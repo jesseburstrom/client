@@ -1,0 +1,32 @@
+{
+	"name": "back-end",
+	"version": "1.0.0",
+	"description": "",
+	"main": "src/server.js",
+	"scripts": {
+		"start": "tsc && ts-node ./dist/server.js",
+		"nod": "nodemon --exec npx ts-node -r dotenv/config src/server.ts"
+	},
+	"author": "Jesse Burström",
+	"dependencies": {
+		"bcrypt": "^5.0.1",
+		"cors": "^2.8.5",
+		"dotenv": "^16.0.1",
+		"express": "^4.18.1",
+		"jsonwebtoken": "^9.0.2",
+		"mongodb": "^4.6.0",
+		"socket.io": "^4.5.1",
+		"uuid": "^8.3.2"
+	},
+	"devDependencies": {
+		"@types/bcrypt": "^5.0.0",
+		"@types/body-parser": "^1.19.2",
+		"@types/cors": "^2.8.12",
+		"@types/express": "^4.17.13",
+		"@types/jsonwebtoken": "^8.5.8",
+		"@types/node": "^17.0.38",
+		"@types/nodemon": "^1.19.1",
+		"@types/uuid": "^8.3.4",
+		"nodemon": "^3.1.9"
+	}
+}
