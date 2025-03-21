@@ -22,16 +22,9 @@ extension WidgetApplicationSettings on Application {
         if (gameTypeText == "Ordinary") {
           gameTypeText = gameTypeOrdinary_;
         }
-
-        var gameText = gameTypeText +
-            " " +
-            games[i]["connected"].toString() +
-            "/" +
-            games[i]["nrPlayers"].toString() +
-            " " +
-            games[i]["userNames"].toString();
-
-        if (games[i]["playerIds"].indexOf(net.socketConnectionId) == -1) {
+        var gameText = '$gameTypeText ${games[i]["connected"]}/${games[i]["nrPlayers"]} ${games[i]["userNames"]}';
+        final serviceProvider = ServiceProvider.of(context);
+        if (games[i]["playerIds"].indexOf(serviceProvider.socketService.socketId) == -1) {
           gameWidgets.add(inputItems.widgetButton(
               () => onAttemptJoinGame(context, i), gameText));
         } else {
@@ -82,12 +75,8 @@ extension WidgetApplicationSettings on Application {
   onStartGameButton(BuildContext context, Function state) async {
     final serviceProvider = ServiceProvider.of(context);
     final socketServiceConnected = serviceProvider.socketService.isConnected;
-    final legacyNetConnected = net.socketConnectionId != "";
 
-    print('🎮 onStartGameButton: Socket connections - Modern: $socketServiceConnected, Legacy: $legacyNetConnected');
-
-    // Either the modern or legacy socket should have a connection
-    if (socketServiceConnected || legacyNetConnected) {
+    if (socketServiceConnected) {
       Map<String, dynamic> msg = {};
 
       msg = {};
@@ -169,13 +158,13 @@ extension WidgetApplicationSettings on Application {
     final headingStyle = TextStyle(
       fontSize: 22,
       fontWeight: FontWeight.bold,
-      color: Theme.of(context).colorScheme.onBackground,
+      color: Theme.of(context).colorScheme.onSurface,
     );
 
     final subtitleStyle = TextStyle(
       fontSize: 18,
       fontWeight: FontWeight.w500,
-      color: Theme.of(context).colorScheme.onBackground,
+      color: Theme.of(context).colorScheme.onSurface,
     );
 
     return DefaultTabController(
@@ -198,7 +187,7 @@ extension WidgetApplicationSettings on Application {
                 indicatorWeight: 3,
                 indicatorColor: Colors.white, // High contrast indicator
                 labelColor: Colors.white, // Ensure high contrast for selected tab
-                unselectedLabelColor: Colors.white.withOpacity(0.8), // Still visible unselected tabs
+                unselectedLabelColor: Colors.white.withValues(alpha: 0.8), // Still visible unselected tabs
                 tabs: [
                   Tab(child: Text(game_, style: tabTextStyle)),
                   Tab(child: Text(general_, style: tabTextStyle)),
@@ -455,9 +444,9 @@ extension WidgetApplicationSettings on Application {
                                     Theme(
                                       data: Theme.of(context).copyWith(
                                         checkboxTheme: CheckboxThemeData(
-                                          fillColor: MaterialStateProperty.resolveWith<Color>(
-                                            (Set<MaterialState> states) {
-                                              if (states.contains(MaterialState.selected)) {
+                                          fillColor: WidgetStateProperty.resolveWith<Color>(
+                                            (Set<WidgetState> states) {
+                                              if (states.contains(WidgetState.selected)) {
                                                 return accentColor;
                                               }
                                               return Colors.grey.shade400;

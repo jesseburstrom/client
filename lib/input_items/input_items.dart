@@ -181,8 +181,8 @@ class InputItems {
           value: name,
           groupValue: radioValue.toString(),
           activeColor: Colors.blue.shade700, // Enhanced active color
-          fillColor: MaterialStateProperty.resolveWith<Color>((states) {
-            if (states.contains(MaterialState.selected)) {
+          fillColor: WidgetStateProperty.resolveWith<Color>((states) {
+            if (states.contains(WidgetState.selected)) {
               return Colors.blue.shade700;
             }
             return Colors.grey.shade600; // Better visible inactive color
@@ -222,8 +222,8 @@ class InputItems {
           value: name,
           groupValue: radioValue,
           activeColor: Colors.blue.shade700, // Enhanced active color
-          fillColor: MaterialStateProperty.resolveWith<Color>((states) {
-            if (states.contains(MaterialState.selected)) {
+          fillColor: WidgetStateProperty.resolveWith<Color>((states) {
+            if (states.contains(WidgetState.selected)) {
               return Colors.blue.shade700;
             }
             return Colors.grey.shade600; // Better visible inactive color
@@ -287,8 +287,8 @@ class InputItems {
           value: name,
           groupValue: radioValue,
           activeColor: Colors.blue.shade700, // Enhanced active color
-          fillColor: MaterialStateProperty.resolveWith<Color>((states) {
-            if (states.contains(MaterialState.selected)) {
+          fillColor: WidgetStateProperty.resolveWith<Color>((states) {
+            if (states.contains(WidgetState.selected)) {
               return Colors.blue.shade700;
             }
             return Colors.grey.shade600; // Better visible inactive color
@@ -316,11 +316,11 @@ class InputItems {
         mainAxisAlignment: MainAxisAlignment.center, children: radioWidgets);
   }
 
-  Color getColor(Set<MaterialState> states) {
-    const Set<MaterialState> interactiveStates = <MaterialState>{
-      MaterialState.pressed,
-      MaterialState.hovered,
-      MaterialState.focused,
+  Color getColor(Set<WidgetState> states) {
+    const Set<WidgetState> interactiveStates = <WidgetState>{
+      WidgetState.pressed,
+      WidgetState.hovered,
+      WidgetState.focused,
     };
     if (states.any(interactiveStates.contains)) {
       return Colors.blue.shade600;
@@ -337,7 +337,7 @@ class InputItems {
         width: 24, // Added width for better proportions
         child: Checkbox(
             checkColor: Colors.white,
-            fillColor: MaterialStateProperty.resolveWith(getColor),
+            fillColor: WidgetStateProperty.resolveWith(getColor),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(4), // Slightly rounded corners
             ),
@@ -356,8 +356,8 @@ class InputItems {
       ),
     ));
     return Row(
-      children: checkWidgets,
-      crossAxisAlignment: CrossAxisAlignment.center, // Better vertical alignment
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: checkWidgets, // Better vertical alignment
     );
   }
 

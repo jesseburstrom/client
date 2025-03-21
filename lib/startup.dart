@@ -8,7 +8,6 @@ import 'application/application.dart';
 import 'chat/chat.dart';
 import 'dices/dices.dart';
 import 'input_items/input_items.dart';
-import 'net/net.dart';
 
 var isOnline = false;
 var isDebug = true;
@@ -49,7 +48,6 @@ var inputItems = InputItems();
 late Tutorial tutorial;
 //var languagesGlobal = LanguagesGlobal();
 
-late Net net;
 late TopScore topScore;
 late AnimationsScroll animationsScroll; // = AnimationsScroll();
 

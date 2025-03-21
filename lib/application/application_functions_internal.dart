@@ -142,7 +142,7 @@ extension ApplicationFunctionsInternal on Application {
     
     // For multiplayer games, send a game update to all players about the turn change
     if (nrPlayers > 1) {
-      print('🎮 Player turn changed: now it\'s player ${playerToMove}\'s turn');
+      print('🎮 Player turn changed: now it\'s player $playerToMove\'s turn');
       
       // Send a game update to notify all players about the turn change
       Map<String, dynamic> updateMsg = {};

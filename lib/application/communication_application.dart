@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:yatzy/application/application_functions_internal.dart';
 import 'package:yatzy/dices/unity_communication.dart';
@@ -7,6 +6,7 @@ import '../chat/chat.dart';
 import '../injection.dart';
 import '../router/router.dart';
 import '../router/router.gr.dart';
+import '../services/service_provider.dart';
 import '../shared_preferences.dart';
 import '../startup.dart';
 import 'application.dart';
@@ -95,8 +95,8 @@ extension CommunicationApplication on Application {
       switch (data["action"]) {
         case "onGetId":
           data = Map<String, dynamic>.from(data);
-          net.socketConnectionId = data["id"];
-
+          final serviceProvider = ServiceProvider.of(context);
+          serviceProvider.socketService.socketId = data["id"];
           var settings = SharedPrefProvider.fetchPrefObject('yatzySettings');
           if (settings.length > 0) {
             userName = settings["userName"];
@@ -115,7 +115,7 @@ extension CommunicationApplication on Application {
           // Find our player ID in the list
           int myIndex = -1;
           if (data["playerIds"] != null) {
-            myIndex = data["playerIds"].indexOf(socketService?.socketId ?? net.socketConnectionId);
+            myIndex = data["playerIds"].indexOf(socketService?.socketId ?? '');
           }
           
           // Only join if we are in this game
@@ -284,7 +284,7 @@ extension CommunicationApplication on Application {
 
         // Check if this is our first update and we don't have an ID yet
         if (gameId == -1) {
-          int potentialId = newPlayerIds.indexOf(socketService?.socketId ?? net.socketConnectionId);
+          int potentialId = newPlayerIds.indexOf(socketService?.socketId ?? '');
           if (potentialId >= 0) {
             // We found ourselves in this game
             myPlayerId = potentialId;
@@ -297,7 +297,7 @@ extension CommunicationApplication on Application {
             userNames = data["userNames"];
             animation.players = nrPlayers;
             
-            print('🎮 Joining game ${gameId} as player $myPlayerId');
+            print('🎮 Joining game $gameId as player $myPlayerId');
             
             if (applicationStarted) {
               if (gameDices.unityCreated) {
@@ -318,8 +318,8 @@ extension CommunicationApplication on Application {
 
         // Check if the current player is still in the game
         if (myPlayerId >= 0 && myPlayerId < newPlayerIds.length) {
-          String myId = socketService?.socketId ?? net.socketConnectionId;
-          
+          String myId = socketService?.socketId ?? '';
+
           if (newPlayerIds[myPlayerId] == null || 
               newPlayerIds[myPlayerId].isEmpty ||
               (newPlayerIds[myPlayerId] != myId)) {
@@ -455,7 +455,7 @@ extension CommunicationApplication on Application {
             int player = data["player"];
             int cell = data["cell"];
 
-            // Update the cell appearance but don't call calcNewSums
+            // Update the cell appearance and call calcNewSums
             appColors[player + 1][cell] = Colors.green.withValues(alpha: 0.7);
             fixedCell[player][cell] = true;
             
@@ -466,7 +466,8 @@ extension CommunicationApplication on Application {
                 cellValue[player][i] = -1;
               }
             }
-            
+            calcNewSums(player, cell);
+
             // Get next player (same logic as in calcNewSums)
             int nextPlayer = player;
             do {

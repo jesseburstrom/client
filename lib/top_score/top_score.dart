@@ -1,10 +1,11 @@
 import 'dart:convert';
 
 import 'package:flutter/animation.dart';
+import '../services/http_service.dart';
 import 'languages_top_score.dart';
+import '../startup.dart';
 
 class TopScore with LanguagesTopScore {
-  final dynamic _net;
   final Function _getChosenLanguage;
   final String _standardLanguage;
   late AnimationController animationController;
@@ -15,11 +16,9 @@ class TopScore with LanguagesTopScore {
 
   TopScore(
       {required Function getChosenLanguage,
-      required String standardLanguage,
-      required dynamic net})
+      required String standardLanguage})
       : _getChosenLanguage = getChosenLanguage,
-        _standardLanguage = standardLanguage,
-        _net = net;
+        _standardLanguage = standardLanguage;
 
   List<dynamic> topScores = [];
 
@@ -43,8 +42,9 @@ class TopScore with LanguagesTopScore {
     
     print('📊 [TopScore] Loading top scores for game type: $gameType');
     try {
+      var httpService= HttpService(baseUrl: localhost);
       var serverResponse =
-          await _net.getDB("/GetTopScores?count=20&type=$gameType");
+          await httpService.getDB("/GetTopScores?count=20&type=$gameType");
       if (serverResponse.statusCode == 200) {
         topScores = jsonDecode(serverResponse.body);
         print('📊 [TopScore] Successfully loaded ${topScores.length} scores for $gameType');
@@ -63,7 +63,8 @@ class TopScore with LanguagesTopScore {
   Future updateTopScore(String name, int score, String gameType) async {
     print('📊 [TopScore] Updating top score: $name/$score/$gameType');
     try {
-      var serverResponse = await _net.postDB("/UpdateTopScore",
+      var httpService= HttpService(baseUrl: localhost);
+      var serverResponse = await httpService.postDB("/UpdateTopScore",
           {"name": name, "score": score, "type": gameType, "count": 20});
       if (serverResponse.statusCode == 200) {
         topScores = jsonDecode(serverResponse.body);

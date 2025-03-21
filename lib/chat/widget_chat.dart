@@ -47,7 +47,7 @@ class _WidgetChatState extends State<WidgetChat> with LanguagesChat{
             decoration: InputDecoration(
               counterText: "",
               filled: true,
-              fillColor: Colors.white.withOpacity(0.9),
+              fillColor: Colors.white.withValues(alpha: 0.9),
               focusedBorder: OutlineInputBorder(
                 borderSide: BorderSide(color: Colors.blue.shade700, width: 2.0),
                 borderRadius: BorderRadius.circular(25.0),
@@ -81,13 +81,13 @@ class _WidgetChatState extends State<WidgetChat> with LanguagesChat{
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Colors.blue.shade50.withOpacity(0.6),
-              Colors.white.withOpacity(0.2),
+              Colors.blue.shade50.withValues(alpha: 0.6),
+              Colors.white.withValues(alpha: 0.2),
             ],
           ),
           // Add a subtle border
           border: Border.all(
-            color: Colors.blue.shade200.withOpacity(0.5),
+            color: Colors.blue.shade200.withValues(alpha: 0.5),
             width: 1.0,
           ),
         ),
@@ -121,7 +121,7 @@ class _WidgetChatState extends State<WidgetChat> with LanguagesChat{
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
+                            color: Colors.black.withValues(alpha: 0.1),
                             spreadRadius: 1,
                             blurRadius: 3,
                             offset: const Offset(0, 1),
@@ -164,7 +164,7 @@ class _WidgetChatState extends State<WidgetChat> with LanguagesChat{
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             spreadRadius: 1,
             blurRadius: 5,
             offset: const Offset(0, 2),
@@ -189,22 +189,22 @@ class _WidgetChatState extends State<WidgetChat> with LanguagesChat{
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
+                    color: Colors.black.withValues(alpha: 0.2),
                     spreadRadius: 1,
                     blurRadius: 3,
                     offset: const Offset(0, 2),
                   ),
                 ],
               ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16.0),
                 child: Row(
                   children: [
-                    const Icon(Icons.chat_bubble_outline, color: Colors.white),
-                    const SizedBox(width: 8),
+                    Icon(Icons.chat_bubble_outline, color: Colors.white),
+                    SizedBox(width: 8),
                     Text(
                       "Chat",
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
@@ -221,10 +221,10 @@ class _WidgetChatState extends State<WidgetChat> with LanguagesChat{
             // Input area
             Container(
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.7),
+                color: Colors.white.withValues(alpha: 0.7),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
+                    color: Colors.black.withValues(alpha: 0.05),
                     spreadRadius: 1,
                     blurRadius: 3,
                     offset: const Offset(0, -1),

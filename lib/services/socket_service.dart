@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:yatzy/application/communication_application.dart';
 import 'dart:convert';
 
 import '../models/game.dart';
-import '../models/player.dart';
 import '../states/cubit/state/state_cubit.dart';
 import '../startup.dart';
 
@@ -104,7 +104,7 @@ class SocketService {
       socket.connect();
       
       // Debug connection status after a reasonable delay
-      Future.delayed(Duration(seconds: 3), () {
+      Future.delayed(const Duration(seconds: 3), () {
         print('🔍 [Socket #$_instanceId] Connection status after 3s: ${socket.connected ? '✅ Connected' : '❌ Not connected'}');
         _connectingInProgress = false;
         _globalConnectionInProgress = false;
@@ -131,9 +131,6 @@ class SocketService {
       
       // Request ID from server
       _requestId();
-      
-      // Sync with legacy Net
-      _syncWithLegacyNet();
       
       // Notify UI to update
       _updateState();
@@ -198,38 +195,7 @@ class SocketService {
     print('📤 [Socket #$_instanceId] Requesting ID from server');
     socket.emit('sendToServer', msg);
   }
-  
-  /// Forward socket events to legacy Net
-  void _syncWithLegacyNet() {
-    if (!isConnected) return;
-    
-    try {
-      final netInstance = net;
-      if (netInstance != null && netInstance.socketConnection != null) {
-        print('🔄 [Socket #$_instanceId] Syncing with legacy Net - forwarding connection state');
-        
-        // Set the socketConnectionId in legacy Net
-        netInstance.socketConnectionId = socketId;
-        
-        // Important: For multiplayer functionality, ensure legacy event handlers are registered
-        print('🔄 [Socket #$_instanceId] Ensuring legacy event handlers are registered');
-        
-        // For multiplayer functionality to work properly, we need to "connect" the legacy net's socket
-        // without actually creating a new connection to the server
-        if (!netInstance.socketConnection.connected) {
-          print('🔄 [Socket #$_instanceId] Updating legacy Net connection state to connected');
-          // This makes the legacy system think it's connected without making a new connection
-          netInstance.socketConnection.id = socketId;
-          
-          // We don't call the connect method since that would create a duplicate connection
-          // Instead, let's manually fire the onConnect event
-          netInstance.onConnect(null);
-        }
-      }
-    } catch (e) {
-      print('❌ [Socket #$_instanceId] Error syncing with legacy Net: $e');
-    }
-  }
+
   
   /// Handle user ID received from server
   void _handleUserId(dynamic data) {
@@ -238,17 +204,6 @@ class SocketService {
     if (data is Map && data['id'] != null) {
       socketId = data['id'];
       
-      // Important: Update the legacy Net socketConnectionId to maintain compatibility
-      try {
-        final netInstance = net;
-        if (netInstance != null) {
-          print('🔄 [Socket #$_instanceId] Synchronizing socketId with legacy Net: $socketId');
-          netInstance.socketConnectionId = socketId;
-        }
-      } catch (e) {
-        print('❌ [Socket #$_instanceId] Error synchronizing socketId: $e');
-      }
-      
       _updateState();
     }
   }
@@ -256,17 +211,11 @@ class SocketService {
   /// Handle client messages
   void _handleClientMessage(dynamic data) {
     print('📩 [Socket #$_instanceId] Received client message: $data');
-    
-    // Forward message to legacy system
+
     try {
-      // Get the Net instance from startup
-      final netInstance = net;
-      if (netInstance != null && netInstance.callbackOnClientMsg != null) {
-        print('🔄 [Socket #$_instanceId] Forwarding client message to legacy callback');
-        netInstance.callbackOnClientMsg(data);
-      }
+      app.callbackOnClientMsg(data);
     } catch (e) {
-      print('❌ [Socket #$_instanceId] Error forwarding to legacy callback: $e');
+      print('❌ [Socket #$_instanceId] Error processing ClientMessage: $e');
     }
     
     _updateState();
@@ -275,32 +224,11 @@ class SocketService {
   /// Handle server messages
   void _handleServerMessage(dynamic data) {
     print('📩 [Socket #$_instanceId] Received server message: $data');
-    
-    // Forward message to legacy system if callbacks are registered in Net class
+
     try {
-      // Get the Net instance from startup
-      final netInstance = net;
-      if (netInstance != null && netInstance.callbackOnServerMsg != null) {
-        print('🔄 [Socket #$_instanceId] Forwarding server message to legacy callback');
-        netInstance.callbackOnServerMsg(data);
-      }
+      app.callbackOnServerMsg(data);
     } catch (e) {
-      print('❌ [Socket #$_instanceId] Error forwarding to legacy callback: $e');
-    }
-    
-    // Also process in modern system if registered
-    if (data is Map<String, dynamic>) {
-      final action = data['action'];
-      if (action == 'onGameStart') {
-        print('🎮 [Socket #$_instanceId] Game start event received');
-        _processGameUpdate(data);
-      } else if (action == 'onGameUpdate') {
-        print('🎮 [Socket #$_instanceId] Game update event received');
-        _processGameUpdate(data);
-      } else if (action == 'onRequestGames') {
-        print('🎮 [Socket #$_instanceId] Game list update received');
-        // games list is stored in legacy system, no need to duplicate here
-      }
+      print('❌ [Socket #$_instanceId] Error processing ServerMessage: $e');
     }
     
     _updateState();

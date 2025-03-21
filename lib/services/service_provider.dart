@@ -13,11 +13,11 @@ class ServiceProvider extends InheritedWidget {
   
   /// Constructor
   const ServiceProvider({
-    Key? key,
-    required Widget child,
+    super.key,
+    required super.child,
     required this.socketService,
     required this.gameService,
-  }) : super(key: key, child: child);
+  });
   
   /// Get the service provider from context
   static ServiceProvider of(BuildContext context) {
