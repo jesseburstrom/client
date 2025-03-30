@@ -227,8 +227,77 @@ extension CommunicationApplication on Application {
           _processGameUpdate(data);
           break;
         case "onGameAborted":
-          await router.push(const SettingsView());
+          print('🚪 Received onGameAborted');
+          // Reset state and go back to settings
+          gameId = -1;
+          myPlayerId = -1;
+          gameFinished = false;
+          isSpectating = false; // Ensure spectator mode is also reset
+          spectatedGameId = -1;
+          gameData = {};
+          Future.microtask(() => context.read<SetStateCubit>().setState());
+          await router.pushAndPopUntil(const SettingsView(), predicate: (_) => false);
           break;
+
+        // **** ADDED CASE ****
+        case "onGameFinished":
+          print('🏁 Received onGameFinished from server for game ${data["gameId"]}');
+          gameData = Map<String, dynamic>.from(data); // Store the final state
+          gameFinished = true; // Set local game finished flag
+
+          // Update the UI to reflect the finished state (for both player and spectator)
+          Future.microtask(() => context.read<SetStateCubit>().setState());
+
+          if (!isSpectating) {
+            // Logic for the actual player
+            String winnerMsg = "Game Over!";
+            // Optional: Determine winner from finalScores if available
+            // List<dynamic>? finalScores = data['finalScores'];
+            // if (finalScores != null && finalScores.isNotEmpty) {
+            //    finalScores.sort((a, b) => b['score'].compareTo(a['score']));
+            //    winnerMsg = "Game Over! Winner: ${finalScores[0]['username']} (${finalScores[0]['score']})";
+            // }
+
+            // Show dialog and navigate back
+            showDialog(
+              context: context,
+              barrierDismissible: false, // User must acknowledge
+              builder: (BuildContext dialogContext) {
+                return AlertDialog(
+                  title: const Text('Game Finished'),
+                  content: Text(winnerMsg),
+                  actions: <Widget>[
+                    TextButton(
+                      child: const Text('OK'),
+                      onPressed: () {
+                        Navigator.of(dialogContext).pop(); // Close dialog
+                        // Navigate back to settings, clearing the game stack
+                        router.pushAndPopUntil(const SettingsView(), predicate: (_) => false);
+                        // Reset local game state if necessary
+                        gameId = -1;
+                        myPlayerId = -1;
+                        gameFinished = false;
+                         // Trigger another state update after navigation if needed
+                         // Future.microtask(() => context.read<SetStateCubit>().setState());
+                      },
+                    ),
+                  ],
+                );
+              },
+            );
+          } else {
+             // Spectator logic: The setState call above will trigger the SpectatorGameBoard
+             // to rebuild and show its finished state. We might add a small delay
+             // before potentially clearing the spectator state automatically, or let
+             // the user manually stop spectating.
+             print('🏁 Spectator received game finished signal.');
+             // Optionally show a snackbar
+             ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Game #${data["gameId"]} has finished.'), duration: const Duration(seconds: 5)),
+             );
+          }
+          break;
+        // **** END ADDED CASE ****
       }
     } catch (e) {
       print('🎮 Error processing server message: $e');
@@ -240,6 +309,13 @@ extension CommunicationApplication on Application {
     if (gameData.isEmpty) {
       return;
     }
+    
+    // **** ADD THIS GUARD ****
+    if (isSpectating || gameId == -1) {
+      print('🎮 Skipping _checkIfPlayerAborted (Spectating or no active game data)');
+      return;
+    }
+    // **** END GUARD ****
 
     // Track if any player's status changed
     bool playerStatusChanged = false;

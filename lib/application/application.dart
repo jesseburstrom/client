@@ -206,7 +206,7 @@ class Application with LanguagesApplication  {
   }
 
   setup() {
-    topScore.loadTopScoreFromServer(gameType);
+    topScore.loadTopScoreFromServer(gameType, context.read<SetStateCubit>());
     gameStarted = true;
     playerToMove = 0;
     winnerId = -1;

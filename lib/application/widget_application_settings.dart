@@ -71,37 +71,38 @@ extension WidgetApplicationSettings on Application {
   // Method to handle spectating a game
   onSpectateGame(BuildContext context, int gameId) async {
     print('🎮 Attempting to spectate game: $gameId');
-    
+
     try {
       final serviceProvider = ServiceProvider.of(context);
-      
+
       // Create a message to request spectating
       Map<String, dynamic> msg = {
         "action": "spectateGame",
         "gameId": gameId,
-        "userName": userName
+        "userName": userName // Send username for logging/display?
       };
-      
+
       // Send the spectate request
       if (serviceProvider.socketService.isConnected) {
         print('🎮 Sending spectate request via socket service');
+
+        // *** SET FLAG BEFORE sending request/setState ***
+        isSpectating = true;
+        spectatedGameId = gameId;
+        gameData = {}; // Clear previous game data immediately
+
         serviceProvider.socketService.sendToServer(msg);
-        
-        // Don't navigate to the game view, just update the UI
+
+        // *** Update the UI AFTER setting the flags ***
+        context.read<SetStateCubit>().setState(); // Update UI to show spectator board
+
         // Show a snackbar to indicate spectating has started
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Spectating game $gameId. Game data will be shown in the console.'),
+            content: Text('👁️ Spectating game #$gameId...'),
             duration: const Duration(seconds: 3),
           ),
         );
-
-        // Update the UI to show we're spectating
-        isSpectating = true;
-        spectatedGameId = gameId;
-
-        // Update the UI to reflect spectating status
-        context.read<SetStateCubit>().setState();
       } else {
         print('❌ Cannot spectate: Not connected to server');
       }

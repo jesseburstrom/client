@@ -23,29 +23,36 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
   @override
   Widget build(BuildContext context) {
     // Print entire game data for debugging
-    print('🎲 Building spectator board');
+    print('🎲 Building spectator board. Game Finished: ${widget.gameData['gameFinished']}');
 
     // Extract player name(s)
     List<String> playerNames = [];
     if (widget.gameData['userNames'] != null) {
       playerNames = List<String>.from(widget.gameData['userNames']);
     }
-
-    if (playerNames.isEmpty) {
-      playerNames = ['J']; // Default from screenshot
+    if (playerNames.isEmpty && widget.gameData['players'] != null) {
+       // Attempt to get names from player objects if userNames is missing
+       try {
+          playerNames = List<String>.from(widget.gameData['players'].map((p) => p?['username'] ?? 'P?'));
+       } catch (_) { playerNames = ['P1']; } // Fallback
     }
+    if (playerNames.isEmpty) playerNames = ['Player 1'];
 
-    // Get current roll number
+    // Get current roll number and dice values
     int currentRoll = widget.gameData['rollCount'] ?? 0;
-
-    // Extract dice values
     List<int> diceValues = [];
     if (widget.gameData['diceValues'] != null) {
-      diceValues = List<int>.from(widget.gameData['diceValues']);
-      print('🎲 Found dice values: $diceValues');
+      try { // Add try-catch for safety
+         diceValues = List<int>.from(widget.gameData['diceValues']);
+      } catch (e) { print("Error parsing diceValues: $e"); }
     }
 
-    return Column(
+    // Check if game is finished
+    bool isFinished = widget.gameData['gameFinished'] ?? false;
+
+    return Stack( // Use Stack for overlay
+      children: [
+        Column(
       children: [
         // Game status header
         Container(
@@ -145,7 +152,42 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
                 ),
               ),
             ),
-          ),
+              ),
+            ),
+            // **** Game Finished Overlay ****
+            if (isFinished)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black.withOpacity(0.5),
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10, spreadRadius: 2)],
+                      ),
+                      child: const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'GAME OVER',
+                            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.red),
+                          ),
+                          SizedBox(height: 10),
+                          Text(
+                            "You can stop spectating from the settings screen.",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 14, color: Colors.black54),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            // **** End Game Finished Overlay ****
+          ],
         ),
       ],
     );

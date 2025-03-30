@@ -4,6 +4,7 @@ import { Game } from '../models/Game';
 import { Player, PlayerFactory } from '../models/Player';
 import { Server, Socket } from 'socket.io'; // Import Socket type
 import { GameLogService, GameMove } from './GameLogService'; // <-- Import log service and types
+import { TopScoreService } from './TopScoreService'; // <-- Import TopScoreService
 import { getSelectionLabel } from '../utils/yatzyMapping'; // <-- Import mapping utility
 
 /**
@@ -15,10 +16,12 @@ export class GameService {
   private gameIdCounter: number = 0;
   private io: Server;
   private gameLogService: GameLogService; // <-- Add log service instance
+  private topScoreService: TopScoreService; // <-- Add top score service instance
 
-  constructor(io: Server, gameLogService: GameLogService) { // <-- Inject log service
+  constructor(io: Server, gameLogService: GameLogService, topScoreService: TopScoreService) { // <-- Inject services
     this.io = io;
     this.gameLogService = gameLogService; // <-- Store log service instance
+    this.topScoreService = topScoreService; // <-- Store top score service instance
   }
 
   // --- Spectator Management ---
@@ -303,6 +306,19 @@ export class GameService {
         console.error(`❌ [GameService] Error logging game ${game.id} end:`, error);
       });
 
+    // **** Update Top Scores ****
+    console.log(`🏆 [GameService] Attempting to update top scores for game ${game.id} (Type: ${game.gameType})`);
+    finalScores.forEach(playerScore => {
+      if (playerScore.username && playerScore.score > 0) { // Basic check
+         this.topScoreService.updateTopScore(game.gameType, playerScore.username, playerScore.score)
+           .then(success => {
+              if (success) console.log(`🏆 [TopScoreService] Score updated/added for ${playerScore.username}`);
+           })
+           .catch(err => console.error(`❌ [TopScoreService] Error updating score for ${playerScore.username}:`, err));
+      }
+    });
+    // **************************
+
     // Notify all active players
     this.notifyGameFinished(game);
 
@@ -396,16 +412,22 @@ export class GameService {
         this.io.to(player.id).emit('onClientMsg', gameData);
       }
     }
+// Also send to spectators
+const gameSpectators = this.spectators.get(game.id);
+if (gameSpectators && gameSpectators.size > 0) {
+  console.log(`[Spectator] Sending dice update to ${gameSpectators.size} spectators`);
+  for (const spectatorId of gameSpectators) {
+    this.io.to(spectatorId).emit('onClientMsg', gameData);
+  }
+}
 
-    // Also send to spectators
-    const gameSpectators = this.spectators.get(game.id);
-    if (gameSpectators && gameSpectators.size > 0) {
-      console.log(`[Spectator] Sending dice update to ${gameSpectators.size} spectators`);
-      for (const spectatorId of gameSpectators) {
-        this.io.to(spectatorId).emit('onClientMsg', gameData);
-      }
-    }
+// --- Notify ALL players AND spectators via onServerMsg (for full state sync) ---
+// This is the crucial addition for spectators to get updated dice/roll count
+console.log(`🔄 Notifying full game update (onServerMsg) after dice roll for game ${game.id}`);
+this.notifyGameUpdate(game);
+// --- End Notify ALL ---
 
+return true;
     return true;
   }
 
@@ -473,6 +495,12 @@ export class GameService {
     // Check if game finished after this selection
     if (game.isGameFinished()) {
       console.log(`🏁 [GameService] Game ${gameId} finished after selection`);
+
+      // **** CRUCIAL FIX: Send final update BEFORE handling finish ****
+      console.log(`🔄 Notifying final game update (onServerMsg) before finishing game ${game.id}`);
+      this.notifyGameUpdate(game); // Send state including the last selection
+      // ***************************************************************
+
       this.handleGameFinished(game); // This handles logging end, notifying, removing game
     } else {
       // Clear dice for next player

@@ -9,6 +9,7 @@ import { createServer } from "http";
 // Import services
 import { GameService } from "./services/GameService";
 import { GameLogService } from "./services/GameLogService"; // <-- Import GameLogService
+import { TopScoreService } from "./services/TopScoreService";
 
 // Import controllers
 import { GameController } from "./controllers/GameController";
@@ -95,7 +96,8 @@ io.use((socket, next) => {
 
 // Create service instances
 const gameLogService = new GameLogService(); // <-- Create GameLogService instance
-const gameService = new GameService(io, gameLogService); // <-- Pass log service to GameService
+const topScoreService = new TopScoreService(); // <-- Create TopScoreService instance
+const gameService = new GameService(io, gameLogService, topScoreService); // <-- Pass both services
 
 // Create controller instances
 const gameController = new GameController(gameService, gameLogService); // <-- Pass log service

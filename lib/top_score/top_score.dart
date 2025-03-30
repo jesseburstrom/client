@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/animation.dart';
+import '../states/cubit/state/state_cubit.dart';
 import '../services/http_service.dart';
 import 'languages_top_score.dart';
 import '../startup.dart';
@@ -30,33 +31,22 @@ class TopScore with LanguagesTopScore {
     return _standardLanguage;
   }
 
-  Future loadTopScoreFromServer(String gameType) async {
-    // Check if we've already loaded this game type in this session
-    if (_loadedGameTypes[gameType] == true) {
-      print('📊 [TopScore] Already loaded $gameType top scores in this session, skipping duplicate request');
-      return;
-    }
-    
-    // Set the flag immediately to prevent concurrent duplicate requests
-    _loadedGameTypes[gameType] = true;
-    
+  Future<void> loadTopScoreFromServer(String gameType, SetStateCubit cubit) async {
     print('📊 [TopScore] Loading top scores for game type: $gameType');
     try {
-      var httpService= HttpService(baseUrl: localhost);
-      var serverResponse =
-          await httpService.getDB("/GetTopScores?count=20&type=$gameType");
+      var httpService = HttpService(baseUrl: localhost);
+      var serverResponse = await httpService.getDB("/GetTopScores?count=20&type=$gameType");
+      
       if (serverResponse.statusCode == 200) {
-        topScores = jsonDecode(serverResponse.body);
-        print('📊 [TopScore] Successfully loaded ${topScores.length} scores for $gameType');
+        final loadedScores = jsonDecode(serverResponse.body);
+        topScores = loadedScores;
+        print('✅ [TopScore] Loaded ${loadedScores.length} scores for $gameType');
+        cubit.setState(); // Trigger UI update
       } else {
-        // Reset the flag in case of error to allow retrying
-        _loadedGameTypes[gameType] = false;
-        print('⚠️ [TopScore] Failed to load scores for $gameType: Status ${serverResponse.statusCode}');
+        print('⚠️ [TopScore] Failed to load scores (Status ${serverResponse.statusCode})');
       }
     } catch (e) {
-      // Reset the flag in case of error to allow retrying
-      _loadedGameTypes[gameType] = false;
-      print('❌ [TopScore] Error loading top scores: $e');
+      print('❌ [TopScore] Error loading scores: $e');
     }
   }
 

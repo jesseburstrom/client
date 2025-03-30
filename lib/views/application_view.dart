@@ -21,7 +21,7 @@ class _ApplicationViewState extends State<ApplicationView>
   }
 
   postFrameCallback(BuildContext context) async {
-    await topScore.loadTopScoreFromServer(app.gameType);
+    await topScore.loadTopScoreFromServer(app.gameType, context.read<SetStateCubit>());
     myState();
     mainPageLoaded = true;
   }
