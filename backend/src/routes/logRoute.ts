@@ -37,11 +37,11 @@ export const logRoute = {
         .collection("logs")
         .findOneAndUpdate(
           { insertedId: userId },
-          { $push: { log: activity } },
-          { upsert: true, returnOriginal: false }
+          { $push: { log: activity } as any },
+          { upsert: true, returnDocument: 'after' }
         );
       console.log("result ", result);
-      res.status(200).json(result.value);
+      res.status(200).json(result);
     });
   },
 };

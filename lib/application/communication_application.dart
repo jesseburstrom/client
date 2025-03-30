@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yatzy/application/application_functions_internal.dart';
 import 'package:yatzy/dices/unity_communication.dart';
 
@@ -9,6 +10,7 @@ import '../router/router.gr.dart';
 import '../services/service_provider.dart';
 import '../shared_preferences.dart';
 import '../startup.dart';
+import '../states/cubit/state/state_cubit.dart';
 import 'application.dart';
 
 extension CommunicationApplication on Application {
@@ -95,8 +97,13 @@ extension CommunicationApplication on Application {
       switch (data["action"]) {
         case "onGetId":
           data = Map<String, dynamic>.from(data);
-          final serviceProvider = ServiceProvider.of(context);
-          serviceProvider.socketService.socketId = data["id"];
+          try {
+            final serviceProvider = ServiceProvider.of(context);
+            serviceProvider.socketService.socketId = data["id"];
+          } catch (e) {
+            print('⚠️ ServiceProvider not available in onGetId: $e');
+            // Continue without setting socketId
+          }
           var settings = SharedPrefProvider.fetchPrefObject('yatzySettings');
           if (settings.length > 0) {
             userName = settings["userName"];
@@ -111,6 +118,59 @@ extension CommunicationApplication on Application {
         case "onGameStart":
           print('🎮 Received game start event for game ${data["gameId"]}');
           data = Map<String, dynamic>.from(data);
+          
+          // Check if this is a spectator message
+          if (data["spectator"] == true) {
+            print('👁️ Received spectator game data for game ${data["gameId"]}');
+            
+            // Extract player data for debugging
+            final players = data["players"];
+            if (players != null && players.isNotEmpty) {
+              final player = players[0];
+              if (player != null && player["cells"] != null) {
+                final cells = player["cells"];
+                print('📊 Spectator data - player cells:');
+                for (var cell in cells) {
+                  if (cell != null) {
+                    print('📊 - ${cell["label"]}: value=${cell["value"]}, fixed=${cell["fixed"]}');
+                  }
+                }
+              }
+            }
+            
+            // Store the game data
+            gameData = data;
+            
+            // Apply the cell values to the UI - this is essential
+            try {
+              if (data["players"] != null && data["players"].isNotEmpty) {
+                final player = data["players"][0];
+                if (player != null && player["cells"] != null) {
+                  final cells = player["cells"];
+                  // Loop through cells and apply values to UI
+                  for (var cell in cells) {
+                    if (cell != null && cell["value"] != null && cell["value"] != -1 && cell["fixed"] == true) {
+                      int index = cell["index"];
+                      if (index >= 0 && index < totalFields) {
+                        // Apply the values to the UI
+                        cellValue[0][index] = cell["value"];
+                        if (index < appText.length && 1 < appText[index].length) {
+                          appText[1][index] = cell["value"].toString();
+                        }
+                        print('📊 Applied value ${cell["value"]} for ${cell["label"]} to UI');
+                      }
+                    }
+                  }
+                }
+              }
+              
+              // Update the UI
+              context.read<SetStateCubit>().setState();
+            } catch (e) {
+              print('⚠️ Error processing spectator data: $e');
+            }
+            return;
+          }
           
           // Find our player ID in the list
           int myIndex = -1;
@@ -263,6 +323,154 @@ extension CommunicationApplication on Application {
       final router = getIt<AppRouter>();
       print('🎮 Processing game update: $data');
 
+      // Check if we're in spectator mode
+      bool isSpectator = data["spectator"] == true;
+      
+      // If spectator, we need to handle things differently
+      if (isSpectator) {
+        print('👁️ Processing game update as spectator');
+        
+        try {
+          // Make a deep copy of the data to ensure all parts are updated
+          Map<String, dynamic> newGameData = Map<String, dynamic>.from(data);
+          
+          // Log complete data for debugging
+          print('👁️ COMPLETE SPECTATOR DATA: $newGameData');
+          print('👁️ Received new spectator data with keys: ${newGameData.keys.join(', ')}');
+          
+          // Get direct board data if available
+          if (newGameData['cellValue'] != null) {
+            print('👁️ Found direct cellValue data: ${newGameData['cellValue']}');
+          }
+          
+          if (newGameData['appText'] != null) {
+            print('👁️ Found appText data: ${newGameData['appText']}');
+          }
+          
+          if (newGameData['appColors'] != null) {
+            print('👁️ Found appColors data (length): ${newGameData['appColors'].length}');
+          }
+          
+          // Check for dice values - multiple possible formats
+          if (newGameData['diceValues'] != null) {
+            print('👁️ Dice values: ${newGameData['diceValues']}');
+          } else if (newGameData['diceValue'] != null) {
+            print('👁️ Dice value: ${newGameData['diceValue']}');
+            // Standardize naming
+            newGameData['diceValues'] = newGameData['diceValue'];
+          }
+          
+          // Try to extract dice data from other places
+          if (newGameData['gameDices'] != null && newGameData['gameDices']['diceValue'] != null) {
+            newGameData['diceValues'] = newGameData['gameDices']['diceValue'];
+            print('👁️ Found dice values in gameDices: ${newGameData['diceValues']}');
+          }
+          
+          // Check for player data
+          if (newGameData['players'] != null && newGameData['players'].isNotEmpty) {
+            print('👁️ Found ${newGameData['players'].length} players in data');
+            
+            // Debug first player data
+            var player = newGameData['players'][0];
+            if (player != null) {
+              print('👁️ First player data keys: ${player.keys.join(', ')}');
+              
+              // Check for score data in various formats
+              if (player['scoreSheet'] != null) {
+                print('👁️ Found scoreSheet: ${player['scoreSheet']}');
+              } else if (player['cells'] != null) {
+                print('👁️ Found cells array with ${player['cells'].length} items');
+                
+                // Try to construct a scoreSheet from cells if needed
+                if (player['scoreSheet'] == null) {
+                  Map<String, dynamic> scoreSheet = {};
+                  for (var cell in player['cells']) {
+                    if (cell != null && cell['key'] != null && cell['value'] != null) {
+                      scoreSheet[cell['key']] = cell['value'];
+                    }
+                  }
+                  
+                  if (scoreSheet.isNotEmpty) {
+                    player['scoreSheet'] = scoreSheet;
+                    print('👁️ Created scoreSheet from cells: $scoreSheet');
+                  }
+                }
+              }
+            }
+          }
+          
+          // Check if we need to populate data from cellValue
+          if (newGameData['cellValue'] != null && newGameData['players'] == null) {
+            try {
+              // Try to create player structures from cellValue
+              List<Map<String, dynamic>> players = [];
+              for (int i = 0; i < newGameData['cellValue'].length; i++) {
+                Map<String, dynamic> scoreSheet = {};
+                
+                // List of score keys in order
+                List<String> scoreKeys = [
+                  'ones', 'twos', 'threes', 'fours', 'fives', 'sixes',
+                  'upperSum', 'bonus', 'pair', 'twoPairs', 'threeOfAKind',
+                  'fourOfAKind', 'fullHouse', 'smallStraight', 'largeStraight',
+                  'chance', 'yatzy', 'total'
+                ];
+                
+                for (int j = 0; j < scoreKeys.length && j < newGameData['cellValue'][i].length; j++) {
+                  if (newGameData['cellValue'][i][j] != null && newGameData['cellValue'][i][j] != -1) {
+                    scoreSheet[scoreKeys[j]] = newGameData['cellValue'][i][j];
+                  }
+                }
+                
+                Map<String, dynamic> player = {
+                  'name': newGameData['userNames']?[i] ?? 'Player ${i+1}',
+                  'scoreSheet': scoreSheet
+                };
+                
+                players.add(player);
+              }
+              
+              if (players.isNotEmpty) {
+                newGameData['players'] = players;
+                print('👁️ Created players from cellValue: ${players.length} players');
+              }
+            } catch (e) {
+              print('👁️ Error creating players from cellValue: $e');
+            }
+          }
+          
+          // Check for player names in various formats
+          if (newGameData['userNames'] != null) {
+            print('👁️ User names: ${newGameData['userNames']}');
+          }
+          
+          // Update the game data with the new information
+          gameData = newGameData;
+          
+          // Make sure to update the UI state to refresh the spectator view
+          // We use Future.microtask to ensure the UI update happens in the next event loop
+          // This helps avoid potential state inconsistencies
+          Future.microtask(() {
+            try {
+              print('👁️ Updating spectator UI state...');
+              context.read<SetStateCubit>().setState();
+              print('👁️ Updated spectator UI state successfully');
+            } catch (e) {
+              print('⚠️ Error updating spectator UI state: $e');
+            }
+          });
+        } catch (parseError) {
+          print('⚠️ Error parsing spectator data: $parseError');
+          // Still try to update with the raw data
+          gameData = data;
+          context.read<SetStateCubit>().setState();
+        }
+        
+        // Since we're just a spectator, we don't need to navigate or setup the game
+        return;
+      }
+
+      // Normal player processing starts here
+      
       // If this is a different game from what we're playing, ignore it
       if (data["gameId"] != gameId && gameId != -1) {
         print('🎮 Ignoring update for different game ID: ${data["gameId"]} (our gameId: $gameId)');
@@ -316,6 +524,12 @@ extension CommunicationApplication on Application {
           }
         }
 
+        // Make sure playerIds and playerActive are initialized
+        if (playerIds.isEmpty) {
+          playerIds = List<String>.from(newPlayerIds);
+          playerActive = List.filled(playerIds.length, true);
+        }
+
         // Check if the current player is still in the game
         if (myPlayerId >= 0 && myPlayerId < newPlayerIds.length) {
           String myId = socketService?.socketId ?? '';
@@ -329,18 +543,20 @@ extension CommunicationApplication on Application {
           }
         }
 
-        // Process player status changes
-        bool playerStatusChanged = false;
-        for (int i = 0; i < playerIds.length && i < playerActive.length; i++) {
-          if (i < newPlayerIds.length) {
-            bool wasActive = playerActive[i];
-            bool isActive = newPlayerIds[i] != null && newPlayerIds[i].toString().isNotEmpty;
+        // Process player status changes if arrays are initialized
+        if (playerIds.isNotEmpty && playerActive.isNotEmpty) {
+          bool playerStatusChanged = false;
+          for (int i = 0; i < playerIds.length && i < playerActive.length; i++) {
+            if (i < newPlayerIds.length) {
+              bool wasActive = playerActive[i];
+              bool isActive = newPlayerIds[i] != null && newPlayerIds[i].toString().isNotEmpty;
 
-            // Player was active but is now inactive (aborted/disconnected)
-            if (wasActive && !isActive) {
-              print('🎮 Player $i has aborted/disconnected!');
-              handlePlayerAbort(i);
-              playerStatusChanged = true;
+              // Player was active but is now inactive (aborted/disconnected)
+              if (wasActive && !isActive) {
+                print('🎮 Player $i has aborted/disconnected!');
+                handlePlayerAbort(i);
+                playerStatusChanged = true;
+              }
             }
           }
         }
@@ -466,7 +682,7 @@ extension CommunicationApplication on Application {
                 cellValue[player][i] = -1;
               }
             }
-            calcNewSums(player, cell);
+            applyLocalSelection(player, cell, cellValue[player][cell]);
 
             // Get next player (same logic as in calcNewSums)
             int nextPlayer = player;

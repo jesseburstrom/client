@@ -34,6 +34,8 @@ class Application with LanguagesApplication  {
     return standardLanguage;
   }
 
+  bool isSpectating = false;
+  int spectatedGameId = -1;
   // Settings properties
   dynamic tabController;
   var textEditingController = TextEditingController();

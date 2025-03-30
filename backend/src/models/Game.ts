@@ -1,11 +1,14 @@
+// backend/src/models/Game.ts
 import { Player, PlayerFactory } from './Player';
 import { v4 as uuidv4 } from 'uuid';
+import { getSelectionIndex } from '../utils/yatzyMapping'; // Import for applySelection
 
 /**
  * Game model for Yatzy
  * Encapsulates all game-related data and logic
  */
 export class Game {
+  // ... (existing properties) ...
   id: number;
   gameType: string;
   players: Player[];
@@ -16,19 +19,22 @@ export class Game {
   playerToMove: number;
   diceValues: number[];
   userNames: string[];
-  gameId: number; // This is redundant with id but kept for backward compatibility
-  playerIds: string[]; // This will be migrated to players array
-  abortedPlayers: boolean[]; // Track which players have aborted the game
-  
-  /**
-   * Create a new Game instance
-   */
+  gameId: number;
+  playerIds: string[];
+  abortedPlayers: boolean[];
+  rollCount: number = 0; // Add roll count
+  turnNumber: number = 0; // Add turn number tracking
+
   constructor(id: number, gameType: string, maxPlayers: number) {
+    // ... (existing constructor logic) ...
     this.id = id;
     this.gameId = id; // For backward compatibility
     this.gameType = gameType;
     this.maxPlayers = maxPlayers;
-    this.players = new Array(maxPlayers).fill(null).map(() => PlayerFactory.createEmptyPlayer());
+     // Initialize players correctly using the Player model/class
+     this.players = new Array(maxPlayers).fill(null).map(() =>
+        PlayerFactory.createEmptyPlayer(gameType) // Pass gameType to factory
+     );
     this.playerIds = new Array(maxPlayers).fill(""); // For backward compatibility
     this.userNames = new Array(maxPlayers).fill(""); // For backward compatibility
     this.abortedPlayers = new Array(maxPlayers).fill(false); // No players have aborted initially
@@ -36,252 +42,319 @@ export class Game {
     this.gameStarted = false;
     this.gameFinished = false;
     this.playerToMove = 0;
-    this.diceValues = [];
+    this.diceValues = []; // Initialize dice values array
+    this.rollCount = 0; // Initialize roll count
+    this.turnNumber = 1; // Start at turn 1
   }
 
-  /**
-   * Add a player to the game
-   * @param player Player to add
-   * @param position Optional position to add player at
-   * @returns true if player was added successfully, false otherwise
-   */
+  // ... (addPlayer, removePlayer, markPlayerAborted, etc.) ...
   addPlayer(player: Player, position: number = -1): boolean {
-    // If game is full and position is not specified, can't add player
     if (this.connectedPlayers >= this.maxPlayers && position === -1) {
       return false;
     }
-
-    // If position is specified, use it, otherwise add to first empty slot
     const playerPosition = position !== -1 ? position : this.findEmptySlot();
-    
-    // If no slot found, can't add player
     if (playerPosition === -1) {
       return false;
     }
 
-    // Add player
-    this.players[playerPosition] = player;
-    this.playerIds[playerPosition] = player.id; // For backward compatibility
-    this.userNames[playerPosition] = player.username; // For backward compatibility
+    // Ensure player object is fully initialized if coming from factory
+    this.players[playerPosition] = player; // Player object now includes score data
+    this.playerIds[playerPosition] = player.id;
+    this.userNames[playerPosition] = player.username;
     this.connectedPlayers++;
-    
-    return true;
-  }
-
-  /**
-   * Remove a player from the game
-   * @param playerId ID of player to remove
-   * @returns true if player was removed, false if player was not in game
-   */
-  removePlayer(playerId: string): boolean {
-    const playerIndex = this.findPlayerIndex(playerId);
-    
-    if (playerIndex === -1) {
-      return false;
-    }
-
-    // Mark player as inactive but keep their data
-    this.players[playerIndex].isActive = false;
-    this.playerIds[playerIndex] = ""; // For backward compatibility
-    this.abortedPlayers[playerIndex] = true; // Mark player as having aborted
-    this.connectedPlayers--;
-
-    // If the game has started but not all players are active, we need to handle this
-    if (this.gameStarted && !this.gameFinished) {
-      // Check if we need to advance player turn
-      if (this.playerToMove === playerIndex) {
-        this.advanceToNextActivePlayer();
-      }
-      
-      // Check if we should end the game (only one player left)
-      const activePlayers = this.players.filter(p => p.isActive).length;
-      if (activePlayers <= 1) {
-        console.log(`🎮 Game ${this.id} has only ${activePlayers} active players, marking as finished`);
-        this.gameFinished = true;
-      }
-    } else if (!this.gameStarted) {
-      // If the game hasn't started yet, we need to update the game state
-      console.log(`🎮 Player aborted before game ${this.id} started, now has ${this.connectedPlayers}/${this.maxPlayers} players`);
-    }
+    this.abortedPlayers[playerPosition] = false; // Ensure not marked as aborted on join
+    player.isActive = true; // Ensure player is active on join
 
     return true;
   }
 
-  /**
-   * Mark a player as having aborted without removing them
-   * @param playerId ID of player who aborted
-   * @returns true if player was marked as aborted, false if player was not in game
-   */
-  markPlayerAborted(playerId: string): boolean {
-    const playerIndex = this.findPlayerIndex(playerId);
-    
-    if (playerIndex === -1) {
-      return false;
-    }
+   removePlayer(playerId: string): boolean {
+     const playerIndex = this.findPlayerIndex(playerId);
+     if (playerIndex === -1 || !this.players[playerIndex]?.isActive) { // Check if already inactive or player doesn't exist
+       return false; // Player not found or already removed/inactive
+     }
 
-    // Mark player as aborted
-    this.abortedPlayers[playerIndex] = true;
-    this.players[playerIndex].isActive = false;
-    
-    // Don't clear the playerIds for backward compatibility views
-    // but decrement the connected players
-    this.connectedPlayers--;
+     console.log(`🔌 Removing player ${playerId} (index ${playerIndex}) from game ${this.id}`);
 
-    // If the game has started but not all players are active, we need to handle this
-    if (this.gameStarted && !this.gameFinished) {
-      // Check if we need to advance player turn
-      if (this.playerToMove === playerIndex) {
-        this.advanceToNextActivePlayer();
+     // Mark player as inactive but keep data
+     this.players[playerIndex].isActive = false;
+     this.abortedPlayers[playerIndex] = true; // Mark as aborted
+     // Keep playerIds and userNames for historical data/logs, but decrement connected count
+     this.connectedPlayers--;
+
+
+     // Game logic adjustments after removal
+      if (!this.gameFinished) {
+         // If the removed player was the current one to move, advance turn
+         if (this.playerToMove === playerIndex) {
+           console.log(`-> Player ${playerIndex} was current, advancing turn.`);
+           this.advanceToNextActivePlayer(); // This handles finding the *next* active one
+         }
+
+         // Check if the game should end now (e.g., only one player left in multiplayer)
+         const activePlayersCount = this.players.filter(p => p?.isActive).length; // Add null check
+         if (this.maxPlayers > 1 && activePlayersCount <= 1) {
+           console.log(`-> Only ${activePlayersCount} player(s) left, marking game ${this.id} as finished.`);
+           this.gameFinished = true;
+           // GameService will call handleGameFinished which logs end state
+         } else if (this.maxPlayers === 1 && activePlayersCount === 0) {
+             console.log(`-> Single player left, marking game ${this.id} as finished.`);
+             this.gameFinished = true;
+         }
       }
-      
-      // Check if we should end the game (only one player left)
-      const activePlayers = this.players.filter(p => p.isActive).length;
-      if (activePlayers <= 1) {
-        console.log(`🎮 Game ${this.id} has only ${activePlayers} active players, marking as finished`);
-        this.gameFinished = true;
-      }
-    } else if (!this.gameStarted) {
-      // If the game hasn't started yet, we need to update the game state
-      console.log(`🎮 Player aborted before game ${this.id} started, now has ${this.connectedPlayers}/${this.maxPlayers} players`);
-    }
 
-    return true;
+
+     return true;
+   }
+
+
+   markPlayerAborted(playerId: string): boolean {
+       // This might be slightly redundant with removePlayer, ensure consistency
+       const playerIndex = this.findPlayerIndex(playerId);
+       if (playerIndex === -1) return false;
+
+       if (this.players[playerIndex]?.isActive) { // Only act if they were active (add null check)
+           this.players[playerIndex].isActive = false;
+           this.abortedPlayers[playerIndex] = true;
+           this.connectedPlayers--; // Decrement count only if they were active
+
+           if (!this.gameFinished) {
+                if (this.playerToMove === playerIndex) {
+                    this.advanceToNextActivePlayer();
+                }
+                const activePlayersCount = this.players.filter(p => p?.isActive).length; // Add null check
+                 if (this.maxPlayers > 1 && activePlayersCount <= 1) {
+                     this.gameFinished = true;
+                 } else if (this.maxPlayers === 1 && activePlayersCount === 0) {
+                    this.gameFinished = true;
+                 }
+           }
+       }
+       return true;
+   }
+
+   /**
+    * Find the index of a player by ID
+    * @param playerId Player ID to find
+    * @returns Player index or -1 if not found
+    */
+   findPlayerIndex(playerId: string): number {
+     return this.players.findIndex(player => player?.id === playerId); // Add null check
+   }
+
+   /**
+    * Find next available empty slot
+    * @returns Index of empty slot or -1 if game is full
+    */
+   private findEmptySlot(): number {
+     return this.players.findIndex(player => !player || !player.isActive || player.id === ""); // Add null check
+   }
+
+   /**
+    * Check if game is full based on connected players
+    */
+   isGameFull(): boolean {
+     return this.connectedPlayers >= this.maxPlayers;
+   }
+
+  // --- Additions ---
+  getCurrentTurnNumber(): number {
+    return this.turnNumber;
   }
 
-  /**
-   * Check if a player has aborted
-   * @param playerIndex Index of player to check
-   * @returns true if player has aborted, false otherwise
-   */
-  hasPlayerAborted(playerIndex: number): boolean {
-    if (playerIndex < 0 || playerIndex >= this.maxPlayers) {
-      return false;
-    }
-    return this.abortedPlayers[playerIndex];
+  incrementRollCount(): void {
+    this.rollCount++;
   }
 
-  /**
-   * Check if game is full
-   */
-  isGameFull(): boolean {
-    return this.connectedPlayers >= this.maxPlayers;
-  }
-
-  /**
-   * Find the index of a player by ID
-   * @param playerId Player ID to find
-   * @returns Player index or -1 if not found
-   */
-  findPlayerIndex(playerId: string): number {
-    return this.players.findIndex(player => player.id === playerId);
-  }
-
-  /**
-   * Find next available empty slot
-   * @returns Index of empty slot or -1 if game is full
-   */
-  private findEmptySlot(): number {
-    return this.players.findIndex(player => !player.isActive || player.id === "");
-  }
-
-  /**
-   * Advance to next active player
-   */
   advanceToNextActivePlayer(): void {
-    // Find next active player
-    let nextPlayer = (this.playerToMove + 1) % this.maxPlayers;
-    
-    // Loop until we find an active player or have checked all players
-    const startPlayer = this.playerToMove;
-    let checkedAllPlayers = false;
-    
-    while ((!this.players[nextPlayer].isActive || this.abortedPlayers[nextPlayer]) && !checkedAllPlayers) {
+    if (this.gameFinished) return; // Don't advance if game over
+
+    const startingPlayer = this.playerToMove;
+    let nextPlayer = startingPlayer;
+    let checkedAll = false;
+
+    do {
       nextPlayer = (nextPlayer + 1) % this.maxPlayers;
-      
-      // If we've checked all players and none are active, keep current player
-      if (nextPlayer === startPlayer) {
-        checkedAllPlayers = true;
-        console.log(`🎮 Game ${this.id}: Checked all players, no active players found`);
-        break;
+      if (nextPlayer === startingPlayer) {
+        checkedAll = true; // We've looped back
       }
-    }
-    
-    if (checkedAllPlayers) {
-      // If all players are inactive, we should mark the game as finished
-      console.log(`🎮 Game ${this.id}: All players are inactive, marking game as finished`);
-      this.gameFinished = true;
-    } else {
-      console.log(`🎮 Game ${this.id}: Advanced turn from player ${this.playerToMove} to player ${nextPlayer}`);
-      this.playerToMove = nextPlayer;
-    }
-  }
-
-  /**
-   * Set dice values
-   * @param values Array of dice values
-   */
-  setDiceValues(values: number[]): void {
-    this.diceValues = [...values];
-  }
-
-  /**
-   * Convert game to JSON format
-   * Returns a format compatible with the previous implementation
-   */
-  toJSON(): any {
-    return {
-      gameId: this.id,
-      gameType: this.gameType,
-      nrPlayers: this.maxPlayers,
-      connected: this.connectedPlayers,
-      playerIds: this.playerIds,
-      userNames: this.userNames,
-      gameStarted: this.gameStarted,
-      gameFinished: this.gameFinished,
-      playerToMove: this.playerToMove,
-      diceValues: this.diceValues,
-      abortedPlayers: this.abortedPlayers // Include aborted players in the JSON
-    };
-  }
-
-  /**
-   * Create a Game instance from JSON data
-   * @param data JSON data
-   * @returns Game instance
-   */
-  static fromJSON(data: any): Game {
-    const game = new Game(
-      data.gameId,
-      data.gameType,
-      data.nrPlayers
-    );
-    
-    game.gameStarted = data.gameStarted || false;
-    game.gameFinished = data.gameFinished || false;
-    game.playerToMove = data.playerToMove || 0;
-    game.connectedPlayers = data.connected || 0;
-    game.diceValues = data.diceValues || [];
-    
-    // Set aborted players if available
-    if (data.abortedPlayers) {
-      game.abortedPlayers = [...data.abortedPlayers];
-    }
-    
-    // Convert playerIds and userNames to players
-    if (data.playerIds && data.userNames) {
-      for (let i = 0; i < data.playerIds.length; i++) {
-        if (data.playerIds[i]) {
-          game.players[i] = PlayerFactory.createPlayer(data.playerIds[i], data.userNames[i]);
-          // Mark player as inactive if they were aborted
-          if (game.abortedPlayers[i]) {
-            game.players[i].isActive = false;
+      // Found an active player who hasn't aborted
+      if (this.players[nextPlayer]?.isActive && !this.abortedPlayers[nextPlayer]) { // Add null check
+          this.playerToMove = nextPlayer;
+          this.rollCount = 0; // Reset roll count for the new player
+          // Increment turn number when looping back to the first player (or initial player)
+          if (nextPlayer <= startingPlayer) { // Check if we wrapped around
+              this.turnNumber++;
+              console.log(`-> Advancing to turn ${this.turnNumber}`);
           }
-          game.playerIds[i] = data.playerIds[i]; // For backward compatibility
-          game.userNames[i] = data.userNames[i]; // For backward compatibility
-        }
+          console.log(`-> Advanced turn to player ${this.playerToMove}`);
+          return; // Exit after finding the next player
       }
+    } while (!checkedAll);
+
+    // If we exit the loop, it means no active players were found (or only one left and it was the current one)
+    console.log(`-> No *other* active players found. Game might be finished or stuck.`);
+     // Check again if the game should be finished based on active players
+     const activePlayersCount = this.players.filter(p => p?.isActive).length; // Add null check
+     if (activePlayersCount <= (this.maxPlayers > 1 ? 1 : 0)) {
+         this.gameFinished = true;
+         console.log(`-> Marking game ${this.id} finished as no other active players found.`);
+     } else {
+         // If the current player is the *only* active one left, they keep playing?
+         // Or game ends? Let's assume they keep playing if solo or last one standing.
+         this.rollCount = 0; // Reset rolls for their next turn action
+         // Do NOT increment turn number here if it's the same player
+         console.log(`-> Player ${this.playerToMove} continues turn (last active?).`);
+     }
+  }
+
+  // Applies the selection and score to the player's board
+  applySelection(playerIndex: number, selectionLabel: string, score: number): void {
+      const cellIndex = getSelectionIndex(this.gameType, selectionLabel);
+      if (cellIndex !== -1 && playerIndex >= 0 && playerIndex < this.players.length) {
+          const player = this.players[playerIndex];
+          if (player && !player.cells[cellIndex]?.fixed) { // Add null checks
+              player.cells[cellIndex].value = score;
+              player.cells[cellIndex].fixed = true;
+              console.log(`-> Applied score ${score} to cell '${selectionLabel}' (index ${cellIndex}) for player ${playerIndex}`);
+              // Recalculate player scores
+              player.calculateScores(); // Uses internal gameType
+          } else {
+              console.warn(`-> Attempted to apply score to already fixed cell '${selectionLabel}' or invalid player/cell for player ${playerIndex}`);
+          }
+      } else {
+           console.error(`-> Failed to apply selection: Invalid index (${cellIndex}) or playerIndex (${playerIndex}) for label '${selectionLabel}'`);
+      }
+  }
+
+  // Check if the game is finished (all active players have filled their boards)
+  isGameFinished(): boolean {
+      if (this.gameFinished) return true; // Already marked
+      // Check if all *active* players have completed their boards
+      const activePlayers = this.players.filter(p => p?.isActive); // Add null check
+      if (!activePlayers.length) { // Use length check
+          // No active players left, game is finished (or maybe aborted)
+          this.gameFinished = true; // Mark finished if no active players
+          return true;
+      }
+      // Check if every active player has finished their cells
+      this.gameFinished = activePlayers.every(p => p.hasCompletedGame());
+      return this.gameFinished;
+  }
+
+
+  // --- Existing methods modified/checked ---
+  setDiceValues(values: number[]): void {
+    if (!values || values.length !== 5) {
+      console.error('Invalid dice values - must be array of 5 numbers');
+      this.diceValues = [0, 0, 0, 0, 0];
+    } else {
+      this.diceValues = [...values];
     }
-    
-    return game;
+    // Do not reset rollCount here, incrementRollCount handles it
+  }
+
+
+   toJSON(): any {
+     // Ensure player data includes scores if needed by client
+     const playersData = this.players.map(player => player ? player.toJSON() : null); // Use player's toJSON, handle null
+
+     return {
+       gameId: this.id,
+       gameType: this.gameType,
+       nrPlayers: this.maxPlayers, // Represents max capacity
+       connected: this.connectedPlayers, // Represents current connected/active
+       playerIds: this.playerIds, // Keep for compatibility if needed
+       userNames: this.userNames, // Keep for compatibility if needed
+       players: playersData, // Send structured player data
+       gameStarted: this.gameStarted,
+       gameFinished: this.isGameFinished(), // Use method to check status
+       playerToMove: this.playerToMove,
+       diceValues: this.diceValues,
+       rollCount: this.rollCount, // Send current roll count
+       turnNumber: this.turnNumber, // Send current turn number
+       abortedPlayers: this.abortedPlayers
+     };
+   }
+
+
+  static fromJSON(data: any): Game {
+      const game = new Game(
+          data.gameId,
+          data.gameType,
+          data.nrPlayers
+      );
+      // Populate game state from JSON
+      game.gameStarted = data.gameStarted ?? false;
+      game.gameFinished = data.gameFinished ?? false;
+      game.playerToMove = data.playerToMove ?? 0;
+      game.connectedPlayers = data.connected ?? 0;
+      game.diceValues = data.diceValues ? [...data.diceValues] : []; // Ensure array copy
+      game.rollCount = data.rollCount ?? 0;
+      game.turnNumber = data.turnNumber ?? 1;
+      game.abortedPlayers = data.abortedPlayers ? [...data.abortedPlayers] : new Array(data.nrPlayers).fill(false); // Ensure array copy
+
+      // Reconstruct players from 'players' array if present, else fallback
+      if (data.players && Array.isArray(data.players)) {
+          for (let i = 0; i < game.maxPlayers; i++) {
+              if (i < data.players.length && data.players[i]) { // Check if player data exists
+                  // Use Player.fromJSON
+                  game.players[i] = Player.fromJSON(data.players[i], game.gameType); // Pass gameType
+                  // Update compatibility arrays
+                  game.playerIds[i] = game.players[i].id;
+                  game.userNames[i] = game.players[i].username;
+              } else {
+                  // If no data for this slot, ensure it's an empty player
+                  game.players[i] = PlayerFactory.createEmptyPlayer(game.gameType);
+                  game.playerIds[i] = "";
+                  game.userNames[i] = "";
+              }
+          }
+          // Recalculate connected players based on reconstructed state
+          game.connectedPlayers = game.players.filter(p => p?.isActive).length; // Add null check
+
+      } else if (data.playerIds && data.userNames) { // Fallback to old format
+          for (let i = 0; i < data.nrPlayers; i++) {
+              if (data.playerIds[i] && data.playerIds[i] != "") {
+                  // Create Player with minimal data, score cells might be missing
+                  game.players[i] = PlayerFactory.createPlayer(data.playerIds[i], data.userNames[i], game.gameType); // Pass gameType
+                  game.players[i].isActive = !game.abortedPlayers[i]; // Set active based on aborted status
+                  game.playerIds[i] = data.playerIds[i];
+                  game.userNames[i] = data.userNames[i];
+              } else {
+                  game.players[i] = PlayerFactory.createEmptyPlayer(game.gameType);
+                  game.playerIds[i] = "";
+                  game.userNames[i] = "";
+              }
+          }
+           // Recalculate connected players based on reconstructed state
+          game.connectedPlayers = game.players.filter(p => p?.isActive).length; // Add null check
+      }
+
+
+      return game;
+  }
+
+
+}
+
+// --- Helper method declarations for external use (e.g., GameService) ---
+// These tell TypeScript that these methods exist on the Game class instance.
+// They don't provide the implementation here.
+declare module './Game' {
+  interface Game {
+    getCurrentTurnNumber(): number;
+    incrementRollCount(): void;
+    applySelection(playerIndex: number, selectionLabel: string, score: number): void;
+    isGameFinished(): boolean;
   }
 }
+
+// Add declarations for Player methods if GameService needs them directly
+// (Though it's better if GameService interacts via Game instance methods)
+// declare module './Player' {
+//     interface Player {
+//         getScore(): number;
+//         hasCompletedGame(): boolean;
+//     }
+// }

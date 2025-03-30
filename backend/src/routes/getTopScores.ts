@@ -16,7 +16,7 @@ export const getTopScores = {
           console.log("getting ordinary game topscores");
           results = await db
             .collection("ordinary")
-            .find({}, { _id: 0 })
+            .find({}, { projection: { _id: 0 } })
             .sort({ score: -1 })
             .toArray();
           break;
@@ -25,7 +25,7 @@ export const getTopScores = {
         case "Mini": {
           results = await db
             .collection("mini")
-            .find({}, { _id: 0 })
+            .find({}, { projection: { _id: 0 } })
             .sort({ score: -1 })
             .toArray();
           break;
@@ -34,7 +34,7 @@ export const getTopScores = {
         case "Maxi": {
           results = await db
             .collection("maxi")
-            .find({}, { _id: 0 })
+            .find({}, { projection: { _id: 0 } })
             .sort({ score: -1 })
             .toArray();
           break;
@@ -43,7 +43,7 @@ export const getTopScores = {
         case "MaxiR3": {
           results = await db
             .collection("maxiR3")
-            .find({}, { _id: 0 })
+            .find({}, { projection: { _id: 0 } })
             .sort({ score: -1 })
             .toArray();
           break;
@@ -52,7 +52,7 @@ export const getTopScores = {
         case "MaxiE3": {
           results = await db
             .collection("maxiE3")
-            .find({}, { _id: 0 })
+            .find({}, { projection: { _id: 0 } })
             .sort({ score: -1 })
             .toArray();
           break;
@@ -61,7 +61,7 @@ export const getTopScores = {
         case "MaxiRE3": {
           results = await db
             .collection("maxiRE3")
-            .find({}, { _id: 0 })
+            .find({}, { projection: { _id: 0 } })
             .sort({ score: -1 })
             .toArray();
           break;

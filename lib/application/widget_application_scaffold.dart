@@ -98,8 +98,13 @@ extension WidgetApplicationScaffold on Application {
                             msg["gameId"] = gameId;
                             msg["playerIds"] = playerIds;
                             msg["diceValue"] = gameDices.diceValue;
-                            final serviceProvider = ServiceProvider.of(context);
-                            serviceProvider.socketService.sendToClients(msg);
+                            try {
+                              final serviceProvider = ServiceProvider.of(context);
+                              serviceProvider.socketService.sendToClients(msg);
+                            } catch (e) {
+                              print('⚠️ ServiceProvider not available when sending dice values: $e');
+                              // Continue without sending to server (single player mode)
+                            }
                             context.read<SetStateCubit>().setState();
                           }
                         },

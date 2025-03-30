@@ -32,9 +32,10 @@ export const getLogRoute = {
 
       const db = getDbConnection("react-auth-db");
 
-      const result = await db.collection("logs").find({ insertedId: userId });
+      const cursor = db.collection("logs").find({ insertedId: userId });
+      const result = await cursor.toArray();
       console.log("result ", result);
-      res.status(200).json(result.value);
+      res.status(200).json(result);
     });
   },
 };

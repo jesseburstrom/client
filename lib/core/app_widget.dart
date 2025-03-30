@@ -64,19 +64,25 @@ class AppWidget extends StatelessWidget {
           // After the app is built, connect to the socket server once
           // using the service provider's socket service
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            final service = ServiceProvider.of(context);
-            
-            print('🔄 AppWidget: Initializing network connectivity');
-            // Only connect if not already connected
-            if (!service.socketService.isConnected) {
-              print('🔌 AppWidget: Connecting modern SocketService');
-              service.socketService.connect();
+            try {
+              final service = ServiceProvider.of(context);
+              
+              print('🔄 AppWidget: Initializing network connectivity');
+              // Only connect if not already connected
+              if (!service.socketService.isConnected) {
+                print('🔌 AppWidget: Connecting modern SocketService');
+                service.socketService.connect();
+              }
+              
+              // Connect the Application instance with the SocketService to enable
+              // multiplayer dice synchronization
+              print('🔄 AppWidget: Connecting modern SocketService to Application instance');
+              app.setSocketService(service.socketService);
+            } catch (e) {
+              print('⚠️ ServiceProvider not available in AppWidget: $e');
+              print('🔄 AppWidget: Running in offline mode');
+              // Continue in offline mode
             }
-            
-            // Connect the Application instance with the SocketService to enable
-            // multiplayer dice synchronization
-            print('🔄 AppWidget: Connecting modern SocketService to Application instance');
-            app.setSocketService(service.socketService);
           });
           return child!;
         },

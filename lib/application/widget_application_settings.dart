@@ -9,6 +9,7 @@ import '../startup.dart';
 import '../states/bloc/language/language_bloc.dart';
 import '../states/bloc/language/language_event.dart';
 import '../states/cubit/state/state_cubit.dart';
+import '../widgets/spectator_game_board.dart';
 import 'application.dart';
 
 extension WidgetApplicationSettings on Application {
@@ -23,21 +24,38 @@ extension WidgetApplicationSettings on Application {
           gameTypeText = gameTypeOrdinary_;
         }
         var gameText = '$gameTypeText ${games[i]["connected"]}/${games[i]["nrPlayers"]} ${games[i]["userNames"]}';
-        final serviceProvider = ServiceProvider.of(context);
-        if (games[i]["playerIds"].indexOf(serviceProvider.socketService.socketId) == -1) {
+        try {
+          final serviceProvider = ServiceProvider.of(context);
+          if (games[i]["playerIds"].indexOf(serviceProvider.socketService.socketId) == -1) {
+            gameWidgets.add(inputItems.widgetButton(
+                () => onAttemptJoinGame(context, i), gameText));
+          } else {
+            gameWidgets.add(Text(gameText,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 20,
+                  color: Colors.black87,
+                )));
+          }
+        } catch (e) {
+          print('⚠️ ServiceProvider not available in widgetWaitingGame: $e');
+          // Add button without checking socket ID
           gameWidgets.add(inputItems.widgetButton(
               () => onAttemptJoinGame(context, i), gameText));
-        } else {
-          gameWidgets.add(Text(gameText,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 20,
-                color: Colors.black87,
-              )));
         }
       } else {
+        // This is an ongoing game - add a spectate button
         ongoingGames++;
+        var gameTypeText = games[i]["gameType"];
+        if (gameTypeText == "Ordinary") {
+          gameTypeText = gameTypeOrdinary_;
+        }
+        var gameText = '$gameTypeText ${games[i]["connected"]}/${games[i]["nrPlayers"]} ${games[i]["userNames"]} (Ongoing)';
+        
+        // Add spectate button
+        gameWidgets.add(inputItems.widgetButton(
+            () => onSpectateGame(context, games[i]["gameId"]), gameText));
       }
     }
     gameWidgets.add(Text("$ongoingGames_ : $ongoingGames",
@@ -48,6 +66,49 @@ extension WidgetApplicationSettings on Application {
           color: Colors.brown,
         )));
     return gameWidgets;
+  }
+
+  // Method to handle spectating a game
+  onSpectateGame(BuildContext context, int gameId) async {
+    print('🎮 Attempting to spectate game: $gameId');
+    
+    try {
+      final serviceProvider = ServiceProvider.of(context);
+      
+      // Create a message to request spectating
+      Map<String, dynamic> msg = {
+        "action": "spectateGame",
+        "gameId": gameId,
+        "userName": userName
+      };
+      
+      // Send the spectate request
+      if (serviceProvider.socketService.isConnected) {
+        print('🎮 Sending spectate request via socket service');
+        serviceProvider.socketService.sendToServer(msg);
+        
+        // Don't navigate to the game view, just update the UI
+        // Show a snackbar to indicate spectating has started
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Spectating game $gameId. Game data will be shown in the console.'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+
+        // Update the UI to show we're spectating
+        isSpectating = true;
+        spectatedGameId = gameId;
+
+        // Update the UI to reflect spectating status
+        context.read<SetStateCubit>().setState();
+      } else {
+        print('❌ Cannot spectate: Not connected to server');
+      }
+    } catch (e) {
+      print('⚠️ ServiceProvider not available in onSpectateGame: $e');
+      // Handle offline mode or show error
+    }
   }
 
   onAttemptJoinGame(BuildContext context, int i) {
@@ -62,56 +123,91 @@ extension WidgetApplicationSettings on Application {
     print('🎮 Joining multiplayer game: ${msg["gameType"]} (${msg["nrPlayers"]} players)');
 
     // Get the service provider
-    final serviceProvider = ServiceProvider.of(context);
-    final socketServiceConnected = serviceProvider.socketService.isConnected;
+    try {
+      final serviceProvider = ServiceProvider.of(context);
+      final socketServiceConnected = serviceProvider.socketService.isConnected;
 
-    // Always use the modern SocketService if it's connected
-    if (socketServiceConnected) {
-      print('🎮 Using modern SocketService for joining game');
-      serviceProvider.socketService.sendToServer(msg);
+      // Always use the modern SocketService if it's connected
+      if (socketServiceConnected) {
+        print('🎮 Using modern SocketService for joining game');
+        serviceProvider.socketService.sendToServer(msg);
+      }
+    } catch (e) {
+      print('⚠️ ServiceProvider not available in onAttemptJoinGame: $e');
+      // Handle offline mode or show error
     }
   }
 
   onStartGameButton(BuildContext context, Function state) async {
-    final serviceProvider = ServiceProvider.of(context);
-    final socketServiceConnected = serviceProvider.socketService.isConnected;
+    try {
+      final serviceProvider = ServiceProvider.of(context);
+      final socketServiceConnected = serviceProvider.socketService.isConnected;
 
-    if (socketServiceConnected) {
-      Map<String, dynamic> msg = {};
-
-      msg = {};
-      msg["playerIds"] = List.filled(nrPlayers, "");
-      msg["userNames"] = List.filled(nrPlayers, "");
-      msg["userName"] = userName;
-      msg["gameType"] = gameType;
-      msg["nrPlayers"] = nrPlayers;
-      msg["connected"] = 0;
-      msg["gameStarted"] = false;
-      msg["action"] = "requestGame";
-
-      // Send through the active socket connection
-      print('🎮 Creating multiplayer game with $nrPlayers players');
-
-      // Always use the modern SocketService if it's connected
       if (socketServiceConnected) {
-        print('🎮 Using modern SocketService for game creation');
-        serviceProvider.socketService.sendToServer(msg);
+        Map<String, dynamic> msg = {};
+
+        msg = {};
+        msg["playerIds"] = List.filled(nrPlayers, "");
+        msg["userNames"] = List.filled(nrPlayers, "");
+        msg["userName"] = userName;
+        msg["gameType"] = gameType;
+        msg["nrPlayers"] = nrPlayers;
+        msg["connected"] = 0;
+        msg["gameStarted"] = false;
+        msg["action"] = "requestGame";
+
+        // Send through the active socket connection
+        print('🎮 Creating multiplayer game with $nrPlayers players');
+
+        // Always use the modern SocketService if it's connected
+        if (socketServiceConnected) {
+          print('🎮 Using modern SocketService for game creation');
+          serviceProvider.socketService.sendToServer(msg);
+        }
+
+        state();
+
+        msg = {};
+        msg["action"] = "saveSettings";
+        msg["userName"] = userName;
+        msg["gameType"] = gameType;
+        msg["nrPlayers"] = nrPlayers;
+        msg["language"] = chosenLanguage;
+        msg["boardAnimation"] = boardAnimation;
+        msg["unityDices"] = gameDices.unityDices;
+        msg["unityLightMotion"] = gameDices.unityLightMotion;
+        SharedPrefProvider.setPrefObject('yatzySettings', msg);
+      } else {
+        print('❌ No socket connection - starting offline 1-player game');
+        myPlayerId = 0;
+        gameId = 0;
+        playerIds = [""];
+        playerActive = List.filled(playerIds.length, true);
+        nrPlayers = 1;
+
+        setup();
+        userNames = [userName];
+        animation.players = 1;
+        if (applicationStarted) {
+          if (gameDices.unityDices) {
+            gameDices.sendResetToUnity();
+            if (gameDices.unityDices && myPlayerId == playerToMove) {
+              gameDices.sendStartToUnity();
+            }
+          }
+
+          context.read<SetStateCubit>().setState();
+          AutoRouter.of(context).pop();
+        } else {
+          applicationStarted = true;
+          await AutoRouter.of(context).pushAndPopUntil(const ApplicationView(),
+              predicate: (Route<dynamic> route) => false);
+        }
       }
-
-      state();
-
-      msg = {};
-      msg["action"] = "saveSettings";
-      msg["userName"] = userName;
-      msg["gameType"] = gameType;
-      msg["nrPlayers"] = nrPlayers;
-      msg["language"] = chosenLanguage;
-      msg["boardAnimation"] = boardAnimation;
-      msg["unityDices"] = gameDices.unityDices;
-      msg["unityLightMotion"] = gameDices.unityLightMotion;
-      SharedPrefProvider.setPrefObject('yatzySettings', msg);
-    } else {
-      print('❌ No socket connection - starting offline 1-player game');
+    } catch (e) {
+      print('⚠️ ServiceProvider not available in onStartGameButton: $e');
+      // Start offline game
+      print('❌ No service provider - starting offline 1-player game');
       myPlayerId = 0;
       gameId = 0;
       playerIds = [""];
@@ -187,7 +283,7 @@ extension WidgetApplicationSettings on Application {
                 indicatorWeight: 3,
                 indicatorColor: Colors.white, // High contrast indicator
                 labelColor: Colors.white, // Ensure high contrast for selected tab
-                unselectedLabelColor: Colors.white.withValues(alpha: 0.8), // Still visible unselected tabs
+                unselectedLabelColor: Colors.white.withOpacity(0.8), // Still visible unselected tabs
                 tabs: [
                   Tab(child: Text(game_, style: tabTextStyle)),
                   Tab(child: Text(general_, style: tabTextStyle)),
@@ -391,6 +487,88 @@ extension WidgetApplicationSettings on Application {
                             ] +
                             // Available Games List
                             widgetWaitingGame(context) +
+                            // Spectator View (if active)
+                            (isSpectating ? [
+                              // Full-screen spectator view
+                              ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  minHeight: MediaQuery.of(context).size.height * 0.7, // 70% of screen height
+                                  maxHeight: MediaQuery.of(context).size.height * 0.85, // 85% of screen height
+                                ),
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: Colors.blue.shade300),
+                                    borderRadius: BorderRadius.circular(8.0),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.1),
+                                        spreadRadius: 1,
+                                        blurRadius: 3,
+                                        offset: const Offset(0, 2),
+                                      )
+                                    ],
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      // Spectator header with close button
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                                        decoration: BoxDecoration(
+                                          color: Colors.blue.shade100,
+                                          borderRadius: const BorderRadius.only(
+                                            topLeft: Radius.circular(7.0),
+                                            topRight: Radius.circular(7.0),
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                const Icon(Icons.visibility, color: Colors.blue, size: 22),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  "Spectating Game #$spectatedGameId",
+                                                  style: const TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.blue,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            ElevatedButton.icon(
+                                              icon: const Icon(Icons.close, size: 18),
+                                              label: const Text("Stop"),
+                                              onPressed: () {
+                                                isSpectating = false;
+                                                spectatedGameId = -1;
+                                                gameData = {};
+                                                context.read<SetStateCubit>().setState();
+                                              },
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.red,
+                                                foregroundColor: Colors.white,
+                                                minimumSize: const Size(80, 30),
+                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius: BorderRadius.circular(4),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      // Spectator game board with flex to fill available space
+                                      Expanded(
+                                        child: SpectatorGameBoard(gameData: gameData),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ] : []) +
                             // Unity Settings
                             gameDices.widgetUnitySettings(state)),
                   ),
@@ -444,9 +622,9 @@ extension WidgetApplicationSettings on Application {
                                     Theme(
                                       data: Theme.of(context).copyWith(
                                         checkboxTheme: CheckboxThemeData(
-                                          fillColor: WidgetStateProperty.resolveWith<Color>(
-                                            (Set<WidgetState> states) {
-                                              if (states.contains(WidgetState.selected)) {
+                                          fillColor: MaterialStateProperty.resolveWith<Color>(
+                                            (Set<MaterialState> states) {
+                                              if (states.contains(MaterialState.selected)) {
                                                 return accentColor;
                                               }
                                               return Colors.grey.shade400;

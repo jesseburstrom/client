@@ -8,11 +8,13 @@ import { createServer } from "http";
 
 // Import services
 import { GameService } from "./services/GameService";
+import { GameLogService } from "./services/GameLogService"; // <-- Import GameLogService
 
 // Import controllers
 import { GameController } from "./controllers/GameController";
 import { PlayerController } from "./controllers/PlayerController";
 import { ChatController } from "./controllers/ChatController";
+import { spectateGameRoute, initializeSpectateRoute } from "./routes/spectateGameRoute"; // <-- Import spectate route and initializer
 
 const PORT: number = 8000;
 
@@ -51,8 +53,16 @@ app.use(express.json());
 // Add all the routes to our Express server
 // exported from routes/index.js
 routes().forEach((route) => {
-  app[route.method](route.path, route.handler);
+  // Ensure correct method mapping for Express
+  const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete' | 'patch' | 'options' | 'head';
+  if (app[method]) {
+      app[method](route.path, route.handler);
+  } else {
+      console.error(`Invalid method ${route.method} for route ${route.path}`);
+  }
 });
+// Add the new spectate route explicitly after other routes
+app.get(spectateGameRoute.path, spectateGameRoute.handler); // <-- Add spectate route handler
 
 ////////////////////////////////// YATZY //////////////////////////////////
 
@@ -84,12 +94,16 @@ io.use((socket, next) => {
 });
 
 // Create service instances
-const gameService = new GameService(io);
+const gameLogService = new GameLogService(); // <-- Create GameLogService instance
+const gameService = new GameService(io, gameLogService); // <-- Pass log service to GameService
 
 // Create controller instances
-const gameController = new GameController(gameService);
-const playerController = new PlayerController(gameService);
+const gameController = new GameController(gameService, gameLogService); // <-- Pass log service
+const playerController = new PlayerController(gameService, gameLogService); // <-- Pass log service
 const chatController = new ChatController(io, gameService);
+
+// Initialize the spectate route with service instances <-- ADD THIS
+initializeSpectateRoute(gameService, gameLogService);
 
 // Handle Socket.IO connections
 io.on("connect", (socket) => {
@@ -154,13 +168,33 @@ app.get("*", (req, res) => {
 });
 
 // Initialize database connection and start server
-initializeDbConnection().then(() => {
-  console.log("Database connection initialized");
-  
-  // Start the server
-  httpServer.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Socket.IO server ready for connections`);
-    isOnline ? console.log("SERVER MODE: ONLINE") : console.log("SERVER MODE: OFFLINE");
+initializeDbConnection()
+  .then(() => {
+    console.log("✅ [SERVER] Database connection initialized successfully");
+    
+    // Verify database connection with GameLogService
+    try {
+      const testCollection = gameLogService.getCollection();
+      console.log("✅ [SERVER] Successfully accessed game_moves collection");
+    } catch (e) {
+      console.error("❌ [SERVER] Error accessing game_moves collection:", e);
+    }
+    
+    // Start the server
+    httpServer.listen(PORT, () => {
+      console.log(`✅ [SERVER] Server running on port ${PORT}`);
+      console.log(`✅ [SERVER] Socket.IO server ready for connections`);
+      isOnline 
+        ? console.log("🌐 [SERVER] SERVER MODE: ONLINE") 
+        : console.log("🖥️ [SERVER] SERVER MODE: OFFLINE");
+      
+      // Log MongoDB connection details
+      console.log(`📊 [SERVER] MongoDB connected to database '${gameLogService.getDatabaseName()}'`);
+      console.log(`📊 [SERVER] Using collection '${gameLogService.getCollectionName()}'`);
+    });
+  })
+  .catch((error) => {
+    console.error("❌ [SERVER] Error initializing database connection:", error);
+    console.error("❌ [SERVER] Server startup failed due to database connection error");
+    process.exit(1); // Exit with error code
   });
-});
