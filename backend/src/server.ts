@@ -96,7 +96,8 @@ io.use((socket, next) => {
 
 // Create service instances
 const gameLogService = new GameLogService(); // <-- Create GameLogService instance
-const topScoreService = new TopScoreService(); // <-- Create TopScoreService instance
+// Pass the io instance to TopScoreService
+const topScoreService = new TopScoreService(io); // <-- Create TopScoreService instance, passing io
 const gameService = new GameService(io, gameLogService, topScoreService); // <-- Pass both services
 
 // Create controller instances
@@ -128,11 +129,44 @@ io.on("connect", (socket) => {
   // Listen for client to server messages
   socket.on("sendToServer", (data) => {
     console.log(`Message to server from ${socket.id}:`, data?.action || data);
+
+    // **** Handle requestTopScores FIRST ****
+    if (data?.action === 'requestTopScores') {
+      // **** Get specific gameType from request ****
+      const requestedGameType = data?.gameType;
+      if (typeof requestedGameType !== 'string') {
+        console.error(`❌ Invalid requestTopScores from ${socket.id}: Missing or invalid gameType.`);
+        socket.emit('errorMsg', { message: 'Invalid request for top scores: gameType missing.' }); 
+        return; // Stop processing invalid request
+      }
+
+      console.log(`🏆 Received requestTopScores from ${socket.id} for game type: ${requestedGameType}`);
+      // **** Fetch scores for the SPECIFIC type (NO LIMIT) ****
+      topScoreService.getTopScores(requestedGameType) // Call without limit argument
+        .then(scores => {
+          // **** Emit the specific list back using 'onServerMsg' ****
+          socket.emit('onServerMsg', { 
+              action: 'onTopScoresUpdate',
+              gameType: requestedGameType, // Include gameType for context
+              scores: scores 
+            });
+          console.log(`🏆 Sent top scores for ${requestedGameType} back to ${socket.id} via onServerMsg`);
+        })
+        .catch(error => {
+          console.error(`❌ Error fetching scores for requestTopScores (${requestedGameType}) from ${socket.id}:`, error);
+          socket.emit('errorMsg', { message: `Failed to retrieve top scores for ${requestedGameType}` }); 
+        });
+      return; // Stop further processing for this action
+    }
+    // ***********************************************
     
-    // Handle chat messages specifically
+    // Handle chat messages (example)
     if (data?.action === 'chatMessage') {
       console.log(`💬 Chat message from ${socket.id}:`, data);
     }
+
+    // Other general message routing/handling could go here
+
   });
 
   // Listen for client to client messages

@@ -308,18 +308,27 @@ export class GameService {
 
     // **** Update Top Scores ****
     console.log(`🏆 [GameService] Attempting to update top scores for game ${game.id} (Type: ${game.gameType})`);
-    finalScores.forEach(playerScore => {
+    const scoreUpdatePromises = finalScores.map(playerScore => {
       if (playerScore.username && playerScore.score > 0) { // Basic check
-         this.topScoreService.updateTopScore(game.gameType, playerScore.username, playerScore.score)
+         // Important: updateTopScore now broadcasts internally
+         return this.topScoreService.updateTopScore(game.gameType, playerScore.username, playerScore.score)
            .then(success => {
-              if (success) console.log(`🏆 [TopScoreService] Score updated/added for ${playerScore.username}`);
+              if (success) console.log(`🏆 [TopScoreService] Score update initiated for ${playerScore.username}`);
+              // No need to log success here, updateTopScore handles its own logging/broadcasting
            })
-           .catch(err => console.error(`❌ [TopScoreService] Error updating score for ${playerScore.username}:`, err));
+           .catch(err => console.error(`❌ [TopScoreService] Error initiating score update for ${playerScore.username}:`, err));
       }
+      return Promise.resolve(); // Return a resolved promise for players with no score
+    });
+
+    // Wait for all score updates to attempt broadcasting before proceeding
+    Promise.all(scoreUpdatePromises).then(() => {
+        console.log(`🏁 [GameService] Finished attempting top score updates for game ${game.id}.`);
+        // Note: Broadcasting now happens within updateTopScore
     });
     // **************************
 
-    // Notify all active players
+    // Notify all active players (and spectators) about the game finish
     this.notifyGameFinished(game);
 
     // Remove the game from the active games map
@@ -331,7 +340,7 @@ export class GameService {
       this.spectators.delete(game.id);
     }
 
-    // Broadcast updated game list
+    // Broadcast updated game list (game is removed)
     this.broadcastGameList();
   }
 
@@ -371,18 +380,16 @@ export class GameService {
     }
 
     // --- Logging ---
-    // Log regret/extra move actions separately when they are *used* (handled by controller/logRegret/logExtraMove)
-    // Log the roll itself here.
     const rollMove: GameMove = {
       turnNumber: game.getCurrentTurnNumber(),
       playerIndex: playerIndex,
       playerId: playerId,
-      action: 'roll', // Log as a standard roll
+      action: 'roll',
       diceValues: [...diceValues],
-      keptDice: [...keptDice], // Log which dice were kept *before* this roll
+      keptDice: [...keptDice],
       timestamp: new Date(),
     };
-    
+
     console.log(`📝 [GameService] Logging dice roll for game ${gameId}: [${diceValues.join(', ')}]`);
     try {
       await this.gameLogService.logMove(gameId, rollMove);
@@ -392,42 +399,47 @@ export class GameService {
     }
     // --- End Logging ---
 
+    // --- Update Game State ---
     game.setDiceValues(diceValues);
-    game.incrementRollCount(); // Ensure Game model tracks roll count
+    game.incrementRollCount();
+    console.log(`🎲 [GameService] Game ${game.id} state updated: Roll ${game.rollCount}, Dice ${game.diceValues}`);
+    // --- End Update Game State ---
 
-    // Notify all players of the dice roll
-    const gameData = {
-      action: 'sendDices', // Use the action name client expects for peer updates
+
+    // --- Notify other players via onClientMsg (for potential direct dice display updates) ---
+    const diceUpdateData = {
+      action: 'sendDices',
       gameId: game.id,
-      // playerIds: game.players.map(p => p?.id ?? ""), // Send current IDs (handle null) - Not needed if using onClientMsg?
       diceValue: diceValues,
-      rollCount: game.rollCount // Include roll count
+      rollCount: game.rollCount
     };
 
-    // Send dice update via onClientMsg to other players AND spectators
-    console.log(`🎲 Broadcasting dice update for game ${game.id}`);
+    console.log(`🎲 Broadcasting 'sendDices' (onClientMsg) for game ${game.id}`);
     for (let i = 0; i < game.players.length; i++) {
       const player = game.players[i];
-      if (player?.isActive && player.id && player.id !== playerId) { // Add null check, send to others only
-        this.io.to(player.id).emit('onClientMsg', gameData);
+      if (player?.isActive && player.id && player.id !== playerId) {
+        this.io.to(player.id).emit('onClientMsg', diceUpdateData);
       }
     }
-// Also send to spectators
-const gameSpectators = this.spectators.get(game.id);
-if (gameSpectators && gameSpectators.size > 0) {
-  console.log(`[Spectator] Sending dice update to ${gameSpectators.size} spectators`);
-  for (const spectatorId of gameSpectators) {
-    this.io.to(spectatorId).emit('onClientMsg', gameData);
-  }
-}
+    // --- End Notify other players ---
 
-// --- Notify ALL players AND spectators via onServerMsg (for full state sync) ---
-// This is the crucial addition for spectators to get updated dice/roll count
-console.log(`🔄 Notifying full game update (onServerMsg) after dice roll for game ${game.id}`);
-this.notifyGameUpdate(game);
-// --- End Notify ALL ---
 
-return true;
+    // --- Notify ALL players AND spectators via onServerMsg (for full state sync) ---
+    // This is the crucial addition for spectators to get updated dice/roll count
+    console.log(`🔄 Notifying full game update (onServerMsg) after dice roll for game ${game.id}`);
+    this.notifyGameUpdate(game);
+    // --- End Notify ALL ---
+
+    // Also send dice update to spectators via onClientMsg if needed for specific client logic
+    const gameSpectators = this.spectators.get(game.id);
+    if (gameSpectators && gameSpectators.size > 0) {
+      console.log(`[Spectator] Sending 'sendDices' (onClientMsg) to ${gameSpectators.size} spectators`);
+      for (const spectatorId of gameSpectators) {
+         this.io.to(spectatorId).emit('onClientMsg', diceUpdateData);
+      }
+    }
+
+
     return true;
   }
 
@@ -601,9 +613,8 @@ return true;
 
     // Update log if it's an existing game being joined
     if (!isNewGame) {
-      // Update the game start log with the new player list?
       console.log(`📝 [GameService] Updating existing game ${game.id} in database with new player ${player.id}`);
-      this.gameLogService.logGameStart(game)
+      this.gameLogService.logGameStart(game) // This updates the log with current players
         .then(() => {
           console.log(`✅ [GameService] Successfully updated game ${game.id} with new player in database`);
         })
@@ -612,20 +623,19 @@ return true;
         });
     }
 
-    // Define activeCount here to use in the 'if' and 'else if' blocks below
     const activeCount = game.players.filter(p => p?.isActive).length; // Add null check
 
     if (game.isGameFull()) {
-      // const activeCount = game.players.filter(p => p?.isActive).length; // Moved definition up
       if (activeCount === maxPlayers) {
         if (!game.gameStarted) { // Only set and log if it wasn't already started
           game.gameStarted = true;
           console.log(`🎮 Game ${game.id} started with ${activeCount} active players`);
           // Log an event indicating the game actually started? Optional.
           // this.gameLogService.logMove(game.id, { turnNumber: 0, playerIndex: -1, playerId: '', action: 'game_start_full', timestamp: new Date() });
-          // Re-log start to ensure player list is up-to-date in the log
+
+          // Re-log start to ensure player list is up-to-date in the log and mark started
           console.log(`📝 [GameService] Marking game ${game.id} as started in database`);
-          this.gameLogService.logGameStart(game)
+          this.gameLogService.logGameStart(game) // Updates game log with started status and players
             .then(() => {
               console.log(`✅ [GameService] Successfully marked game ${game.id} as started in database`);
             })
@@ -656,13 +666,13 @@ return true;
       this.notifyGameUpdate(game);
     }
 
-
     this.broadcastGameList(); // Broadcast updated list
 
-    return game;
+    return game; // <-- Ensure game is returned
   }
 
-  // --- New methods for logging special actions ---
+  // --- New methods for logging special actions --- 
+  // (Restored these methods)
   async logRegret(gameId: number, playerId: string) {
     const game = this.getGame(gameId);
     if (!game) {
@@ -732,6 +742,7 @@ declare module '../models/Game' {
     incrementRollCount(): void;
     applySelection(playerIndex: number, selectionLabel: string, score: number): void;
     isGameFinished(): boolean;
+    advanceToNextActivePlayer(): void; // Added this declaration as it's used
   }
 }
 

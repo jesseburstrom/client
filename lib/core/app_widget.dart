@@ -24,8 +24,7 @@ class AppWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Initialize legacy networking - but do not connect to server
-    // We'll manage the connection via the SocketService
+
     // Initialize application components
     topScore = TopScore(
         getChosenLanguage: getChosenLanguage,

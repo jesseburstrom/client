@@ -94,36 +94,50 @@ extension CommunicationApplication on Application {
       final router = getIt<AppRouter>();
       print('📩 Received server message: $data');
 
-      switch (data["action"]) {
+      // *** ADD NULL CHECK FOR data ***
+      if (data == null || data is! Map) {
+        print('⚠️ Received invalid server message data: $data');
+        return;
+      }
+
+      // *** Safely access action ***
+      final action = data['action'];
+      if (action == null) {
+        print('⚠️ Server message missing \'action\' key: $data');
+        return;
+      }
+
+      switch (action) {
         case "onGetId":
-          data = Map<String, dynamic>.from(data);
+          // Explicitly cast keys and values using .map()
+          final Map<String, dynamic> getIdData = (data as Map).map(
+            (key, value) => MapEntry(key.toString(), value)
+          );
           try {
             final serviceProvider = ServiceProvider.of(context);
-            serviceProvider.socketService.socketId = data["id"];
+            serviceProvider.socketService.socketId = getIdData["id"];
           } catch (e) {
             print('⚠️ ServiceProvider not available in onGetId: $e');
-            // Continue without setting socketId
           }
           var settings = SharedPrefProvider.fetchPrefObject('yatzySettings');
           if (settings.length > 0) {
-            userName = settings["userName"];
-            gameType = settings["gameType"];
-            nrPlayers = settings["nrPlayers"];
-            boardAnimation = settings["boardAnimation"];
-            chosenLanguage = settings["language"];
-            gameDices.unityDices = settings["unityDices"];
-            gameDices.unityLightMotion = settings["unityLightMotion"];
+             userName = settings["userName"];
+             gameType = settings["gameType"];
+             nrPlayers = settings["nrPlayers"];
+             boardAnimation = settings["boardAnimation"];
+             chosenLanguage = settings["language"];
+             gameDices.unityDices = settings["unityDices"];
+             gameDices.unityLightMotion = settings["unityLightMotion"];
           }
           break;
         case "onGameStart":
           print('🎮 Received game start event for game ${data["gameId"]}');
-          data = Map<String, dynamic>.from(data);
           
           // Check if this is a spectator message
           if (data["spectator"] == true) {
             print('👁️ Received spectator game data for game ${data["gameId"]}');
             
-            // Extract player data for debugging
+            // Extract player data for debugging (optional, keep if useful)
             final players = data["players"];
             if (players != null && players.isNotEmpty) {
               final player = players[0];
@@ -138,13 +152,14 @@ extension CommunicationApplication on Application {
               }
             }
             
-            // Store the game data
-            gameData = data;
+            // Store the game data (Apply casting here)
+            gameData = (data).map((key, value) => MapEntry(key.toString(), value));
             
             // Apply the cell values to the UI - this is essential
             try {
-              if (data["players"] != null && data["players"].isNotEmpty) {
-                final player = data["players"][0];
+              // Use the already cast `gameData` map
+              if (gameData["players"] != null && gameData["players"].isNotEmpty) {
+                final player = gameData["players"][0];
                 if (player != null && player["cells"] != null) {
                   final cells = player["cells"];
                   // Loop through cells and apply values to UI
@@ -154,8 +169,11 @@ extension CommunicationApplication on Application {
                       if (index >= 0 && index < totalFields) {
                         // Apply the values to the UI
                         cellValue[0][index] = cell["value"];
-                        if (index < appText.length && 1 < appText[index].length) {
-                          appText[1][index] = cell["value"].toString();
+                        // Add safe checks before accessing appText
+                        if (appText.length > 1 && appText[1].length > index) {
+                           appText[1][index] = cell["value"].toString();
+                        } else {
+                           print('⚠️ Index $index out of bounds for appText[1] (${appText.length > 1 ? appText[1].length : 'N/A'})');
                         }
                         print('📊 Applied value ${cell["value"]} for ${cell["label"]} to UI');
                       }
@@ -169,9 +187,10 @@ extension CommunicationApplication on Application {
             } catch (e) {
               print('⚠️ Error processing spectator data: $e');
             }
-            return;
+            return; // Return after handling spectator data
           }
           
+          // Normal game start logic (for players)
           // Find our player ID in the list
           int myIndex = -1;
           if (data["playerIds"] != null) {
@@ -184,19 +203,21 @@ extension CommunicationApplication on Application {
             if (gameId == data["gameId"] && gameId != -1) {
               print('🎮 Received onGameStart for our current game - treating as update');
               // Process this as a game update instead of a new game
-              _processGameUpdate(data);
+              // Apply casting here too for consistency
+              _processGameUpdate((data as Map).map((key, value) => MapEntry(key.toString(), value)));
               return;
             }
             
             myPlayerId = myIndex;
-            gameData = data;
-            gameId = data["gameId"];
-            playerIds = data["playerIds"];
+            // Apply casting here
+            gameData = (data as Map).map((key, value) => MapEntry(key.toString(), value));
+            gameId = gameData["gameId"]; // Use the casted map
+            playerIds = gameData["playerIds"]; // Use the casted map
             playerActive = List.filled(playerIds.length, true);
-            gameType = data["gameType"];
-            nrPlayers = data["nrPlayers"];
+            gameType = gameData["gameType"]; // Use the casted map
+            nrPlayers = gameData["nrPlayers"]; // Use the casted map
             setup();
-            userNames = data["userNames"];
+            userNames = gameData["userNames"]; // Use the casted map
             animation.players = nrPlayers;
             
             print('🎮 Game started! Transitioning to game screen, myPlayerId: $myPlayerId, gameId: $gameId');
@@ -235,69 +256,88 @@ extension CommunicationApplication on Application {
           isSpectating = false; // Ensure spectator mode is also reset
           spectatedGameId = -1;
           gameData = {};
-          Future.microtask(() => context.read<SetStateCubit>().setState());
+          context.read<SetStateCubit>().setState();
           await router.pushAndPopUntil(const SettingsView(), predicate: (_) => false);
           break;
-
-        // **** ADDED CASE ****
         case "onGameFinished":
           print('🏁 Received onGameFinished from server for game ${data["gameId"]}');
-          gameData = Map<String, dynamic>.from(data); // Store the final state
-          gameFinished = true; // Set local game finished flag
+          final Map<String, dynamic> finishedGameData = (data).map(
+            (key, value) => MapEntry(key.toString(), value)
+          );
+          gameData = finishedGameData;
+          gameFinished = true; // Set flag for UI layer to handle dialog
 
-          // Update the UI to reflect the finished state (for both player and spectator)
-          Future.microtask(() => context.read<SetStateCubit>().setState());
+          // Trigger UI update first
+          context.read<SetStateCubit>().setState();
 
           if (!isSpectating) {
-            // Logic for the actual player
-            String winnerMsg = "Game Over!";
-            // Optional: Determine winner from finalScores if available
-            // List<dynamic>? finalScores = data['finalScores'];
-            // if (finalScores != null && finalScores.isNotEmpty) {
-            //    finalScores.sort((a, b) => b['score'].compareTo(a['score']));
-            //    winnerMsg = "Game Over! Winner: ${finalScores[0]['username']} (${finalScores[0]['score']})";
-            // }
+            // Player specific logic (dialog is handled by UI layer)
+            print('🏁 Game finished for player. UI layer will handle dialog.');
+            
+            // **** Trigger top score fetch for THIS game type ****
+            try {
+               if (socketService != null && socketService!.isConnected) {
+                   final finishedGameType = gameData['gameType'] ?? gameType; // Get type from finished game data or current app state
+                   print('🏆 Requesting latest top scores for $finishedGameType after game finish...');
+                   socketService!.sendToServer({
+                     'action': 'requestTopScores',
+                     'gameType': finishedGameType 
+                    });
+               } else {
+                   print('⚠️ Cannot request top scores: SocketService not connected.');
+               }
+            } catch (e) {
+               print('❌ Error sending requestTopScores for player: $e');
+            }
 
-            // Show dialog and navigate back
-            showDialog(
-              context: context,
-              barrierDismissible: false, // User must acknowledge
-              builder: (BuildContext dialogContext) {
-                return AlertDialog(
-                  title: const Text('Game Finished'),
-                  content: Text(winnerMsg),
-                  actions: <Widget>[
-                    TextButton(
-                      child: const Text('OK'),
-                      onPressed: () {
-                        Navigator.of(dialogContext).pop(); // Close dialog
-                        // Navigate back to settings, clearing the game stack
-                        router.pushAndPopUntil(const SettingsView(), predicate: (_) => false);
-                        // Reset local game state if necessary
-                        gameId = -1;
-                        myPlayerId = -1;
-                        gameFinished = false;
-                         // Trigger another state update after navigation if needed
-                         // Future.microtask(() => context.read<SetStateCubit>().setState());
-                      },
-                    ),
-                  ],
-                );
-              },
-            );
           } else {
-             // Spectator logic: The setState call above will trigger the SpectatorGameBoard
-             // to rebuild and show its finished state. We might add a small delay
-             // before potentially clearing the spectator state automatically, or let
-             // the user manually stop spectating.
+             // Spectator specific logic - DO NOTHING related to top scores
              print('🏁 Spectator received game finished signal.');
-             // Optionally show a snackbar
-             ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Game #${data["gameId"]} has finished.'), duration: const Duration(seconds: 5)),
-             );
           }
           break;
-        // **** END ADDED CASE ****
+        case "onTopScoresUpdate":
+          print('🏆 Received top scores update');
+          try {
+            // Parse received data
+            final Map<String, dynamic> receivedData = (data as Map).map(
+              (key, value) => MapEntry(key.toString(), value)
+            );
+            final receivedGameType = receivedData['gameType'];
+            final dynamic scoresList = receivedData['scores'];
+
+            // Validate format
+            if (receivedGameType == null || receivedGameType is! String || scoresList == null || scoresList is! List) {
+               print('❌ Invalid onTopScoresUpdate data format: $receivedData');
+               return;
+            }
+
+            // Convert score entries to the correct type
+            List<Map<String, dynamic>> typedScores = (scoresList as List).map((scoreEntry) {
+              if (scoreEntry is Map) {
+                return scoreEntry.map((k, v) => MapEntry(k.toString(), v));
+              } else {
+                print('⚠️ Unexpected score entry format for $receivedGameType: $scoreEntry');
+                return <String, dynamic>{};
+              }
+            }).where((map) => map.isNotEmpty).toList();
+
+            // **** CALL NEW TopScore METHOD ****
+            // Update the TopScore instance directly instead of app state
+            topScore.updateScoresFromData(typedScores, context.read<SetStateCubit>());
+            print('🏆 Updated TopScore instance for $receivedGameType (${typedScores.length} entries)');
+
+            // Remove update to app.currentTopScores
+            // currentTopScores = typedScores;
+            // print('🏆 Updated local top scores for $receivedGameType (${currentTopScores.length} entries)');
+
+            // Remove direct setState call here, as updateScoresFromData handles it
+            // context.read<SetStateCubit>().setState();
+
+          } catch (e) {
+            print('❌ Error processing top scores update: $e');
+            print('Raw data causing error: $data');
+          }
+          break;
       }
     } catch (e) {
       print('🎮 Error processing server message: $e');
@@ -306,46 +346,80 @@ extension CommunicationApplication on Application {
   
   // Helper method to check if any players have aborted the game
   void _checkIfPlayerAborted() {
-    if (gameData.isEmpty) {
-      return;
-    }
-    
     // **** ADD THIS GUARD ****
-    if (isSpectating || gameId == -1) {
+    if (isSpectating || gameData.isEmpty || gameId == -1) {
       print('🎮 Skipping _checkIfPlayerAborted (Spectating or no active game data)');
       return;
     }
     // **** END GUARD ****
 
+    // Existing logic...
+    print('🎮 Checking for aborted players...'); // Add log
+
     // Track if any player's status changed
     bool playerStatusChanged = false;
 
     for (var i = 0; i < games.length; i++) {
-      if (games[i]["gameId"] == gameData["gameId"]) {
-        for (var j = 0; j < nrPlayers && j < games[i]["playerIds"].length; j++) {
-          bool wasActive = playerActive[j];
-          bool isActive = games[i]["playerIds"][j] != null && games[i]["playerIds"][j] != "";
+      // Ensure games[i] is a Map and has the required keys
+      if (games[i] is Map && games[i]["gameId"] == gameData["gameId"] && games[i]["playerIds"] != null) {
+        var currentGameFromList = games[i]; // To avoid repeated lookups
 
-          // If a player was active but is now inactive, they aborted
-          if (wasActive && !isActive) {
-            print('🎮 Player $j has aborted the game!');
-            playerStatusChanged = true;
-            handlePlayerAbort(j);
-          }
-
-          playerActive[j] = isActive;
+        // Ensure playerActive and playerIds are initialized and match length
+        if (playerActive.length != nrPlayers || playerIds.length != nrPlayers) {
+           print('⚠️ Player state arrays mismatch nrPlayers ($nrPlayers). Reinitializing.');
+           playerActive = List.filled(nrPlayers, true); // Reinitialize based on current game
+           playerIds = List<String>.from(gameData['playerIds'] ?? List.filled(nrPlayers, "")); // Use current game data
         }
-        playerIds = games[i]["playerIds"];
+
+
+        for (var j = 0; j < nrPlayers && j < currentGameFromList["playerIds"].length; j++) {
+          // Make sure indices are valid before accessing
+          if (j < playerActive.length) {
+             bool wasActive = playerActive[j];
+             // Check if player ID is present and not empty in the game list data
+             bool isActive = currentGameFromList["playerIds"][j] != null &&
+                             currentGameFromList["playerIds"][j].toString().isNotEmpty;
+
+             // If a player was active but is now inactive, they aborted
+             if (wasActive && !isActive) {
+               print('🎮 Player $j has aborted the game!');
+               playerStatusChanged = true;
+               handlePlayerAbort(j); // Make sure this function handles UI updates
+             }
+
+             // Update the local playerActive status
+             playerActive[j] = isActive;
+          } else {
+             print('⚠️ Index $j out of bounds for playerActive (${playerActive.length})');
+          }
+        }
+         // Update playerIds safely
+         playerIds = List<String>.from(currentGameFromList["playerIds"]);
+         break; // Found the matching game, no need to check others
       }
     }
 
     // If no specific player status changed but current player is inactive,
     // we need to advance to the next active player
-    if (!playerStatusChanged && playerToMove < playerActive.length && !playerActive[playerToMove]) {
+    // Add checks to prevent RangeError here as well
+    if (!playerStatusChanged &&
+        playerToMove >= 0 && playerToMove < playerActive.length && !playerActive[playerToMove]) {
       _advanceToNextActivePlayer();
+    } else if (playerToMove >= playerActive.length) {
+       print('⚠️ playerToMove ($playerToMove) is out of bounds for playerActive (${playerActive.length})');
+       // Reset playerToMove? Or handle error?
+       if (playerActive.isNotEmpty) playerToMove = 0;
     }
 
-    colorBoard();
+    // Update board colors based on the potentially changed playerActive status
+    colorBoard(); // Moved from inside the loop
+
+    // Trigger UI update if needed (e.g., if handlePlayerAbort doesn't do it)
+    if (playerStatusChanged) {
+        try {
+            context.read<SetStateCubit>().setState();
+        } catch (e) { print('⚠️ Error updating state after abort check: $e'); }
+    }
   }
   
   // Helper method to advance to the next active player
@@ -525,7 +599,7 @@ extension CommunicationApplication on Application {
           // Make sure to update the UI state to refresh the spectator view
           // We use Future.microtask to ensure the UI update happens in the next event loop
           // This helps avoid potential state inconsistencies
-          Future.microtask(() {
+
             try {
               print('👁️ Updating spectator UI state...');
               context.read<SetStateCubit>().setState();
@@ -533,7 +607,7 @@ extension CommunicationApplication on Application {
             } catch (e) {
               print('⚠️ Error updating spectator UI state: $e');
             }
-          });
+
         } catch (parseError) {
           print('⚠️ Error parsing spectator data: $parseError');
           // Still try to update with the raw data

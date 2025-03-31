@@ -1,8 +1,12 @@
 // backend/src/services/TopScoreService.ts
 import { Collection, Db } from 'mongodb';
 import { getDbConnection } from '../db';
+import { Server } from 'socket.io';
 
 const DB_NAME = 'top-scores';
+
+// Define the supported game types explicitly
+const SUPPORTED_GAME_TYPES = ["Mini", "Ordinary", "Maxi", "MaxiR3", "MaxiE3", "MaxiRE3"];
 
 interface TopScoreEntry {
   name: string;
@@ -10,6 +14,12 @@ interface TopScoreEntry {
 }
 
 export class TopScoreService {
+  private io: Server;
+
+  constructor(io: Server) {
+    this.io = io;
+  }
+
   private getDb(): Db {
     return getDbConnection(DB_NAME);
   }
@@ -24,18 +34,30 @@ export class TopScoreService {
   /**
    * Gets the top scores for a given game type.
    * @param gameType - The type of game (e.g., "Ordinary", "MaxiR3").
-   * @param limit - The maximum number of scores to return.
+   * @param limit - Optional maximum number of scores to return.
    * @returns An array of top score entries.
    */
-  async getTopScores(gameType: string, limit: number = 20): Promise<TopScoreEntry[]> {
+  async getTopScores(gameType: string, limit?: number): Promise<TopScoreEntry[]> {
     try {
+      // Ensure the game type is supported before querying
+      if (!SUPPORTED_GAME_TYPES.includes(gameType)) {
+         console.warn(`[TopScoreService] Attempted to get scores for unsupported game type: ${gameType}`);
+         return [];
+      }
       const collection = this.getCollection(gameType);
-      const results = await collection
-        .find({}, { projection: { _id: 0 } }) // Exclude the _id field
-        .sort({ score: -1 }) // Sort by score descending
-        .limit(limit) // Limit the results
-        .toArray();
-      console.log(`📊 [TopScoreService] Fetched ${results.length} top scores for ${gameType}`);
+      // Build query dynamically based on limit
+      let query = collection
+        .find({}, { projection: { _id: 0 } })
+        .sort({ score: -1 });
+
+      // Apply limit ONLY if provided
+      if (limit !== undefined && limit > 0) {
+         query = query.limit(limit);
+      }
+
+      const results = await query.toArray();
+
+      console.log(`📊 [TopScoreService] Fetched ${results.length} top scores for ${gameType}${limit ? ' (limited to ' + limit + ')' : ' (all)'}`);
       return results;
     } catch (error) {
       console.error(`❌ [TopScoreService] Error fetching top scores for ${gameType}:`, error);
@@ -44,8 +66,35 @@ export class TopScoreService {
   }
 
   /**
+   * Gets top scores for all supported game types.
+   * @returns A map where keys are game types and values are arrays of top score entries.
+   */
+  async getAllTopScores(): Promise<{ [gameType: string]: TopScoreEntry[] }> {
+    const allScores: { [gameType: string]: TopScoreEntry[] } = {};
+    console.log(`📊 [TopScoreService] Fetching top scores for all supported types: ${SUPPORTED_GAME_TYPES.join(', ')}`);
+    for (const gameType of SUPPORTED_GAME_TYPES) {
+      // Use the existing getTopScores method
+      allScores[gameType] = await this.getTopScores(gameType);
+    }
+    console.log(`📊 [TopScoreService] Finished fetching all top scores.`);
+    return allScores;
+  }
+
+  /**
+   * Broadcasts all top scores to all connected clients.
+   */
+  async broadcastTopScores(): Promise<void> {
+    try {
+      const allScores = await this.getAllTopScores();
+      this.io.emit('onTopScoresUpdate', allScores); // Use a specific event name
+      console.log(`📢 [TopScoreService] Broadcasted updated top scores to all clients.`);
+    } catch (error) {
+      console.error(`❌ [TopScoreService] Error broadcasting top scores:`, error);
+    }
+  }
+
+  /**
    * Attempts to add a new score to the top scores list if it qualifies.
-   * Currently, it just adds the score; filtering/limiting logic might be needed.
    * @param gameType - The type of game.
    * @param name - The player's name.
    * @param score - The player's score.
@@ -57,14 +106,17 @@ export class TopScoreService {
        console.warn(`❌ [TopScoreService] Invalid data for updateTopScore: name=${name}, score=${score}, gameType=${gameType}`);
        return false;
      }
-     // Add score - simplistic approach for now.
-     // A real implementation might check if the score is high enough first,
-     // or prune the list after insertion to maintain a fixed size (e.g., top 20).
+     // Ensure the game type is supported before inserting
+     if (!SUPPORTED_GAME_TYPES.includes(gameType)) {
+        console.warn(`❌ [TopScoreService] Attempted to update score for unsupported game type: ${gameType}`);
+        return false;
+     }
+
      try {
        const collection = this.getCollection(gameType);
        const result = await collection.insertOne({ name, score });
        console.log(`✅ [TopScoreService] Inserted score ${score} for ${name} in ${gameType} (Inserted ID: ${result.insertedId})`);
-       return result.acknowledged;
+       return result.acknowledged; // Return insertion status directly
      } catch (error) {
        console.error(`❌ [TopScoreService] Error inserting top score for ${gameType}:`, error);
        return false;

@@ -1,180 +1,183 @@
-# Project Description: jesseburstrom-client (Yatzy Game Client-Server System)
+Okay, here is a detailed description of your Yatzy game project based on the provided file structure and contents.
 
-## 1. Project Overview
+## Project Overview: Multiplayer Yatzy Game (Flutter & Node.js)
 
-`jesseburstrom-client` is a client-server application primarily focused on implementing a multiplayer Yatzy game. It consists of a Flutter frontend (`lib/`) providing the user interface and game interaction, and a Node.js/Express backend (`backend/`) handling game logic, real-time communication, authentication, and data persistence.
+This project implements a multiplayer Yatzy game featuring a Flutter frontend and a Node.js (Express/TypeScript) backend. It leverages WebSockets (Socket.IO) for real-time gameplay and communication, MongoDB for data persistence (game logs, top scores, potentially user auth), and includes unique features like multiple game modes, spectator functionality, and integration with Unity for 3D dice rendering.
 
-The system appears to support:
+**Core Technologies:**
 
-*   Multiple Yatzy game types (Ordinary, Mini, Maxi, and variants with special rules like Regret/Extra moves).
-*   Real-time multiplayer gameplay via WebSockets (Socket.IO).
-*   User authentication (Sign up/Log in).
-*   Top score tracking per game type.
-*   A spectator mode for watching ongoing games.
-*   Integration with Unity via `flutter_unity_widget` for potentially rendering 3D dice (controlled by a setting).
+*   **Frontend:** Flutter (Dart)
+*   **Backend:** Node.js, Express.js, TypeScript
+*   **Real-time Communication:** Socket.IO
+*   **Database:** MongoDB
+*   **3D Rendering (Optional):** Unity (integrated via `flutter_unity_widget`)
+
+**Key Features:**
+
+*   Real-time multiplayer Yatzy gameplay.
+*   Multiple game modes (Ordinary, Mini, Maxi, including variants with Regret/Extra Move rules).
+*   Persistent Top Scores leaderboard per game mode.
+*   Game logging/history stored in the database.
 *   In-game chat functionality.
+*   Spectator mode to watch ongoing games.
+*   User authentication (Login/Signup routes exist, likely JWT-based).
+*   Optional 3D dice rendering via Unity integration.
+*   Basic settings configuration (Username, Language, Game Type, Visuals).
+*   Localization support (English/Swedish examples shown).
 
-The backend README also mentions a React client, suggesting the backend might serve multiple frontend implementations, but this description focuses on the provided Flutter frontend and Node.js backend.
+---
 
-## 2. Technology Stack
+## Backend Description (`backend/`)
 
-*   **Frontend (`lib/`):**
-    *   Framework: Flutter
-    *   Language: Dart
-    *   State Management: flutter_bloc / Cubit (`LanguageBloc`, `SetStateCubit`)
-    *   Dependency Injection: get_it, injectable
-    *   Routing: auto_route
-    *   Networking:
-        *   HTTP: http package (`HttpService`)
-        *   WebSocket: socket_io_client (`SocketService`)
-    *   UI: Material Design, auto_size_text, animated_text_kit
-    *   Local Storage: shared_preferences
-    *   Unity Integration: flutter_unity_widget
+The backend is a Node.js application built with the Express.js framework and written in TypeScript. It serves as the central authority for game logic, state management, and communication between clients.
 
-*   **Backend (`backend/`):**
-    *   Runtime: Node.js
-    *   Framework: Express.js
-    *   Language: TypeScript
-    *   Real-time Communication: Socket.IO
-    *   Database: MongoDB (using `mongodb` driver)
-    *   Authentication: JSON Web Tokens (JWT), bcrypt (password hashing)
-    *   API: RESTful API endpoints, WebSocket events
-    *   Utilities: cors, dotenv, uuid
+**Core Components & Architecture:**
 
-## 3. Architecture
+1.  **Server (`server.ts`):**
+    *   Initializes an Express application and an HTTP server.
+    *   Sets up Socket.IO on top of the HTTP server for real-time communication.
+    *   Configures CORS to allow connections from the frontend (including handling development vs. production origins via an `isOnline` flag).
+    *   Integrates middleware (like `express.json` for parsing request bodies).
+    *   Initializes the MongoDB database connection (`db.ts`).
+    *   Instantiates and wires up Controllers and Services.
+    *   Registers API routes defined in the `routes/` directory.
+    *   Sets up Socket.IO event listeners, delegating handling to controllers.
+    *   Includes logic for serving static frontend build files (handling different paths for local dev vs. online deployment).
 
-The project follows a standard **Client-Server architecture**:
+2.  **Database (`db.ts`):**
+    *   Manages the MongoDB connection using the native `mongodb` driver.
+    *   Provides functions `initializeDbConnection` and `getDbConnection` to access specific databases (`react-auth-db`, `top-scores`, `yatzy-game-log-db`).
+    *   Includes a connection test write operation on startup.
 
-*   **Backend (Server):** Acts as the central authority. It manages game state, validates actions, handles player connections, persists data (users, game logs, top scores), and facilitates real-time communication between clients. It exposes a REST API for certain actions (auth, top scores, initial spectator data) and uses Socket.IO for real-time game events and chat.
-    *   **Layers:**
-        *   **Routes (`src/routes/`):** Define REST API endpoints.
-        *   **Controllers (`src/controllers/`):** Handle incoming Socket.IO events and REST requests, orchestrate responses, interact with services.
-        *   **Services (`src/services/`):** Encapsulate core business logic (game management, logging). `GameService` is central to multiplayer logic.
-        *   **Models (`src/models/`):** Define data structures (Game, Player, BoardCell).
-        *   **Database (`db.ts`, `GameLogService`):** Handles MongoDB connections and data persistence.
-*   **Frontend (Client):** Provides the user interface and interacts with the backend. It maintains a local representation of the game state, sends user actions to the backend, and updates the UI based on responses and real-time updates received from the backend.
-    *   **Layers (typical Flutter structure):**
-        *   **Views (`views/`):** Top-level screen widgets managed by the router.
-        *   **Widgets (`widgets/`, `application/widget*.dart`, etc.):** Reusable UI components.
-        *   **State Management (`states/`, `application/application.dart`):** Manages UI state and application-level state (using Bloc/Cubit and a central `Application` class).
-        *   **Services (`services/`):** Handle communication with the backend (`HttpService`, `SocketService`) and potentially other tasks. The Flutter `GameService` acts as an interface layer over `SocketService` for game actions.
-        *   **Models (`models/`):** Client-side representation of data structures.
-        *   **Routing (`router/`):** Manages navigation between views.
+3.  **Networking (Socket.IO in `server.ts`):**
+    *   Handles client connections, disconnections, and message routing.
+    *   Uses robust Socket.IO configuration supporting both `websocket` and `polling` transports, with ping timeouts for connection stability.
+    *   Listens for client events (`sendToServer`, `sendToClients`) and forwards them to the appropriate controllers.
+    *   Broadcasts game state updates (`onServerMsg`) and client-specific messages (`onClientMsg`) to players and spectators.
 
-## 4. Directory Structure Breakdown
+4.  **API Routes (`routes/`):**
+    *   Defines RESTful endpoints using Express Router.
+    *   `logInRoute.ts`, `signUpRoute.ts`: Handle user authentication (likely using bcrypt for password hashing and JWT for session tokens).
+    *   `logRoute.ts`, `getLogRoute.ts`: Potentially for user activity logging (seems related to the auth DB).
+    *   `getTopScores.ts`, `updateTopScore.ts`: API for fetching and submitting high scores for different game modes, interacting with the `top-scores` DB.
+    *   `spectateGameRoute.ts`: An *HTTP GET* endpoint `/api/spectate/:gameId` used to fetch the initial state and log for a game being spectated.
 
-*   **`jesseburstrom-client/`**
-    *   **`backend/`**: Contains the Node.js/Express server code.
-        *   `node_modules/`: Project dependencies (ignored by git).
-        *   `dist/`: Compiled TypeScript output (ignored by git).
-        *   `.env`: Environment variables (ignored by git).
-        *   `package.json`, `package-lock.json`: Node.js project definition and dependencies.
-        *   `tsconfig.json`: TypeScript compiler configuration.
-        *   `src/`: Source code for the backend.
-            *   `controllers/`: Handles incoming requests/events (Game, Player, Chat).
-            *   `db.ts`: MongoDB connection setup.
-            *   `models/`: Data structure definitions (Game, Player, BoardCell, Dice).
-            *   `routes/`: REST API endpoint definitions.
-            *   `services/`: Business logic (GameService, GameLogService).
-            *   `utils/`: Utility functions and game configuration (gameConfig, yatzyMapping).
-            *   `server.ts`: Main server entry point, sets up Express and Socket.IO.
-    *   **`lib/`**: Contains the Flutter frontend code.
-        *   `application/`: Core application logic, state, UI widgets for the main game view.
-        *   `chat/`: Chat feature implementation (state, UI).
-        *   `core/`: Core setup files (DI modules, root AppWidget).
-        *   `dices/`: Dice logic, UI, and Unity integration files.
-        *   `input_items/`: Reusable input widgets (buttons, text fields, etc.).
-        *   `models/`: Frontend data models (BoardCell, Game, Player).
-        *   `router/`: AutoRoute configuration and generated files.
-        *   `scroll/`: Scrolling text animation feature.
-        *   `services/`: Frontend services (HttpService, SocketService, GameService, ServiceProvider).
-        *   `states/`: Bloc/Cubit state management setup.
-        *   `top_score/`: Top score display feature.
-        *   `tutorial/`: In-app tutorial feature.
-        *   `utils/`: Client-side utility functions (yatzyMappingClient).
-        *   `views/`: Top-level screen widgets (ApplicationView, SettingsView).
-        *   `widgets/`: Other reusable widgets (SpectatorGameBoard).
-        *   `injection.dart`, `injection.config.dart`: Dependency injection setup.
-        *   `main.dart`: Flutter application entry point.
-        *   `shared_preferences.dart`: Utility for local storage.
-        *   `startup.dart`: Global configuration variables/flags.
+5.  **Controllers (`controllers/`):**
+    *   `ChatController.ts`: Handles receiving chat messages via Socket.IO (`sendToClients`, `sendToServer` with `chatMessage` action) and broadcasts them to relevant players in a specific game using `GameService` to find participants.
+    *   `GameController.ts`: Manages core game flow events via Socket.IO (`requestGame`, `requestJoinGame`, `removeGame`, `useRegret`, `useExtraMove`, `spectateGame`). Handles receiving player actions like dice rolls (`sendDices`) and score selections (`sendSelection`), validating turns, interacting with `GameService` and `GameLogService`, and triggering state updates.
+    *   `PlayerController.ts`: Primarily handles initial player connection setup (`getId`) and potentially player-specific events (though most game actions are delegated to `GameController`).
 
-## 5. Interconnection & Data Flow
+6.  **Services (`services/`):**
+    *   `GameService.ts`: The core logic hub. Manages the state of active games (`Map<gameId, Game>`). Handles game creation, finding available games, player joining/leaving/disconnecting (including turn management and game finishing logic), adding/removing spectators, processing dice rolls and selections, broadcasting game state updates and game lists to clients via Socket.IO (`io.emit`, `io.to`). Interacts with `GameLogService` to record game events and `TopScoreService` to update scores when a game finishes.
+    *   `GameLogService.ts`: Responsible for interacting with the `yatzy-game-log-db` MongoDB database (`game_moves` collection). Logs game start, individual moves (roll, select, regret, extra move, disconnect, spectate), and game end (with final scores). Provides a method to retrieve the full log for a game (used by spectator mode).
+    *   `TopScoreService.ts`: Handles interactions with the `top-scores` MongoDB database. Provides methods to fetch top scores for different game types and to insert new scores.
 
-Communication between the Flutter frontend and the Node.js backend happens via two primary mechanisms:
+7.  **Models (`models/`):**
+    *   `BoardCell.ts`: Represents a single cell on the Yatzy scorecard (index, label, value, fixed status).
+    *   `Dice.ts`: Encapsulates dice logic (rolling, keeping specific dice). *Note: The backend `GameService` seems to rely on client dice rolls, using this model mainly for internal state perhaps.*
+    *   `Game.ts`: Represents the state of a single Yatzy game instance (ID, type, players, status flags, current player, dice values, roll count, turn number, etc.). Includes methods for adding/removing players, managing turns, applying selections, checking finish conditions, and serialization (`toJSON`, `fromJSON`).
+    *   `Player.ts`: Represents a player (ID, username, active status, scorecard `cells`, calculated scores, special move counts like `regretsLeft`). Includes methods for score calculation and serialization.
 
-1.  **REST API (HTTP):** Used for actions that don't require real-time updates or are typically request-response based.
-    *   **Authentication:** `/api/signup`, `/api/login` (POST). Frontend `HttpService` sends credentials, backend `logInRoute`/`signUpRoute` handle validation/creation, interact with MongoDB (`react-auth-db`), and return JWTs.
-    *   **Top Scores:** `/GetTopScores` (GET), `/UpdateTopScore` (POST). Frontend `HttpService` calls these, backend routes interact with MongoDB (`top-scores`).
-    *   **Spectator Initial Data:** `/api/spectate/:gameId` (GET). Frontend `HttpService` (or potentially direct call within Settings) fetches initial game state and log from backend `spectateGameRoute`, which uses `GameService` and `GameLogService`.
-    *   **(Potential) User Logging:** `/api/log/:userId` (POST), `/api/getLog/:userId` (GET). Requires JWT auth.
+8.  **Utilities (`utils/`):**
+    *   `gameConfig.ts`: Defines constants and structures for different game types (cell labels, bonus rules, dice count, max rolls).
+    *   `yatzyMapping.ts`: Provides utility functions (`getSelectionLabel`, `getSelectionIndex`) to map between the numerical index of a scorecard cell and its string label (e.g., 0 -> "Ones", 8 -> "Pair"), essential for processing selections received from the client.
+    *   `index.ts`: General utility functions (currently includes `randomInt`, `delay`, etc., might not be heavily used by core game logic).
 
-2.  **WebSocket (Socket.IO):** Used for real-time game events, multiplayer state synchronization, and chat.
-    *   **Connection:** Flutter `SocketService` establishes a persistent connection to the backend Socket.IO server defined in `server.ts`.
-    *   **Client -> Server Events (`sendToServer`):**
-        *   `getId`: Client requests its server-assigned ID (`PlayerController`).
-        *   `requestGame`/`createGame`: Client requests to create/join a game (`GameController` -> `GameService`).
-        *   `requestJoinGame`/`joinGame`: Client requests to join a specific game (`GameController` -> `GameService`).
-        *   `useRegret`/`useExtraMove`: Client uses a special move (`GameController` -> `GameService`).
-        *   `spectateGame` (WS): Client requests to start spectating via WebSocket (`GameController` -> `GameService.addSpectator`).
-        *   `chatMessage`: Client sends a chat message intended for the server or broadcast (`ChatController`).
-    *   **Client -> Other Clients Events (`sendToClients`):**
-        *   `sendDices`: Client informs server/others about its dice roll result (`GameController` -> `GameService.processDiceRoll` -> Broadcast).
-        *   `sendSelection`: Client informs server/others about its score selection (`GameController` -> `GameService.processSelection` -> Broadcast).
-        *   `chatMessage`: Client sends a chat message to be broadcast (`ChatController` -> Broadcast).
-    *   **Server -> Client Events (`onServerMsg`, `onClientMsg`):**
-        *   `onGetId` / `userId`: Server sends the client its unique socket ID (response to `getId`).
-        *   `onRequestGames`: Server broadcasts the list of available games (`GameService.broadcastGameList`).
-        *   `onGameStart`: Server informs players that a game they are in has started (`GameService.createOrJoinGame`).
-        *   `onGameUpdate`: Server broadcasts the updated state of a game to all players and spectators (`GameService.notifyGameUpdate`). This is the primary mechanism for state sync.
-        *   `onGameFinished`: Server informs players/spectators that a game has ended (`GameService.handleGameFinished`).
-        *   `onGameAborted`: Server informs a player if the game they were in was aborted (potentially).
-        *   `chatMessage` (`onClientMsg` or `onServerMsg`): Server relays chat messages to relevant clients (`ChatController`).
-        *   `sendDices` / `sendSelection` (`onClientMsg`): Server relays dice rolls or selections made by one player to other players in the game (`GameService.processDiceRoll`/`forwardSelectionToPlayers`).
+---
 
-    *   **State Synchronization:** The backend `GameService` maintains the authoritative game state. Client actions trigger events sent to the server. The server validates the action, updates the state in the corresponding `Game` object instance, logs the move via `GameLogService`, and then broadcasts the updated game state (`onGameUpdate`) to all connected clients (players and spectators) in that game room. The Flutter client receives this update in `SocketService._handleServerMessage` -> `app.callbackOnServerMsg` -> `_processGameUpdate` and updates its local UI state.
+## Frontend Description (`lib/`)
 
-## 6. Key Features Detailed
+The frontend is a Flutter application providing the user interface for playing Yatzy, managing settings, and viewing top scores. It communicates with the backend via Socket.IO for real-time updates and HTTP for less frequent data retrieval/submission.
 
-*   **Real-time Multiplayer:** Managed by the backend `GameService` and `Socket.IO`. `GameService` tracks active games and players. Actions are sent via Socket.IO, processed by the server, and state updates are broadcast back to clients.
-*   **Yatzy Game Logic:**
-    *   Backend: `Game` and `Player` models (`backend/src/models/`) manage state (turns, scores, cells, rolls). `GameService` orchestrates turn advancement, game start/end. Score calculation logic seems to primarily reside on the *client* (`application/application_functions_internal_calc_dice_values.dart`), which sends the calculated score with its selection (`sendSelection`). The server logs this score. *Note: Server-side validation of scores would be a good improvement.*
-    *   Frontend: `Application` class holds local state. `application_functions_internal_calc_dice_values.dart` contains score calculation logic used to display potential scores. `cellClick` sends the selection (including label and calculated score) to the backend.
-*   **Authentication:** Handled via REST API (`/api/signup`, `/api/login`). Uses bcrypt for password hashing and JWT for session management. `react-auth-db` in MongoDB stores user credentials.
-*   **Database Persistence:** MongoDB is used for:
-    *   User accounts (`react-auth-db` -> `users` collection).
-    *   (Potential) User activity logs (`react-auth-db` -> `logs` collection).
-    *   Yatzy game moves and results (`yatzy-game-log-db` -> `game_moves` collection, managed by `GameLogService`).
-    *   Top scores (`top-scores` database -> collections per game type).
-*   **Spectator Mode:**
-    *   Initiation: Client likely calls the REST endpoint (`/api/spectate/:gameId`) via `HttpService` to get initial game state and log history.
-    *   Real-time Updates: Client sends a `spectateGame` event via WebSocket. Backend `GameService.addSpectator` registers the socket ID. Subsequent `onGameUpdate` broadcasts from `GameService.notifyGameUpdate` are sent to spectators as well as players.
-    *   UI: `widgets/spectator_game_board.dart` is likely used to render the read-only game state.
-*   **Unity Integration:** `flutter_unity_widget` is used. The `Dices` widget can display the Unity view. `UnityCommunication` extension handles message passing between Flutter and Unity for dice state, rolls, and settings (like transparency, effects).
-*   **State Management (Flutter):** Uses Bloc/Cubit (`LanguageBloc` for language, `SetStateCubit` for triggering general UI updates) and a central `Application` class instance (`app`) which holds much of the game UI state directly. `ServiceProvider` provides access to `SocketService` and `GameService`.
+**Core Components & Architecture:**
 
-## 7. Setup & Running
+1.  **Initialization (`main.dart`, `startup.dart`):**
+    *   Sets up the Flutter application (`runApp`).
+    *   Initializes shared preferences (`SharedPrefProvider`) for storing settings.
+    *   Configures dependency injection (`getIt`, `injectable`).
+    *   Sets up global state management using Flutter Bloc (`LanguageBloc`, `SetStateCubit`).
+    *   Initializes global variables/configuration in `startup.dart` (like `isOnline`, `localhost` URL, default language, instances of core classes like `app`, `dices`, `chat`).
+    *   Wraps the application in `ServiceProvider` (`app_widget.dart`) to make services accessible.
+    *   Crucially, `app_widget.dart`'s `builder` initializes the connection via `SocketService.connect()` after the first frame.
 
-*   **Backend:**
-    1.  Navigate to the `backend/` directory.
-    2.  Install dependencies: `npm install`
-    3.  Create a `.env` file based on requirements (likely `JWT_SECRET`, potentially MongoDB connection string although it defaults to local).
-    4.  Run in development: `npm run nod` (uses `nodemon` and `ts-node`).
-    5.  Build for production: `npm run build` (or similar, uses `tsc`), then `node dist/server.js`.
-*   **Frontend:**
-    1.  Navigate to the root directory (`jesseburstrom-client/`).
-    2.  Ensure Flutter SDK is installed.
-    3.  Run on a device/emulator: `flutter run`
-*   **Configuration:** The `isOnline` flag in `backend/src/server.ts` and `lib/startup.dart` controls static file serving paths and potentially backend URLs (`localhost` variable in `lib/startup.dart`). Ensure the `localhost` URL in `lib/startup.dart` correctly points to the running backend server, especially when testing on a physical device (use the backend machine's local network IP, not `localhost` or `127.0.0.1`).
+2.  **Routing (`router/`):**
+    *   Uses the `auto_route` package for declarative navigation.
+    *   Defines routes for the main views: `SettingsView` (initial) and `ApplicationView` (game screen).
 
-## 8. Potential Improvements / Notes
+3.  **State Management (`states/`):**
+    *   Uses `flutter_bloc`.
+    *   `LanguageBloc`: Manages the application's current language.
+    *   `SetStateCubit`: A simple cubit used extensively for triggering general UI rebuilds (`context.read<SetStateCubit>().setState()`). This suggests a mix of Bloc for specific features and a more basic "setState" approach for broader UI updates managed within the `Application` class.
 
-*   **Server-Side Score Validation:** The server currently seems to trust the score sent by the client during `sendSelection`. Adding server-side calculation based on the logged dice roll would improve robustness.
-*   **Error Handling:** More specific error messages could be sent back to the client from the backend. Frontend error handling could be more robust (e.g., showing Snackbars for connection issues or invalid actions).
-*   **State Management:** The Flutter frontend relies heavily on a global `app` instance and a simple `SetStateCubit`. For larger applications, refining state management (e.g., more specific Blocs/Cubits per feature) could improve maintainability.
-*   **Model Synchronization:** Ensure frontend models (`lib/models/`) stay perfectly synchronized with backend models (`backend/src/models/`) and the data structures used in JSON communication.
-*   **Configuration Management:** Centralize the `isOnline` flag and backend URL configuration.
-*   **Code Clarity:** Some areas, especially in the frontend state management and communication handling (`Application`, `CommunicationApplication`), could potentially be refactored for better separation of concerns.
-*   **Dice Model Usage:** The backend `Dice.ts` model doesn't seem actively used in the primary game flow described by the controllers/services, which rely on client-sent dice values. Its purpose might be vestigial or for future features.
+4.  **Core Application Logic (`application/`):**
+    *   `Application.dart`: A central class holding much of the frontend game state and UI logic. It's instantiated globally in `startup.dart`. Contains game state variables (`gameType`, `nrPlayers`, `gameData`, `myPlayerId`, `playerToMove`, board state arrays like `cellValue`, `fixedCell`, `appText`, `appColors`). Manages interactions with the `Dices` component and handles UI updates via callbacks and the `SetStateCubit`.
+    *   `CommunicationApplication.dart`: An extension containing the crucial `callbackOnServerMsg` and `callbackOnClientMsg` methods. These methods parse messages received from the `SocketService` and update the `Application` state accordingly (handling game start, updates, aborts, finish, chat messages, dice/selection updates from other players). Also handles sending chat messages.
+    *   `WidgetApplicationScaffold.dart`: Extension defining the main scaffold/layout for the `ApplicationView`, arranging different widgets (game board, dice, chat, top scores, scroll text) based on screen orientation. Includes logic for floating action buttons (Settings, New Game, Regret, Extra Move).
+    *   `WidgetApplication.dart`: Contains the `WidgetSetupGameBoard` (builds the Yatzy scorecard UI based on `Application` state) and `WidgetDisplayGameStatus` widgets.
+    *   `WidgetApplicationSettings.dart`: Extension defining the UI for the `SettingsView`, including game type selection, player count, username input, available game list (with join buttons), spectator buttons, and general settings tabs (language, animations, Unity options). Includes the `SpectatorGameBoard` when spectating.
+    *   `LanguagesApplication.dart`: Mixin holding localized strings for the application UI elements.
+    *   `ApplicationFunctionsInternal*.dart`: Extensions containing helper functions for cell clicks, local UI updates after selection, board coloring, and dice score calculations.
 
-This description provides a comprehensive overview of the project structure, technologies, and interactions, suitable for understanding the codebase's flow and key components.
+5.  **Networking (`services/`):**
+    *   `SocketService.dart`: The *modern* implementation for handling Socket.IO communication. Manages connection state, sends/receives events (`sendToServer`, `sendToClients`, `onClientMsg`, `onServerMsg`), and interacts with the `Application` class via callbacks (`app.callbackOnClientMsg`, `app.callbackOnServerMsg`). It's provided via `ServiceProvider`.
+    *   `HttpService.dart`: The *modern* implementation for making HTTP requests (GET, POST, PUT, DELETE) to the backend API using the `http` package. Used for fetching/updating top scores, potentially login/signup. It's provided via `ServiceProvider`.
+    *   `GameService.dart`: A frontend service that likely acts as an intermediary between UI components and the `SocketService` for game-specific actions. It holds a reference to the `SocketService`.
+    *   `ServiceProvider.dart`: Uses `InheritedWidget` to make `SocketService` and `GameService` instances available throughout the widget tree via `ServiceProvider.of(context)`.
+
+6.  **Dice Component (`dices/`):**
+    *   `Dices.dart`: Manages the state of the dice (values, held status, rolls left). Includes logic for rolling dice locally (for single-player or visual feedback).
+    *   `UnityCommunication.dart`: Handles the communication *to* and *from* the embedded Unity widget using `flutter_unity_widget`. Defines methods to send messages (reset, start, update dice, update colors, toggle features) and callbacks (`onUnityMessage`, `onUnityCreated`) to handle messages received *from* Unity (like dice roll results).
+    *   `WidgetDices.dart`: The UI widget that either displays the 2D dice images or embeds the `UnityWidget` based on the `unityDices` setting.
+
+7.  **Other Features (`chat/`, `top_score/`, `scroll/`, `tutorial/`):**
+    *   `chat/`: Contains the `Chat` logic class and `WidgetChat` UI for the in-game chatbox.
+    *   `top_score/`: Contains the `TopScore` logic class (fetching/updating scores via `HttpService`) and `WidgetTopScore` UI.
+    *   `scroll/`: Implements an animated scrolling text widget (`WidgetAnimationsScroll`).
+    *   `tutorial/`: Contains logic and widgets for displaying tutorial arrows/hints (`WidgetArrow`).
+
+8.  **Models (`models/`):**
+    *   Defines frontend representations of `Game`, `Player`, and `BoardCell`, used to structure data received from the backend and manage UI state.
+
+9.  **Utilities (`utils/`):**
+    *   `yatzy_mapping_client.dart`: Provides client-side mapping between cell indices and string labels, ensuring consistency with the backend when sending/interpreting selections.
+
+---
+
+## Key Interactions & Workflow
+
+1.  **App Start:** Flutter app initializes, `ServiceProvider` creates `SocketService` and `GameService`. `AppWidget` triggers `SocketService.connect()`.
+2.  **Connection:** `SocketService` connects to the backend Socket.IO server, receives a unique `socketId`.
+3.  **Settings:** User configures game settings (type, players, username) in `SettingsView`.
+4.  **Create/Join Game:**
+    *   User clicks "Create Game".
+    *   `Application` -> `onStartGameButton` -> `SocketService.sendToServer` (action: `requestGame`).
+    *   Backend `GameController` -> `GameService.createOrJoinGame`.
+    *   Backend broadcasts updated game list (`onRequestGames`) via `onServerMsg`.
+    *   *Or* User clicks an available game to join.
+    *   `Application` -> `onAttemptJoinGame` -> `SocketService.sendToServer` (action: `requestJoinGame`).
+    *   Backend `GameController` -> `GameService.joinGame`.
+    *   Backend broadcasts updated game list.
+5.  **Game Start:** When a game is full, backend `GameService` marks it as started and broadcasts `onGameStart` via `onServerMsg`.
+6.  **Navigation:** Frontend receives `onGameStart`, `CommunicationApplication.callbackOnServerMsg` processes it, updates `Application` state, and navigates to `ApplicationView`.
+7.  **Gameplay Turn:**
+    *   Backend determines `playerToMove` and includes it in `onServerMsg` updates.
+    *   Frontend `Application` updates UI based on `isMyTurn`.
+    *   **Dice Roll:**
+        *   If `unityDices` is true: User interacts with Unity, Unity performs roll, sends result via `onUnityMessage` -> `UnityCommunication.onUnityMessage` -> `Dices.callbackUpdateDiceValues`.
+        *   If `unityDices` is false: User clicks "Roll" button (`WidgetDices`), `Dices.rollDices` calculates locally, calls `Dices.callbackUpdateDiceValues`.
+        *   `Dices.callbackUpdateDiceValues` calls `Application.callbackUpdateDiceValues` which sends dice values (`sendDices`) to backend via `SocketService.sendToClients`.
+        *   Backend `GameController.handleSendDices` -> `GameService.processDiceRoll` (logs roll) -> broadcasts `sendDices` via `onClientMsg` to *other* players and spectators, and sends full state update (`onServerMsg`) to *all*.
+    *   **Score Selection:**
+        *   User clicks a cell (`WidgetSetupGameBoard`).
+        *   `Application.cellClick` calculates local score, creates message with `selectionLabel`, sends (`sendSelection`) via `SocketService.sendToClients`. Updates UI *optimistically* via `applyLocalSelection`.
+        *   Backend `GameController.handleSendSelection` -> `GameService.processSelection` (validates turn, logs selection, updates game state, advances turn).
+        *   Backend sends full state update (`onGameUpdate`) via `onServerMsg` to all players/spectators. Frontend `callbackOnServerMsg` receives this authoritative state.
+8.  **Chat:** User types message, `Chat.onSubmitted` -> `Application.chatCallbackOnSubmitted` -> `SocketService.sendToClients` (action: `chatMessage`). Backend `ChatController` relays message via `onClientMsg` to other players. Frontend `callbackOnClientMsg` -> `Application.updateChat` updates UI.
+9.  **Spectating:**
+    *   User clicks "Spectate" button in `SettingsView`.
+    *   `Application.onSpectateGame` -> `SocketService.sendToServer` (action: `spectateGame`).
+    *   Backend `GameController.handleSpectateGame` -> fetches game state/log, sends initial state (`onGameStart` with `spectator: true`) via `onServerMsg`. Adds spectator to `GameService`.
+    *   Frontend `callbackOnServerMsg` receives spectator data, sets `isSpectating` flag, updates UI to show `SpectatorGameBoard`.
+    *   Subsequent `onGameUpdate` messages are received and displayed by `SpectatorGameBoard`.
+10. **Game End:** Backend `GameService` detects game end, logs final scores, updates top scores via `TopScoreService`, broadcasts `onGameFinished` via `onServerMsg`. Frontend `callbackOnServerMsg` handles this, shows dialog, navigates back to `SettingsView`.
+

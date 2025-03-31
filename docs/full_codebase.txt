@@ -30,7 +30,8 @@ Directory structure:
     │       │   └── updateTopScore.ts
     │       ├── services/
     │       │   ├── GameLogService.ts
-    │       │   └── GameService.ts
+    │       │   ├── GameService.ts
+    │       │   └── TopScoreService.ts
     │       └── utils/
     │           ├── gameConfig.ts
     │           ├── index.ts
@@ -6781,6 +6782,7 @@ import { createServer } from "http";
 // Import services
 import { GameService } from "./services/GameService";
 import { GameLogService } from "./services/GameLogService"; // <-- Import GameLogService
+import { TopScoreService } from "./services/TopScoreService";
 
 // Import controllers
 import { GameController } from "./controllers/GameController";
@@ -6867,7 +6869,8 @@ io.use((socket, next) => {
 
 // Create service instances
 const gameLogService = new GameLogService(); // <-- Create GameLogService instance
-const gameService = new GameService(io, gameLogService); // <-- Pass log service to GameService
+const topScoreService = new TopScoreService(); // <-- Create TopScoreService instance
+const gameService = new GameService(io, gameLogService, topScoreService); // <-- Pass both services
 
 // Create controller instances
 const gameController = new GameController(gameService, gameLogService); // <-- Pass log service
@@ -9220,6 +9223,7 @@ import { Game } from '../models/Game';
 import { Player, PlayerFactory } from '../models/Player';
 import { Server, Socket } from 'socket.io'; // Import Socket type
 import { GameLogService, GameMove } from './GameLogService'; // <-- Import log service and types
+import { TopScoreService } from './TopScoreService'; // <-- Import TopScoreService
 import { getSelectionLabel } from '../utils/yatzyMapping'; // <-- Import mapping utility
 
 /**
@@ -9231,10 +9235,12 @@ export class GameService {
   private gameIdCounter: number = 0;
   private io: Server;
   private gameLogService: GameLogService; // <-- Add log service instance
+  private topScoreService: TopScoreService; // <-- Add top score service instance
 
-  constructor(io: Server, gameLogService: GameLogService) { // <-- Inject log service
+  constructor(io: Server, gameLogService: GameLogService, topScoreService: TopScoreService) { // <-- Inject services
     this.io = io;
     this.gameLogService = gameLogService; // <-- Store log service instance
+    this.topScoreService = topScoreService; // <-- Store top score service instance
   }
 
   // --- Spectator Management ---
@@ -9519,6 +9525,19 @@ export class GameService {
         console.error(`❌ [GameService] Error logging game ${game.id} end:`, error);
       });
 
+    // **** Update Top Scores ****
+    console.log(`🏆 [GameService] Attempting to update top scores for game ${game.id} (Type: ${game.gameType})`);
+    finalScores.forEach(playerScore => {
+      if (playerScore.username && playerScore.score > 0) { // Basic check
+         this.topScoreService.updateTopScore(game.gameType, playerScore.username, playerScore.score)
+           .then(success => {
+              if (success) console.log(`🏆 [TopScoreService] Score updated/added for ${playerScore.username}`);
+           })
+           .catch(err => console.error(`❌ [TopScoreService] Error updating score for ${playerScore.username}:`, err));
+      }
+    });
+    // **************************
+
     // Notify all active players
     this.notifyGameFinished(game);
 
@@ -9612,16 +9631,22 @@ export class GameService {
         this.io.to(player.id).emit('onClientMsg', gameData);
       }
     }
+// Also send to spectators
+const gameSpectators = this.spectators.get(game.id);
+if (gameSpectators && gameSpectators.size > 0) {
+  console.log(`[Spectator] Sending dice update to ${gameSpectators.size} spectators`);
+  for (const spectatorId of gameSpectators) {
+    this.io.to(spectatorId).emit('onClientMsg', gameData);
+  }
+}
 
-    // Also send to spectators
-    const gameSpectators = this.spectators.get(game.id);
-    if (gameSpectators && gameSpectators.size > 0) {
-      console.log(`[Spectator] Sending dice update to ${gameSpectators.size} spectators`);
-      for (const spectatorId of gameSpectators) {
-        this.io.to(spectatorId).emit('onClientMsg', gameData);
-      }
-    }
+// --- Notify ALL players AND spectators via onServerMsg (for full state sync) ---
+// This is the crucial addition for spectators to get updated dice/roll count
+console.log(`🔄 Notifying full game update (onServerMsg) after dice roll for game ${game.id}`);
+this.notifyGameUpdate(game);
+// --- End Notify ALL ---
 
+return true;
     return true;
   }
 
@@ -9689,6 +9714,12 @@ export class GameService {
     // Check if game finished after this selection
     if (game.isGameFinished()) {
       console.log(`🏁 [GameService] Game ${gameId} finished after selection`);
+
+      // **** CRUCIAL FIX: Send final update BEFORE handling finish ****
+      console.log(`🔄 Notifying final game update (onServerMsg) before finishing game ${game.id}`);
+      this.notifyGameUpdate(game); // Send state including the last selection
+      // ***************************************************************
+
       this.handleGameFinished(game); // This handles logging end, notifying, removing game
     } else {
       // Clear dice for next player
@@ -9931,6 +9962,84 @@ declare module '../models/Player' {
   }
 }
 
+
+
+================================================
+File: backend/src/services/TopScoreService.ts
+================================================
+// backend/src/services/TopScoreService.ts
+import { Collection, Db } from 'mongodb';
+import { getDbConnection } from '../db';
+
+const DB_NAME = 'top-scores';
+
+interface TopScoreEntry {
+  name: string;
+  score: number;
+}
+
+export class TopScoreService {
+  private getDb(): Db {
+    return getDbConnection(DB_NAME);
+  }
+
+  private getCollection(gameType: string): Collection<TopScoreEntry> {
+    const db = this.getDb();
+    // Normalize collection name (e.g., MaxiR3 -> maxiR3)
+    const collectionName = gameType.charAt(0).toLowerCase() + gameType.slice(1);
+    return db.collection<TopScoreEntry>(collectionName);
+  }
+
+  /**
+   * Gets the top scores for a given game type.
+   * @param gameType - The type of game (e.g., "Ordinary", "MaxiR3").
+   * @param limit - The maximum number of scores to return.
+   * @returns An array of top score entries.
+   */
+  async getTopScores(gameType: string, limit: number = 20): Promise<TopScoreEntry[]> {
+    try {
+      const collection = this.getCollection(gameType);
+      const results = await collection
+        .find({}, { projection: { _id: 0 } }) // Exclude the _id field
+        .sort({ score: -1 }) // Sort by score descending
+        .limit(limit) // Limit the results
+        .toArray();
+      console.log(`📊 [TopScoreService] Fetched ${results.length} top scores for ${gameType}`);
+      return results;
+    } catch (error) {
+      console.error(`❌ [TopScoreService] Error fetching top scores for ${gameType}:`, error);
+      return []; // Return empty array on error
+    }
+  }
+
+  /**
+   * Attempts to add a new score to the top scores list if it qualifies.
+   * Currently, it just adds the score; filtering/limiting logic might be needed.
+   * @param gameType - The type of game.
+   * @param name - The player's name.
+   * @param score - The player's score.
+   * @returns True if the score was inserted, false otherwise.
+   */
+  async updateTopScore(gameType: string, name: string, score: number): Promise<boolean> {
+     // Basic validation
+     if (!name || typeof score !== 'number' || !gameType) {
+       console.warn(`❌ [TopScoreService] Invalid data for updateTopScore: name=${name}, score=${score}, gameType=${gameType}`);
+       return false;
+     }
+     // Add score - simplistic approach for now.
+     // A real implementation might check if the score is high enough first,
+     // or prune the list after insertion to maintain a fixed size (e.g., top 20).
+     try {
+       const collection = this.getCollection(gameType);
+       const result = await collection.insertOne({ name, score });
+       console.log(`✅ [TopScoreService] Inserted score ${score} for ${name} in ${gameType} (Inserted ID: ${result.insertedId})`);
+       return result.acknowledged;
+     } catch (error) {
+       console.error(`❌ [TopScoreService] Error inserting top score for ${gameType}:`, error);
+       return false;
+     }
+  }
+}
 
 
 ================================================
@@ -10593,7 +10702,7 @@ class Application with LanguagesApplication  {
   }
 
   setup() {
-    topScore.loadTopScoreFromServer(gameType);
+    topScore.loadTopScoreFromServer(gameType, context.read<SetStateCubit>());
     gameStarted = true;
     playerToMove = 0;
     winnerId = -1;
@@ -11595,8 +11704,77 @@ extension CommunicationApplication on Application {
           _processGameUpdate(data);
           break;
         case "onGameAborted":
-          await router.push(const SettingsView());
+          print('🚪 Received onGameAborted');
+          // Reset state and go back to settings
+          gameId = -1;
+          myPlayerId = -1;
+          gameFinished = false;
+          isSpectating = false; // Ensure spectator mode is also reset
+          spectatedGameId = -1;
+          gameData = {};
+          Future.microtask(() => context.read<SetStateCubit>().setState());
+          await router.pushAndPopUntil(const SettingsView(), predicate: (_) => false);
           break;
+
+        // **** ADDED CASE ****
+        case "onGameFinished":
+          print('🏁 Received onGameFinished from server for game ${data["gameId"]}');
+          gameData = Map<String, dynamic>.from(data); // Store the final state
+          gameFinished = true; // Set local game finished flag
+
+          // Update the UI to reflect the finished state (for both player and spectator)
+          Future.microtask(() => context.read<SetStateCubit>().setState());
+
+          if (!isSpectating) {
+            // Logic for the actual player
+            String winnerMsg = "Game Over!";
+            // Optional: Determine winner from finalScores if available
+            // List<dynamic>? finalScores = data['finalScores'];
+            // if (finalScores != null && finalScores.isNotEmpty) {
+            //    finalScores.sort((a, b) => b['score'].compareTo(a['score']));
+            //    winnerMsg = "Game Over! Winner: ${finalScores[0]['username']} (${finalScores[0]['score']})";
+            // }
+
+            // Show dialog and navigate back
+            showDialog(
+              context: context,
+              barrierDismissible: false, // User must acknowledge
+              builder: (BuildContext dialogContext) {
+                return AlertDialog(
+                  title: const Text('Game Finished'),
+                  content: Text(winnerMsg),
+                  actions: <Widget>[
+                    TextButton(
+                      child: const Text('OK'),
+                      onPressed: () {
+                        Navigator.of(dialogContext).pop(); // Close dialog
+                        // Navigate back to settings, clearing the game stack
+                        router.pushAndPopUntil(const SettingsView(), predicate: (_) => false);
+                        // Reset local game state if necessary
+                        gameId = -1;
+                        myPlayerId = -1;
+                        gameFinished = false;
+                         // Trigger another state update after navigation if needed
+                         // Future.microtask(() => context.read<SetStateCubit>().setState());
+                      },
+                    ),
+                  ],
+                );
+              },
+            );
+          } else {
+             // Spectator logic: The setState call above will trigger the SpectatorGameBoard
+             // to rebuild and show its finished state. We might add a small delay
+             // before potentially clearing the spectator state automatically, or let
+             // the user manually stop spectating.
+             print('🏁 Spectator received game finished signal.');
+             // Optionally show a snackbar
+             ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Game #${data["gameId"]} has finished.'), duration: const Duration(seconds: 5)),
+             );
+          }
+          break;
+        // **** END ADDED CASE ****
       }
     } catch (e) {
       print('🎮 Error processing server message: $e');
@@ -11608,6 +11786,13 @@ extension CommunicationApplication on Application {
     if (gameData.isEmpty) {
       return;
     }
+    
+    // **** ADD THIS GUARD ****
+    if (isSpectating || gameId == -1) {
+      print('🎮 Skipping _checkIfPlayerAborted (Spectating or no active game data)');
+      return;
+    }
+    // **** END GUARD ****
 
     // Track if any player's status changed
     bool playerStatusChanged = false;
@@ -13180,37 +13365,38 @@ extension WidgetApplicationSettings on Application {
   // Method to handle spectating a game
   onSpectateGame(BuildContext context, int gameId) async {
     print('🎮 Attempting to spectate game: $gameId');
-    
+
     try {
       final serviceProvider = ServiceProvider.of(context);
-      
+
       // Create a message to request spectating
       Map<String, dynamic> msg = {
         "action": "spectateGame",
         "gameId": gameId,
-        "userName": userName
+        "userName": userName // Send username for logging/display?
       };
-      
+
       // Send the spectate request
       if (serviceProvider.socketService.isConnected) {
         print('🎮 Sending spectate request via socket service');
+
+        // *** SET FLAG BEFORE sending request/setState ***
+        isSpectating = true;
+        spectatedGameId = gameId;
+        gameData = {}; // Clear previous game data immediately
+
         serviceProvider.socketService.sendToServer(msg);
-        
-        // Don't navigate to the game view, just update the UI
+
+        // *** Update the UI AFTER setting the flags ***
+        context.read<SetStateCubit>().setState(); // Update UI to show spectator board
+
         // Show a snackbar to indicate spectating has started
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Spectating game $gameId. Game data will be shown in the console.'),
+            content: Text('👁️ Spectating game #$gameId...'),
             duration: const Duration(seconds: 3),
           ),
         );
-
-        // Update the UI to show we're spectating
-        isSpectating = true;
-        spectatedGameId = gameId;
-
-        // Update the UI to reflect spectating status
-        context.read<SetStateCubit>().setState();
       } else {
         print('❌ Cannot spectate: Not connected to server');
       }
@@ -17166,6 +17352,7 @@ File: lib/top_score/top_score.dart
 import 'dart:convert';
 
 import 'package:flutter/animation.dart';
+import '../states/cubit/state/state_cubit.dart';
 import '../services/http_service.dart';
 import 'languages_top_score.dart';
 import '../startup.dart';
@@ -17195,33 +17382,22 @@ class TopScore with LanguagesTopScore {
     return _standardLanguage;
   }
 
-  Future loadTopScoreFromServer(String gameType) async {
-    // Check if we've already loaded this game type in this session
-    if (_loadedGameTypes[gameType] == true) {
-      print('📊 [TopScore] Already loaded $gameType top scores in this session, skipping duplicate request');
-      return;
-    }
-    
-    // Set the flag immediately to prevent concurrent duplicate requests
-    _loadedGameTypes[gameType] = true;
-    
+  Future<void> loadTopScoreFromServer(String gameType, SetStateCubit cubit) async {
     print('📊 [TopScore] Loading top scores for game type: $gameType');
     try {
-      var httpService= HttpService(baseUrl: localhost);
-      var serverResponse =
-          await httpService.getDB("/GetTopScores?count=20&type=$gameType");
+      var httpService = HttpService(baseUrl: localhost);
+      var serverResponse = await httpService.getDB("/GetTopScores?count=20&type=$gameType");
+      
       if (serverResponse.statusCode == 200) {
-        topScores = jsonDecode(serverResponse.body);
-        print('📊 [TopScore] Successfully loaded ${topScores.length} scores for $gameType');
+        final loadedScores = jsonDecode(serverResponse.body);
+        topScores = loadedScores;
+        print('✅ [TopScore] Loaded ${loadedScores.length} scores for $gameType');
+        cubit.setState(); // Trigger UI update
       } else {
-        // Reset the flag in case of error to allow retrying
-        _loadedGameTypes[gameType] = false;
-        print('⚠️ [TopScore] Failed to load scores for $gameType: Status ${serverResponse.statusCode}');
+        print('⚠️ [TopScore] Failed to load scores (Status ${serverResponse.statusCode})');
       }
     } catch (e) {
-      // Reset the flag in case of error to allow retrying
-      _loadedGameTypes[gameType] = false;
-      print('❌ [TopScore] Error loading top scores: $e');
+      print('❌ [TopScore] Error loading scores: $e');
     }
   }
 
@@ -17698,7 +17874,7 @@ class _ApplicationViewState extends State<ApplicationView>
   }
 
   postFrameCallback(BuildContext context) async {
-    await topScore.loadTopScoreFromServer(app.gameType);
+    await topScore.loadTopScoreFromServer(app.gameType, context.read<SetStateCubit>());
     myState();
     mainPageLoaded = true;
   }
@@ -17802,29 +17978,36 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
   @override
   Widget build(BuildContext context) {
     // Print entire game data for debugging
-    print('🎲 Building spectator board');
+    print('🎲 Building spectator board. Game Finished: ${widget.gameData['gameFinished']}');
 
     // Extract player name(s)
     List<String> playerNames = [];
     if (widget.gameData['userNames'] != null) {
       playerNames = List<String>.from(widget.gameData['userNames']);
     }
-
-    if (playerNames.isEmpty) {
-      playerNames = ['J']; // Default from screenshot
+    if (playerNames.isEmpty && widget.gameData['players'] != null) {
+       // Attempt to get names from player objects if userNames is missing
+       try {
+          playerNames = List<String>.from(widget.gameData['players'].map((p) => p?['username'] ?? 'P?'));
+       } catch (_) { playerNames = ['P1']; } // Fallback
     }
+    if (playerNames.isEmpty) playerNames = ['Player 1'];
 
-    // Get current roll number
+    // Get current roll number and dice values
     int currentRoll = widget.gameData['rollCount'] ?? 0;
-
-    // Extract dice values
     List<int> diceValues = [];
     if (widget.gameData['diceValues'] != null) {
-      diceValues = List<int>.from(widget.gameData['diceValues']);
-      print('🎲 Found dice values: $diceValues');
+      try { // Add try-catch for safety
+         diceValues = List<int>.from(widget.gameData['diceValues']);
+      } catch (e) { print("Error parsing diceValues: $e"); }
     }
 
-    return Column(
+    // Check if game is finished
+    bool isFinished = widget.gameData['gameFinished'] ?? false;
+
+    return Stack( // Use Stack for overlay
+      children: [
+        Column(
       children: [
         // Game status header
         Container(
@@ -17924,7 +18107,42 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
                 ),
               ),
             ),
-          ),
+              ),
+            ),
+            // **** Game Finished Overlay ****
+            if (isFinished)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black.withOpacity(0.5),
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10, spreadRadius: 2)],
+                      ),
+                      child: const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'GAME OVER',
+                            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.red),
+                          ),
+                          SizedBox(height: 10),
+                          Text(
+                            "You can stop spectating from the settings screen.",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 14, color: Colors.black54),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            // **** End Game Finished Overlay ****
+          ],
         ),
       ],
     );

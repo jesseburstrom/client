@@ -1,259 +1,715 @@
-## Jesseburstrom Client/Server Codebase Analysis (Dependency Graphs)
+### Codebase Analysis: jesseburstrom-client
 
-**Objective:** Provide a compact overview of class/function relationships and dependencies, including file references, suitable for AI parsing.
+**Version:** 1.0
+**Date:** 2024-10-27
 
----
-### Backend (Node.js / TypeScript - ./backend/)
----
+**Format:**
+[F] File Path
+  [C] Class Name
+    [f] methodOrFunctionName() -> [Dependency: Class/Function/Module (Location)]
+    [v] propertyName : Type
+    [extends/with/implements] BaseClass/Mixin/Interface (Location)
+  [f] topLevelFunctionName() -> [Dependency: Class/Function/Module (Location)]
 
-**1. Entry Point & Core Setup (`server.ts`)**
-   - **File:** `backend/src/server.ts`
-   - **Responsibilities:** Initializes Express app, HTTP server, Socket.IO server, CORS, static file serving, connects to DB, instantiates services/controllers, sets up core Socket.IO event listeners (`connect`, `disconnect`).
-   - **Dependencies:**
-     - `express`, `cors`, `http`, `socket.io`, `path` (Node modules)
-     - `./db.ts` -> `initializeDbConnection`
-     - `./routes/index.ts` -> `routes()`
-     - `./services/GameService.ts` -> `GameService`
-     - `./services/GameLogService.ts` -> `GameLogService`
-     - `./controllers/GameController.ts` -> `GameController`
-     - `./controllers/PlayerController.ts` -> `PlayerController`
-     - `./controllers/ChatController.ts` -> `ChatController`
-     - `./routes/spectateGameRoute.ts` -> `spectateGameRoute`, `initializeSpectateRoute`
-   - **Interactions:**
-     - Calls `initializeDbConnection()`.
-     - Iterates `routes()` -> `app[method](path, handler)`.
-     - Instantiates `GameLogService`.
-     - Instantiates `GameService` (passes `io`, `gameLogService`).
-     - Instantiates Controllers (passes `gameService`, `gameLogService`, `io`).
-     - Calls `initializeSpectateRoute()` (passes services).
-     - `io.on('connect', ...)`: Sets up socket listeners.
-       - Calls `controller.registerSocketHandlers(socket)` for each controller.
-       - Calls `gameService.handlePlayerDisconnect(socket.id)` on disconnect.
+**--- Backend (Node.js/TypeScript) ---**
 
-**2. Database (`db.ts`)**
-   - **File:** `backend/src/db.ts`
-   - **Responsibilities:** Manages MongoDB connection.
-   - **Exports:**
-     - `initializeDbConnection`: Connects to MongoDB.
-     - `getDbConnection`: Returns a DB instance for a specific database name.
-   - **Dependencies:** `mongodb` (Node module)
+[F] backend/src/server.ts
+  [f] (Top Level Script)
+    -> express (External)
+    -> routes/index -> routes() ([F]backend/src/routes/index.ts)
+    -> db -> initializeDbConnection() ([F]backend/src/db.ts)
+    -> path (External: Node)
+    -> cors (External)
+    -> socket.io -> Server ([F]backend/node_modules/socket.io)
+    -> http -> createServer (External: Node)
+    -> services/GameService ([F]backend/src/services/GameService.ts)
+    -> services/GameLogService ([F]backend/src/services/GameLogService.ts)
+    -> services/TopScoreService ([F]backend/src/services/TopScoreService.ts)
+    -> controllers/GameController ([F]backend/src/controllers/GameController.ts)
+    -> controllers/PlayerController ([F]backend/src/controllers/PlayerController.ts)
+    -> controllers/ChatController ([F]backend/src/controllers/ChatController.ts)
+    -> routes/spectateGameRoute -> spectateGameRoute, initializeSpectateRoute ([F]backend/src/routes/spectateGameRoute.ts)
+    - Creates: Express app, httpServer, io (Socket.IO Server)
+    - Creates: gameLogService, topScoreService, gameService, gameController, playerController, chatController
+    - Configures: CORS, express.json, express.static
+    - Loops through `routes()` result, calls `app[method](path, handler)`
+    - Calls: `initializeSpectateRoute(gameService, gameLogService)`
+    - Sets up Socket.IO connection ('connect' event)
+      - Inside 'connect':
+        -> socket.emit('welcome')
+        -> socket.on('echo', ...) -> socket.emit('echo')
+        -> gameController.registerSocketHandlers(socket)
+        -> playerController.registerSocketHandlers(socket)
+        -> chatController.registerSocketHandlers(socket)
+        -> socket.on('sendToServer', ...)
+        -> socket.on('sendToClients', ...)
+        -> socket.on('disconnect', ...) -> gameService.handlePlayerDisconnect(socket.id)
+    - Defines HTTP GET '/flutter', '*' routes -> res.sendFile()
+    - Calls: `initializeDbConnection()`
+    - Calls: `httpServer.listen()`
 
-**3. Routes (`./routes/*.ts`)**
-   - **File:** `backend/src/routes/index.ts`
-     - **Responsibilities:** Aggregates all route definitions.
-     - **Imports:** All other files in `./routes/`.
-     - **Exports:** `routes()` function returning an array of route objects.
-   - **File:** `backend/src/routes/logInRoute.ts`, `signUpRoute.ts`, `logRoute.ts`, `getLogRoute.ts`
-     - **Responsibilities:** Define API endpoints for user auth and logging.
-     - **Dependencies:** `express`, `bcrypt`, `jsonwebtoken` (Node modules), `../db.ts` -> `getDbConnection`.
-     - **Interactions:** Access MongoDB via `getDbConnection`. Use `bcrypt` for hashing/comparison. Use `jwt` for token signing/verification.
-   - **File:** `backend/src/routes/getTopScores.ts`, `updateTopScore.ts`
-     - **Responsibilities:** Define API endpoints for high scores.
-     - **Dependencies:** `express`, `../db.ts` -> `getDbConnection`.
-     - **Interactions:** Access MongoDB (`top-scores` DB) via `getDbConnection`.
-   - **File:** `backend/src/routes/spectateGameRoute.ts`
-     - **Responsibilities:** Define API endpoint for getting spectator data; holds service references.
-     - **Dependencies:** `express`, `../services/GameService.ts`, `../services/GameLogService.ts`.
-     - **Exports:** `spectateGameRoute` (object), `initializeSpectateRoute` (function).
-     - **Interactions (Handler):** Uses injected `GameService` (`getGame`) and `GameLogService` (`getGameLog`).
+[F] backend/src/db.ts
+  [v] client : MongoClient (External: mongodb)
+  [f] initializeDbConnection() -> MongoClient.connect (External: mongodb)
+  [f] getDbConnection(dbName: string) : Db -> client.db() (External: mongodb)
 
-**4. Controllers (`./controllers/*.ts`)**
-   - **File:** `backend/src/controllers/GameController.ts`
-     - **Responsibilities:** Handles game logic Socket.IO events (`requestGame`, `requestJoinGame`, `sendDices`, `sendSelection`, `useRegret`, `useExtraMove`, `spectateGame`).
-     - **Dependencies:** `socket.io` (types), `../services/GameService.ts`, `../services/GameLogService.ts`, `../models/Player.ts`, `../models/Game.ts`, `../utils/yatzyMapping.ts`.
-     - **Interactions:**
-       - Constructor takes `GameService`, `GameLogService`.
-       - `registerSocketHandlers` sets up listeners for specific actions.
-       - Calls `gameService.createOrJoinGame()`, `gameService.getGame()`, `gameService.joinGame()`, `gameService.removeGame()`, `gameService.processDiceRoll()`, `gameService.processSelection()`, `gameService.logRegret()`, `gameService.logExtraMove()`, `gameLogService.getGameLog()`, `gameService.addSpectator()`.
-       - Uses `PlayerFactory.createPlayer()`.
-       - Uses `getSelectionLabel()`, `getSelectionIndex()`.
-       - Uses `game.applySelection()`, `game.toJSON()`.
-   - **File:** `backend/src/controllers/PlayerController.ts`
-     - **Responsibilities:** Handles player-specific Socket.IO events (`getId`).
-     - **Dependencies:** `socket.io` (types), `../services/GameService.ts`, `../services/GameLogService.ts`.
-     - **Interactions:**
-       - Constructor takes `GameService`, `GameLogService`.
-       - `registerSocketHandlers` sets up listeners.
-       - Calls `gameService.broadcastGameListToPlayer()`.
-   - **File:** `backend/src/controllers/ChatController.ts`
-     - **Responsibilities:** Handles chat message Socket.IO events (`chatMessage`).
-     - **Dependencies:** `socket.io` (types), `../services/GameService.ts`.
-     - **Interactions:**
-       - Constructor takes `io`, `GameService`.
-       - `registerSocketHandlers` sets up listeners.
-       - Uses `gameService.getGame()` to find players.
-       - Uses `io.to(playerId).emit()` to send messages.
+[F] backend/src/routes/index.ts
+  [f] routes() -> Array<RouteObject>
+    -> ./logInRoute ([F]backend/src/routes/logInRoute.ts)
+    -> ./logRoute ([F]backend/src/routes/logRoute.ts)
+    -> ./getLogRoute ([F]backend/src/routes/getLogRoute.ts)
+    -> ./signUpRoute ([F]backend/src/routes/signUpRoute.ts)
+    -> ./getTopScores ([F]backend/src/routes/getTopScores.ts)
+    -> ./updateTopScore ([F]backend/src/routes/updateTopScore.ts)
+    <- backend/src/server.ts
 
-**5. Services (`./services/*.ts`)**
-   - **File:** `backend/src/services/GameService.ts`
-     - **Responsibilities:** Core game state management (creating, finding, joining, removing games), player connection/disconnection handling, processing game actions (rolls, selections), managing spectators, broadcasting updates.
-     - **Dependencies:** `../models/Game.ts`, `../models/Player.ts`, `socket.io` (types), `./GameLogService.ts`.
-     - **Interactions:**
-       - Constructor takes `io`, `GameLogService`.
-       - Manages `games` Map, `spectators` Map.
-       - Calls `gameLogService.logGameStart()`, `gameLogService.logMove()`, `gameLogService.logGameEnd()`, `gameLogService.logRegret()`, `gameLogService.logExtraMove()`.
-       - Creates/manipulates `Game` and `Player` instances.
-       - Uses `io.emit()`, `io.to().emit()` extensively for broadcasting/sending messages (`onServerMsg`, `onClientMsg`).
-   - **File:** `backend/src/services/GameLogService.ts`
-     - **Responsibilities:** Handles interaction with the MongoDB `game_moves` collection for logging game events.
-     - **Dependencies:** `mongodb` (types), `../db.ts` -> `getDbConnection`, `../models/Game.ts`.
-     - **Interactions:**
-       - Uses `getDbConnection()` to get the DB instance.
-       - Calls `db.collection().replaceOne()`, `db.collection().updateOne()`, `db.collection().findOne()`, `db.collection().insertOne()`.
-     - **Exports:** `GameMove`, `GameLog` interfaces.
+[F] backend/src/routes/logInRoute.ts
+  [v] logInRoute : { path, method, handler }
+    [f] handler(req, res)
+      -> bcrypt (External)
+      -> jsonwebtoken (External)
+      -> ../db -> getDbConnection() ([F]backend/src/db.ts)
+      -> db.collection('users').findOne()
+      -> bcrypt.compare()
+      -> jwt.sign()
+      -> res.status().json() / res.sendStatus()
 
-**6. Models (`./models/*.ts`)**
-   - **File:** `backend/src/models/Game.ts`
-     - **Responsibilities:** Represents the state of a single game instance.
-     - **Dependencies:** `./Player.ts`, `uuid`, `../utils/yatzyMapping.ts`.
-     - **Interactions:** Contains `Player` objects. Uses `PlayerFactory`. Calls `player.calculateScores()`, `player.hasCompletedGame()`. Uses `getSelectionIndex()`.
-   - **File:** `backend/src/models/Player.ts`
-     - **Responsibilities:** Represents the state of a single player within a game.
-     - **Dependencies:** `./BoardCell.ts`, `../utils/gameConfig.ts`.
-     - **Interactions:** Contains `BoardCell` objects. Uses `GameConfig`.
-   - **File:** `backend/src/models/BoardCell.ts`
-     - **Responsibilities:** Represents a single cell on the scorecard. Minimal dependencies.
-   - **File:** `backend/src/models/Dice.ts`
-     - **Responsibilities:** Basic dice rolling logic (appears less used server-side, client sends results). Minimal dependencies.
+[F] backend/src/routes/logRoute.ts
+  [v] logRoute : { path, method, handler }
+    [f] handler(req, res)
+      -> jsonwebtoken (External)
+      -> ../db -> getDbConnection() ([F]backend/src/db.ts)
+      -> jwt.verify()
+      -> db.collection('logs').findOneAndUpdate()
+      -> res.status().json()
 
-**7. Utils (`./utils/*.ts`)**
-   - **File:** `backend/src/utils/gameConfig.ts`
-     - **Responsibilities:** Provides configuration (labels, thresholds, counts) for different Yatzy game types.
-     - **Used by:** `Player.ts`.
-   - **File:** `backend/src/utils/yatzyMapping.ts`
-     - **Responsibilities:** Maps between cell labels (strings) and cell indices (numbers).
-     - **Used by:** `GameController.ts`, `Game.ts`.
-   - **File:** `backend/src/utils/index.ts`
-     - **Responsibilities:** Generic utility functions. (Appears less used in core logic shown).
+[F] backend/src/routes/getLogRoute.ts
+  [v] getLogRoute : { path, method, handler }
+    [f] handler(req, res)
+      -> jsonwebtoken (External)
+      -> ../db -> getDbConnection() ([F]backend/src/db.ts)
+      -> jwt.verify()
+      -> db.collection('logs').find().toArray()
+      -> res.status().json()
 
----
-### Frontend (Flutter / Dart - ./lib/)
----
+[F] backend/src/routes/signUpRoute.ts
+  [v] signUpRoute : { path, method, handler }
+    [f] handler(req, res)
+      -> bcrypt (External)
+      -> jsonwebtoken (External)
+      -> ../db -> getDbConnection() ([F]backend/src/db.ts)
+      -> db.collection('users').findOne()
+      -> bcrypt.hash()
+      -> db.collection('users').insertOne()
+      -> db.collection('logs').insertOne()
+      -> jwt.sign()
+      -> res.status().json() / res.sendStatus()
 
-**1. Entry Point & Core Setup**
-   - **File:** `lib/main.dart`
-     - **Responsibilities:** Initializes Flutter bindings, `SharedPrefProvider`, Dependency Injection (`configureInjection`), BLoC providers (`LanguageBloc`, `SetStateCubit`), runs `AppWidget`.
-     - **Dependencies:** `flutter/material.dart`, `flutter_bloc`, `injectable`, `./injection.dart`, `./shared_preferences.dart`, `./core/app_widget.dart`, `./states/*`.
-   - **File:** `lib/core/app_widget.dart`
-     - **Responsibilities:** Root widget. Sets up `MaterialApp.router`. Initializes legacy global state objects (`app`, `dices`, `chat`, `topScore`, etc.). Initializes `ServiceProvider`. Connects `SocketService` in `addPostFrameCallback`. Links `SocketService` to `Application` instance (`app.setSocketService`).
-     - **Dependencies:** `flutter/material.dart`, `auto_route`, `flutter_bloc`, `../application/*`, `../dices/*`, `../chat/*`, `../top_score/*`, `../scroll/*`, `../tutorial/*`, `../injection.dart`, `../router/router.dart`, `../services/service_provider.dart`, `../startup.dart`, `../states/cubit/state/state_cubit.dart`.
-   - **File:** `lib/startup.dart`
-     - **Responsibilities:** Defines global variables (legacy state management, URLs, flags like `isOnline`). Initializes instances of legacy classes (`inputItems`, etc.).
-     - **Dependencies:** References many classes (`InputItems`, `Tutorial`, `TopScore`, `AnimationsScroll`, `Application`, `Chat`, `Dices`).
+[F] backend/src/routes/getTopScores.ts
+  [v] getTopScores : { path, method, handler }
+    [f] handler(req, res)
+      -> ../db -> getDbConnection() ([F]backend/src/db.ts)
+      -> db.collection(...).find().sort().toArray()
+      -> res.status().json() / res.sendStatus()
 
-**2. Dependency Injection & Router**
-   - **File:** `lib/injection.dart`, `lib/injection.config.dart`, `lib/core/injectable_modules.dart`
-     - **Responsibilities:** Configures GetIt for dependency injection using `injectable`. Primarily injects `AppRouter`.
-     - **Dependencies:** `get_it`, `injectable`, `../router/router.dart`.
-   - **File:** `lib/router/router.dart`, `lib/router/router.gr.dart`
-     - **Responsibilities:** Defines navigation routes using `auto_route`. Routes: `SettingsView`, `ApplicationView`.
-     - **Dependencies:** `auto_route`, `../views/*.dart`.
+[F] backend/src/routes/updateTopScore.ts
+  [v] updateTopScore : { path, method, handler }
+    [f] handler(req, res)
+      -> ../db -> getDbConnection() ([F]backend/src/db.ts)
+      -> db.collection(...).insertOne()
+      -> db.collection(...).find().sort().toArray()
+      -> res.status().json() / res.sendStatus()
 
-**3. Views**
-   - **File:** `lib/views/settings_view.dart`
-     - **Responsibilities:** UI for settings, creating/joining games, viewing available games, spectating.
-     - **Dependencies:** `flutter/material.dart`, `auto_route`, `flutter_bloc`, `../application/widget_application_settings.dart`, `../startup.dart`, `../states/cubit/state/state_cubit.dart`.
-     - **Interactions:** Uses `app.widgetScaffoldSettings()` to build UI. Uses `SetStateCubit` for updates. Calls `app.onStartGameButton()`, `app.onAttemptJoinGame()`, `app.onSpectateGame()`. Includes `SpectatorGameBoard`.
-   - **File:** `lib/views/application_view.dart`
-     - **Responsibilities:** Main game view UI container.
-     - **Dependencies:** `flutter/material.dart`, `auto_route`, `flutter_bloc`, `../application/widget_application_scaffold.dart`, `../startup.dart`, `../states/cubit/state/state_cubit.dart`, `../tutorial/tutorial.dart`, `../scroll/animations_scroll.dart`.
-     - **Interactions:** Uses `app.widgetScaffold()` to build UI. Initializes `app.setup()`, `tutorial.setup()`, `app.animation.setupAnimation()`. Uses `SetStateCubit`. Calls `topScore.loadTopScoreFromServer()`.
+[F] backend/src/routes/spectateGameRoute.ts
+  [v] gameServiceInstance : GameService ([F]backend/src/services/GameService.ts)
+  [v] gameLogServiceInstance : GameLogService ([F]backend/src/services/GameLogService.ts)
+  [f] initializeSpectateRoute(gs, gls) <- backend/src/server.ts
+  [v] spectateGameRoute : { path, method, handler }
+    [f] handler(req, res)
+      -> gameServiceInstance.getGame()
+      -> gameLogServiceInstance.getGameLog()
+      -> game.toJSON()
+      -> res.status().json()
 
-**4. Application Logic (Legacy Global State)**
-   - **File:** `lib/application/application.dart`
-     - **Responsibilities:** Holds main legacy game state (board, players, game type, etc.). References other components (`Dices`, `InputItems`, `AnimationsApplication`). Provides callbacks to `Dices`. Links to `SocketService`.
-     - **Dependencies:** `flutter/material.dart`, `flutter_bloc`, `./application_functions_internal.dart`, `../dices/dices.dart`, `../dices/unity_communication.dart`, `../input_items/input_items.dart`, `../services/socket_service.dart`, `../startup.dart`, `../states/cubit/state/state_cubit.dart`, `./animations_application.dart`, `./languages_application.dart`.
-     - **Interactions:** `setup()` initializes board state. `setSocketService()` stores service ref. `callbackUpdateDiceValues()`, `callbackUnityCreated()`, `callbackCheckPlayerToMove()` are called by `Dices`. `updateDiceValues()` calls `yatzyFunctions` and triggers state update.
-   - **File:** `lib/application/communication_application.dart` (Extension)
-     - **Responsibilities:** Handles incoming socket messages (`callbackOnServerMsg`, `callbackOnClientMsg`) by updating the state in `Application`. Handles chat submission (`chatCallbackOnSubmitted`).
-     - **Dependencies:** `flutter/material.dart`, `flutter_bloc`, `../chat/chat.dart`, `../injection.dart`, `../router/router.dart`, `../router/router.gr.dart`, `../services/service_provider.dart`, `../shared_preferences.dart`, `../startup.dart`, `../states/cubit/state/state_cubit.dart`, `./application.dart`.
-     - **Interactions:** Calls `router`, `SetStateCubit`, reads `socketService`, interacts with `gameDices`, updates `app` state (`gameData`, `myPlayerId`, etc.). Calls `app.setup()`.
-   - **File:** `lib/application/application_functions_internal.dart` (Extension)
-     - **Responsibilities:** Contains game interaction logic (`cellClick`, `applyLocalSelection`, `colorBoard`).
-     - **Dependencies:** `flutter/material.dart`, `provider`, `../dices/unity_communication.dart`, `../startup.dart`, `./application.dart`, `../utils/yatzy_mapping_client.dart`, `../states/cubit/state/state_cubit.dart`.
-     - **Interactions:** Called by UI gestures. Calls `socketService.sendToClients()`. Calls `getSelectionLabel()`. Updates `app` state (`appColors`, `fixedCell`, `cellValue`, `appText`). Calls `gameDices.sendResetToUnity()`, `gameDices.clearDices()`. Calls `SetStateCubit`.
-   - **File:** `lib/application/application_functions_internal_calc_dice_values.dart` (Extension)
-     - **Responsibilities:** Contains pure functions to calculate potential scores based on current dice values.
-     - **Dependencies:** `./application.dart`.
-     - **Interactions:** Reads `app.gameDices.diceValue`. Called by `app.updateDiceValues()`.
-   - **File:** `lib/application/widget_application_scaffold.dart` (Extension)
-     - **Responsibilities:** Builds the main scaffold widget for the application view. Includes layout logic, floating action buttons.
-     - **Dependencies:** `auto_route`, `flutter/material.dart`, `flutter_bloc`, `./communication_application.dart`, `../chat/widget_chat.dart`, `../dices/unity_communication.dart`, `../dices/widget_dices.dart`, `../top_score/widget_top_scores.dart`, `../router/router.gr.dart`, `../scroll/widget_scroll.dart`, `../services/service_provider.dart`, `../startup.dart`, `../states/cubit/state/state_cubit.dart`, `./application.dart`, `./widget_application.dart`.
-     - **Interactions:** Calls other widget builders (`WidgetDices`, `WidgetTopScore`, `WidgetSetupGameBoard`, etc.). Handles FAB presses (calls `app.setup`, `gameDices.rollDices`, interacts with router, sends messages via `socketService`).
-   - **File:** `lib/application/widget_application_settings.dart` (Extension)
-     - **Responsibilities:** Builds the settings view UI. Includes logic for displaying available games, joining games, spectating.
-     - **Dependencies:** `auto_route`, `flutter/material.dart`, `flutter_bloc`, `../dices/unity_communication.dart`, `../router/router.gr.dart`, `../services/service_provider.dart`, `../shared_preferences.dart`, `../startup.dart`, `../states/bloc/language/language_bloc.dart`, `../states/bloc/language/language_event.dart`, `../states/cubit/state/state_cubit.dart`, `../widgets/spectator_game_board.dart`, `./application.dart`.
-     - **Interactions:** Reads `app.games`. Calls `inputItems.widgetButton`, `inputItems.widgetCheckbox`, etc. Calls `onAttemptJoinGame`, `onStartGameButton`, `onSpectateGame`, `onChangeUserName`. Interacts with `LanguageBloc`, `SetStateCubit`. Includes `SpectatorGameBoard`.
-   - **File:** `lib/application/widget_application.dart` (`WidgetSetupGameBoard`, `WidgetDisplayGameStatus`)
-     - **Responsibilities:** Builds the game board UI and the game status display.
-     - **Dependencies:** `dart:math`, `auto_size_text`, `flutter/material.dart`, `flutter_bloc`, `./application_functions_internal.dart`, `../dices/unity_communication.dart`, `../startup.dart`, `../states/cubit/state/state_cubit.dart`, `./languages_application.dart`.
-     - **Interactions:** Reads `app` state (`nrPlayers`, `totalFields`, `board*` arrays, `appText`, `appColors`, `focusStatus`). Calls `app.cellClick`. Uses `SetStateCubit`.
+[F] backend/src/controllers/ChatController.ts
+  [C] ChatController
+    [v] io : Server (External: socket.io)
+    [v] gameService : GameService ([F]backend/src/services/GameService.ts)
+    [f] constructor(io, gameService) <- backend/src/server.ts
+    [f] registerSocketHandlers(socket) <- backend/src/server.ts
+      -> socket.on('sendToClients', ...) -> this.handleChatMessage()
+      -> socket.on('sendToServer', ...) -> this.handleServerChatMessage()
+    [f] handleChatMessage(socket, data)
+      -> gameService.getGame()
+      -> io.to(playerId).emit('onClientMsg')
+    [f] handleServerChatMessage(socket, data)
+      -> gameService.getGame()
+      -> io.to(playerId).emit('onClientMsg')
+      -> socket.to(room).emit('onClientMsg')
+    [f] broadcastToPlayersInSameGame(socket, data)
+      -> gameService.getAllGames()
+      -> io.to(playerId).emit('onClientMsg')
 
-**5. Services (Modern)**
-   - **File:** `lib/services/service_provider.dart`
-     - **Responsibilities:** InheritedWidget to provide access to modern services (`SocketService`, `GameService`). Initializes these services.
-     - **Dependencies:** `flutter/material.dart`, `./socket_service.dart`, `./game_service.dart`.
-   - **File:** `lib/services/socket_service.dart`
-     - **Responsibilities:** Manages the Socket.IO connection, event handling (listening and emitting), holds socket ID. Replaces legacy `Net`.
-     - **Dependencies:** `flutter/material.dart`, `socket_io_client`, `flutter_bloc`, `../application/communication_application.dart`, `dart:convert`, `../models/game.dart`, `../states/cubit/state/state_cubit.dart`, `../startup.dart`.
-     - **Interactions:** Connects to the server URL from `startup.dart`. Emits events (`sendToServer`, `sendToClients`). Listens for events (`onConnect`, `onDisconnect`, `onServerMsg`, `onClientMsg`, etc.). Calls legacy `app.callbackOnServerMsg`/`app.callbackOnClientMsg`. Uses `SetStateCubit`.
-   - **File:** `lib/services/http_service.dart`
-     - **Responsibilities:** Handles HTTP requests (GET, POST, UPDATE, DELETE). Replaces legacy `Net`.
-     - **Dependencies:** `dart:convert`, `package:http/http.dart`.
-     - **Interactions:** Makes HTTP calls to the base URL from `startup.dart`.
-   - **File:** `lib/services/game_service.dart`
-     - **Responsibilities:** Intended to manage client-side game logic (currently less utilized, `Application` holds most state). Listens for updates from `SocketService`.
-     - **Dependencies:** `../models/game.dart`, `../models/board_cell.dart`, `./socket_service.dart`.
-     - **Interactions:** Takes `SocketService` in constructor. `_handleGameUpdate` updates internal `_game` state. Provides methods like `createGame`, `joinGame`, `rollDice`, `selectCell` which call corresponding `SocketService` methods.
+[F] backend/src/controllers/GameController.ts
+  [C] GameController
+    [v] gameService : GameService ([F]backend/src/services/GameService.ts)
+    [v] gameLogService : GameLogService ([F]backend/src/services/GameLogService.ts)
+    [f] constructor(gameService, gameLogService) <- backend/src/server.ts
+    [f] registerSocketHandlers(socket) <- backend/src/server.ts
+      -> socket.on('sendToServer', ...) -> handles various actions (requestGame, joinGame, useRegret, etc.)
+      -> socket.on('sendToClients', ...) -> handles sendDices, sendSelection
+    [f] handleRequestGame(socket, data) -> PlayerFactory.createPlayer(), gameService.createOrJoinGame()
+    [f] handleRequestJoinGame(socket, data) -> gameService.getGame(), PlayerFactory.createPlayer(), gameService.joinGame(), gameService.notifyGameUpdate(), gameService.broadcastGameList()
+    [f] handleRemoveGame(socket, data) -> gameService.getGame(), gameService.removeGame(), gameService.broadcastGameList()
+    [f] handleSendDices(socket, data) -> gameService.getGame(), gameService.processDiceRoll()
+    [f] handleSendSelection(socket, data) -> gameService.getGame(), gameService.processSelection(), gameService.forwardSelectionToPlayers()
+    [f] handleUseRegret(socket, data) -> gameService.getGame(), gameService.logRegret(), gameService.notifyGameUpdate()
+    [f] handleUseExtraMove(socket, data) -> gameService.getGame(), gameService.logExtraMove(), gameService.notifyGameUpdate()
+    [f] handleSpectateGame(socket, data) -> gameService.getGame(), gameLogService.getGameLog(), game.toJSON(), gameLogService.logSpectate(), socket.emit('onServerMsg'), gameService.addSpectator()
 
-**6. State Management**
-   - **File:** `lib/states/bloc/language/*`
-     - **Responsibilities:** Manages the selected language using `flutter_bloc`. Persists state using `SharedPrefProvider`.
-     - **Dependencies:** `injectable`, `flutter_bloc`, `../../shared_preferences.dart`.
-   - **File:** `lib/states/cubit/state/state_cubit.dart`
-     - **Responsibilities:** Simple Cubit used globally to trigger UI rebuilds (equivalent to `setState`).
-     - **Dependencies:** `flutter_bloc`.
+[F] backend/src/controllers/PlayerController.ts
+  [C] PlayerController
+    [v] gameService : GameService ([F]backend/src/services/GameService.ts)
+    [v] gameLogService : GameLogService ([F]backend/src/services/GameLogService.ts)
+    [v] playerRegistry : Map<string, boolean>
+    [f] constructor(gameService, gameLogService) <- backend/src/server.ts
+    [f] registerSocketHandlers(socket) <- backend/src/server.ts
+      -> socket.on('sendToServer', ...) -> this.handleGetId()
+    [f] handleGetId(socket) -> playerRegistry.set(), socket.emit('onServerMsg'), gameService.broadcastGameListToPlayer()
 
-**7. Models**
-   - **File:** `lib/models/game.dart`, `player.dart`, `board_cell.dart`
-     - **Responsibilities:** Client-side data models representing game, player, and cell state. Simpler than server-side counterparts.
-     - **Dependencies:** `flutter/foundation.dart`.
-     - **Interactions:** `Game.fromJson` used in `SocketService` (or `Application`) to update state from server data. `Player.calculateScores` used locally.
+[F] backend/src/services/GameLogService.ts
+  [C] GameLogService
+    [f] constructor() <- backend/src/server.ts
+    [f] getCollection() : Collection<GameLog> -> getDbConnection().collection() ([F]backend/src/db.ts)
+    [f] getDatabaseName()
+    [f] getCollectionName()
+    [f] logGameStart(game: Game) -> this.getCollection().replaceOne()
+    [f] logMove(gameId, move: GameMove) -> this.getCollection().updateOne(), this.getCollection().findOne(), this.getCollection().insertOne()
+    [f] logGameEnd(gameId, finalScores) -> this.getCollection().updateOne()
+    [f] getGameLog(gameId) : Promise<GameLog | null> -> this.getCollection().findOne()
+    [f] logSpectate(gameId, spectatorId, spectatorName) -> this.getGameLog(), this.getCollection().updateOne()
 
-**8. UI Components & Features**
-   - **File:** `lib/dices/*`
-     - **Responsibilities:** Manages dice UI (2D/3D), dice state (`diceValue`, `holdDices`), communication with Unity (`flutter_unity_widget`).
-     - **Dependencies:** `dart:math`, `flutter/cupertino.dart`, `flutter_unity_widget`, `../input_items/input_items.dart`, `dart:convert`, `./unity_message.dart`.
-     - **Interactions:** `WidgetDices` displays dice. `Dices` class holds state, `rollDices` performs client-side roll. `UnityCommunication` extension sends/receives messages to/from Unity. Calls `callbackUpdateDiceValues`, `callbackUnityCreated`.
-   - **File:** `lib/chat/*`
-     - **Responsibilities:** Manages chat UI and local message list.
-     - **Dependencies:** `flutter/cupertino.dart`, `../input_items/input_items.dart`.
-     - **Interactions:** `WidgetChat` displays messages and input field. `Chat` class holds `messages`. `onSubmitted` calls `app.chatCallbackOnSubmitted`.
-   - **File:** `lib/top_score/*`
-     - **Responsibilities:** Fetches and displays top scores.
-     - **Dependencies:** `dart:convert`, `flutter/animation.dart`, `../services/http_service.dart`, `../startup.dart`.
-     - **Interactions:** `WidgetTopScore` displays the list. `TopScore` class uses `HttpService` (`getDB`, `postDB`) to interact with the backend API.
-   - **File:** `lib/scroll/*`
-     - **Responsibilities:** Displays scrolling text animation.
-     - **Dependencies:** `animated_text_kit`, `flutter/material.dart`, `../startup.dart`.
-   - **File:** `lib/tutorial/*`
-     - **Responsibilities:** Provides tutorial overlay arrows.
-     - **Dependencies:** `flutter/material.dart`.
-   - **File:** `lib/input_items/input_items.dart`
-     - **Responsibilities:** Reusable UI input widgets (buttons, checkboxes, text fields, etc.).
-     - **Dependencies:** `flutter/material.dart`.
-   - **File:** `lib/widgets/spectator_game_board.dart`
-     - **Responsibilities:** Displays the game board state for a spectator based on received `gameData`.
-     - **Dependencies:** `flutter/material.dart`.
+[F] backend/src/services/GameService.ts
+  [C] GameService
+    [v] games : Map<number, Game>
+    [v] spectators : Map<number, Set<string>>
+    [v] gameIdCounter : number
+    [v] io : Server (External: socket.io)
+    [v] gameLogService : GameLogService ([F]backend/src/services/GameLogService.ts)
+    [v] topScoreService : TopScoreService ([F]backend/src/services/TopScoreService.ts)
+    [f] constructor(io, gameLogService, topScoreService) <- backend/src/server.ts
+    [f] addSpectator(gameId, spectatorId) -> games.get(), spectators.set/get(), game.toJSON(), io.to().emit('onServerMsg')
+    [f] removeSpectator(spectatorId) -> spectators.delete()
+    [f] createGame(gameType, maxPlayers) : Game -> new Game(), games.set(), gameLogService.logGameStart()
+    [f] findAvailableGame(gameType, maxPlayers) : Game | null -> games.values() iteration
+    [f] getGame(gameId) : Game | undefined -> games.get()
+    [f] getAllGames() : Game[] -> Array.from(games.values())
+    [f] removeGame(gameId) : boolean -> games.get(), game.players.map(), player.getScore(), gameLogService.logGameEnd(), games.delete()
+    [f] joinGame(gameId, player: Player) : Game | null -> games.get(), game.addPlayer(), gameLogService.logGameStart()
+    [f] handlePlayerDisconnect(playerId) <- backend/src/server.ts (socket disconnect)
+      -> games iteration, game.findPlayerIndex(), gameLogService.logMove(), game.markPlayerAborted(), this.handleGameFinished(), this.notifyGameUpdate(), this.broadcastGameList(), this.removeSpectator()
+    [f] broadcastGameList() -> games.values().map(game.toJSON()), io.emit('onServerMsg')
+    [f] broadcastGameListToPlayer(playerId) -> games.values().map(game.toJSON()), io.to(playerId).emit('onServerMsg')
+    [f] notifyGameUpdate(game: Game) -> game.toJSON(), io.to(player.id).emit('onServerMsg'), spectators.get(), io.to(spectatorId).emit('onServerMsg')
+    [f] handlePlayerStartingNewGame(playerId) -> this.handlePlayerDisconnect()
+    [f] handlePlayerAbort(playerId) -> this.handlePlayerDisconnect()
+    [f] handleGameFinished(game: Game) -> game.players.map(), player.getScore(), gameLogService.logGameEnd(), topScoreService.updateTopScore(), this.notifyGameFinished(), games.delete(), spectators.delete(), this.broadcastGameList()
+    [f] notifyGameFinished(game: Game) -> game.toJSON(), io.to(player.id).emit('onServerMsg'), spectators.get(), io.to(spectatorId).emit('onServerMsg')
+    [f] processDiceRoll(gameId, playerId, diceValues, keptDice) -> games.get(), game.findPlayerIndex(), gameLogService.logMove(), game.setDiceValues(), game.incrementRollCount(), io.to(player.id).emit('onClientMsg'), spectators.get(), io.to(spectatorId).emit('onClientMsg'), this.notifyGameUpdate()
+    [f] processSelection(gameId, playerId, selectionLabel, score) -> games.get(), game.findPlayerIndex(), gameLogService.logMove(), game.applySelection(), game.isGameFinished(), this.handleGameFinished(), game.setDiceValues(), game.advanceToNextActivePlayer(), this.notifyGameUpdate()
+    [f] forwardSelectionToPlayers(gameId, senderId, selectionData) -> games.get(), getSelectionLabel(), game.findPlayerIndex(), io.to(player.id).emit('onClientMsg')
+    [f] createOrJoinGame(gameType, maxPlayers, player: Player) : Game -> this.handlePlayerStartingNewGame(), this.findAvailableGame(), this.createGame(), game.addPlayer(), gameLogService.logGameStart(), this.notifyGameUpdate(), this.broadcastGameList()
+    [f] logRegret(gameId, playerId) -> games.get(), game.findPlayerIndex(), gameLogService.logMove()
+    [f] logExtraMove(gameId, playerId) -> games.get(), game.findPlayerIndex(), gameLogService.logMove()
 
-**9. Utils & Shared Preferences**
-   - **File:** `lib/utils/yatzy_mapping_client.dart`
-     - **Responsibilities:** Client-side mapping between cell labels and indices. *Must match server version.*
-     - **Used By:** `ApplicationFunctionsInternal`.
-   - **File:** `lib/shared_preferences.dart`
-     - **Responsibilities:** Wrapper around `shared_preferences` package for storing/retrieving simple key-value data.
-     - **Dependencies:** `dart:convert`, `shared_preferences`.
-     - **Used By:** `main.dart`, `LanguageBloc`, `communication_application.dart`.
+[F] backend/src/services/TopScoreService.ts
+  [C] TopScoreService
+    [f] constructor() <- backend/src/server.ts
+    [f] getDb() : Db -> getDbConnection() ([F]backend/src/db.ts)
+    [f] getCollection(gameType) : Collection<TopScoreEntry> -> this.getDb().collection()
+    [f] getTopScores(gameType, limit) : Promise<TopScoreEntry[]> -> this.getCollection().find().sort().limit().toArray()
+    [f] updateTopScore(gameType, name, score) : Promise<boolean> -> this.getCollection().insertOne()
 
----
-**(End of Analysis)**
+[F] backend/src/models/BoardCell.ts
+  [C] BoardCell
+    [v] index, label, value, fixed, isNonScoreCell
+    [f] constructor()
+    [f] toJSON() : any
+    [sf] fromJson(data, defaultLabel) : BoardCell -> new BoardCell()
+
+[F] backend/src/models/Dice.ts
+  [C] Dice
+    [v] values : number[]
+    [v] diceCount : number
+    [f] constructor()
+    [f] roll() : number[] -> Math.random()
+    [f] rollSelected(keptDice: boolean[]) : number[] -> Math.random()
+    [f] getValues() : number[]
+    [f] setValues(values: number[])
+    [f] reset()
+
+[F] backend/src/models/Game.ts
+  [C] Game
+    [v] id, gameType, players: Player[], maxPlayers, connectedPlayers, gameStarted, gameFinished, playerToMove, diceValues: number[], userNames: string[], gameId, playerIds: string[], abortedPlayers: boolean[], rollCount: number, turnNumber: number
+    -> PlayerFactory ([F]backend/src/models/Player.ts)
+    -> uuidv4 (External: uuid)
+    -> getSelectionIndex ([F]backend/src/utils/yatzyMapping.ts)
+    [f] constructor(id, gameType, maxPlayers) -> PlayerFactory.createEmptyPlayer()
+    [f] addPlayer(player: Player, position: number) : boolean -> this.findEmptySlot()
+    [f] removePlayer(playerId: string) : boolean -> this.findPlayerIndex(), this.advanceToNextActivePlayer()
+    [f] markPlayerAborted(playerId: string) : boolean -> this.findPlayerIndex(), this.advanceToNextActivePlayer()
+    [f] findPlayerIndex(playerId: string) : number -> players.findIndex()
+    [f] findEmptySlot() : number -> players.findIndex()
+    [f] isGameFull() : boolean
+    [f] getCurrentTurnNumber() : number
+    [f] incrementRollCount()
+    [f] advanceToNextActivePlayer()
+    [f] applySelection(playerIndex, selectionLabel, score) -> getSelectionIndex(), player.calculateScores()
+    [f] isGameFinished() : boolean -> player.hasCompletedGame()
+    [f] setDiceValues(values: number[])
+    [f] toJSON() : any -> player.toJSON()
+    [sf] fromJSON(data) : Game -> new Game(), Player.fromJSON(), PlayerFactory.createPlayer(), PlayerFactory.createEmptyPlayer()
+
+[F] backend/src/models/Player.ts
+  [C] Player
+    [v] id, username, isActive, cells: BoardCell[], score, upperSum, bonusAchieved, regretsLeft?, extraMovesLeft?
+    -> BoardCell ([F]backend/src/models/BoardCell.ts)
+    -> GameConfig, getBaseGameType ([F]backend/src/utils/gameConfig.ts)
+    [f] constructor(id, username, gameType, ...) -> new BoardCell()
+    [f] calculateScores() -> GameConfig
+    [f] hasCompletedGame() : boolean -> cells.every()
+    [f] getScore() : number
+    [f] toJSON() : any -> cell.toJSON()
+    [sf] fromJSON(data, gameType) : Player -> BoardCell.fromJson(), new Player()
+  [C] PlayerFactory
+    [sf] createPlayer(id, username, gameType) : Player -> new Player()
+    [sf] createEmptyPlayer(gameType) : Player -> new BoardCell(), new Player()
+
+[F] backend/src/utils/gameConfig.ts
+  [v] GameConfig : { [key: string]: GameTypeConfig }
+  [f] getBaseGameType(gameType: string) : keyof typeof GameConfig
+
+[F] backend/src/utils/index.ts
+  [f] randomInt(min, max) -> Math.random()
+  [f] delay(ms) -> Promise(setTimeout)
+  [f] isDefined(value)
+  [f] deepCopy(obj) -> JSON.parse(JSON.stringify())
+
+[F] backend/src/utils/yatzyMapping.ts
+  [v] gameTypeMappings : { [key: string]: string[] }
+  [f] getBaseGameType(gameType: string) : keyof typeof gameTypeMappings
+  [f] getSelectionLabel(gameType, index) : string | null
+  [f] getSelectionIndex(gameType, label) : number
+
+
+**--- Frontend (Flutter/Dart) ---**
+
+[F] lib/main.dart
+  [f] main()
+    -> WidgetsFlutterBinding (External: Flutter)
+    -> SharedPrefProvider.loadPrefs() ([F]lib/shared_preferences.dart)
+    -> configureInjection() ([F]lib/injection.dart)
+    -> runApp()
+    -> MultiBlocProvider (External: flutter_bloc)
+      -> LanguageBloc ([F]lib/states/bloc/language/language_bloc.dart)
+      -> SetStateCubit ([F]lib/states/cubit/state/state_cubit.dart)
+      -> AppWidget ([F]lib/core/app_widget.dart)
+
+[F] lib/core/app_widget.dart
+  [C] AppWidget extends StatelessWidget
+    [v] _appRouter : AppRouter ([F]lib/router/router.dart)
+    [f] build(context)
+      -> topScore = TopScore() ([F]lib/top_score/top_score.dart)
+      -> animationsScroll = AnimationsScroll() ([F]lib/scroll/animations_scroll.dart)
+      -> tutorial = Tutorial() ([F]lib/tutorial/tutorial.dart)
+      -> dices = Dices() ([F]lib/dices/dices.dart)
+      -> app = Application() ([F]lib/application/application.dart)
+      -> chat = Chat() ([F]lib/chat/chat.dart)
+      -> ServiceProvider.initialize() ([F]lib/services/service_provider.dart)
+        -> SocketService ([F]lib/services/socket_service.dart)
+        -> GameService ([F]lib/services/game_service.dart)
+      -> MaterialApp.router() (External: Flutter)
+        -> ServiceProvider.of(context).socketService.connect()
+        -> app.setSocketService(service)
+
+[F] lib/injection.dart
+  [v] getIt : GetIt (External: get_it)
+  [f] configureInjection(environment) -> getIt.initApiInjection() (Generated: [F]lib/injection.config.dart)
+
+[F] lib/injection.config.dart (Generated)
+  [X] GetItInjectableX on GetIt
+    [f] init() -> GetItHelper, injectableModule.router, LanguageBloc, SetStateCubit
+
+[F] lib/core/injectable_modules.dart
+  [C] InjectableModule (abstract)
+    [f] router : AppRouter -> new AppRouter() ([F]lib/router/router.dart)
+
+[F] lib/router/router.dart
+  [C] AppRouter extends $AppRouter (Generated: [F]lib/router/router.gr.dart)
+    [v] routes -> List<AutoRoute> (Defines SettingsView, ApplicationView)
+
+[F] lib/router/router.gr.dart (Generated)
+  [C] $AppRouter extends RootStackRouter
+  [C] ApplicationView extends PageRouteInfo
+  [C] SettingsView extends PageRouteInfo
+
+[F] lib/shared_preferences.dart
+  [C] SharedPrefProvider (abstract)
+    [v] prefs : SharedPreferences (External: shared_preferences)
+    [sf] loadPrefs() -> SharedPreferences.getInstance()
+    [sf] fetchPref...(key) -> prefs.get...()
+    [sf] setPref...(key, value) -> prefs.set...()
+
+[F] lib/startup.dart
+  [v] (Global Variables: isOnline, isDebug, localhost, applicationStarted, userName, ...)
+
+[F] lib/application/application.dart
+  [C] Application with LanguagesApplication
+    [v] context, inputItems, gameDices : Dices
+    [v] (State variables: isSpectating, gameType, nrPlayers, gameData, gameId, myPlayerId, board state arrays, ...)
+    [v] animation : AnimationsApplication ([F]lib/application/animations_application.dart)
+    [v] socketService : SocketService? ([F]lib/services/socket_service.dart)
+    [f] constructor() -> gameDices.setCallbacks(), languagesSetup()
+    [f] getChosenLanguage() -> chosenLanguage (Global)
+    [f] getStandardLanguage() -> standardLanguage (Global)
+    [f] callbackCheckPlayerToMove() -> playerToMove == myPlayerId
+    [f] callbackUnityCreated() -> gameDices.sendStartToUnity()
+    [f] callbackUpdateDiceValues() -> updateDiceValues(), socketService?.sendToClients()
+    [f] updateDiceValues() -> clearFocus(), yatzyFunctions[i](), context.read<SetStateCubit>().setState()
+    [f] setAppText()
+    [f] setup() -> topScore.loadTopScoreFromServer(), gameDices.initDices(), yatzyFunctions assignment, state initialization
+    [f] setSocketService(service)
+
+[F] lib/application/application_functions_internal.dart
+  [X] ApplicationFunctionsInternal on Application
+    [f] clearFocus()
+    [f] cellClick(player, cell) -> getSelectionLabel(), socketService?.sendToClients(), applyLocalSelection()
+    [f] applyLocalSelection(player, cell, score) -> gameDices.sendResetToUnity(), fixedCell assignment, score calculations, colorBoard(), gameDices.clearDices(), context.read<SetStateCubit>().setState()
+    [f] colorBoard()
+
+[F] lib/application/communication_application.dart
+  [X] CommunicationApplication on Application
+    [f] resetDices() -> gameDices.clearDices(), clearFocus()
+    [f] handlePlayerAbort(abortedPlayerIndex) -> advanceToNextActivePlayer(), colorBoard()
+    [f] advanceToNextActivePlayer() -> colorBoard(), resetDices(), gameDices.sendResetToUnity(), gameDices.sendStartToUnity()
+    [f] callbackOnServerMsg(data) -> ServiceProvider.of().socketService, SharedPrefProvider.fetchPrefObject(), _processGameUpdate(), setup(), router.push/pop, _checkIfPlayerAborted(), showDialog()
+    [f] _checkIfPlayerAborted() -> handlePlayerAbort(), _advanceToNextActivePlayer(), colorBoard()
+    [f] _advanceToNextActivePlayer() -> resetDices(), gameDices.sendResetToUnity(), gameDices.sendStartToUnity()
+    [f] _processGameUpdate(data) -> game = Game.fromJson(), context.read<SetStateCubit>().setState() // Handles spectator logic here as well
+    [f] chatCallbackOnSubmitted(text) -> chat.scrollController, socketService?.sendToClients()
+    [f] updateChat(text) -> chat.messages.add(), chat.scrollController.animateTo()
+    [f] callbackOnClientMsg(data) -> app.callbackOnClientMsg(), updateDiceValues(), gameDices.updateDiceImages(), gameDices.sendDicesToUnity(), updateChat(), router.push()
+
+[F] lib/application/application_functions_internal_calc_dice_values.dart
+  [X] ApplicationCalcDiceValues on Application
+    [f] (Pure score calculation functions: zero, calcOnes, calcPair, calcYatzy, etc.) -> calcDiceNr(), gameDices.diceValue
+
+[F] lib/application/animations_application.dart
+  [C] AnimationsApplication
+    [v] animationControllers, animationDurations, cellAnimationControllers, ...
+    [f] animateBoard() -> controller.forward()
+    [f] setupAnimation(ticket, nrPlayers, ...) -> AnimationController(), CurveTween()
+
+[F] lib/application/languages_application.dart
+  [M] LanguagesApplication
+    [f] languagesSetup()
+    [f] getText(textVariable)
+    [v] (_ones, _twos, ..., _settings_, ...) : Map<String, String>
+
+[F] lib/application/widget_application.dart
+  [C] WidgetSetupGameBoard extends StatefulWidget -> _WidgetSetupGameBoardState
+  [C] _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with LanguagesApplication
+    [f] build(context) -> app.setup(), app.setAppText(), AnimatedBuilder(), Positioned(), Container(), FittedBox(), Text(), GestureDetector() -> app.cellClick(), context.read<SetStateCubit>().setState()
+  [C] WidgetDisplayGameStatus extends StatefulWidget -> _WidgetDisplayGameStatusState
+  [C] _WidgetDisplayGameStatusState extends State<WidgetDisplayGameStatus> with LanguagesApplication
+    [f] build(context) -> AutoSizeText(), Text() (Displays game state from `app`)
+
+[F] lib/application/widget_application_scaffold.dart
+  [X] WidgetApplicationScaffold on Application
+    [f] widgetScaffold(context, state) -> MediaQuery, Scaffold(), Stack(), Positioned(), WidgetDices(), WidgetTopScore(), WidgetSetupGameBoard(), WidgetDisplayGameStatus(), WidgetChat(), WidgetAnimationsScroll(), widgetFloatingButton()
+
+[F] lib/application/widget_application_settings.dart
+  [X] WidgetApplicationSettings on Application
+    [f] widgetWaitingGame(context) -> inputItems.widgetButton(), Text() -> onAttemptJoinGame(), onSpectateGame()
+    [f] onSpectateGame(context, gameId) -> ServiceProvider.of().socketService.sendToServer(), context.read<SetStateCubit>().setState()
+    [f] onAttemptJoinGame(context, i) -> ServiceProvider.of().socketService.sendToServer()
+    [f] onStartGameButton(context, state) -> ServiceProvider.of().socketService.sendToServer(), setup(), AutoRouter.of().push/pop(), SharedPrefProvider.setPrefObject()
+    [f] onChangeUserName(value)
+    [f] widgetScaffoldSettings(context, state) -> DefaultTabController(), Scaffold(), AppBar(), TabBar(), TabBarView(), ListView(), Card(), Container(), Column(), Row(), Text(), inputItems various widgets, ElevatedButton(), widgetWaitingGame(), SpectatorGameBoard() ([F]lib/widgets/spectator_game_board.dart), gameDices.widgetUnitySettings()
+
+[F] lib/chat/chat.dart
+  [C] ChatMessage
+  [C] Chat
+    [v] _getChosenLanguage, _standardLanguage, setState, inputItems, callbackOnSubmitted
+    [v] chatTextController, scrollController, focusNode, listenerKey, messages: List<ChatMessage>
+    [f] constructor()
+    [f] onSubmitted(value, context) -> chatTextController.clear(), messages.add(), callbackOnSubmitted(), setState(), scrollController.animateTo()
+
+[F] lib/chat/languages_chat.dart
+  [M] LanguagesChat
+    [v] _sendMessage
+    [f] languagesSetup()
+    [f] getText()
+
+[F] lib/chat/widget_chat.dart
+  [C] WidgetChat extends StatefulWidget -> _WidgetChatState
+  [C] _WidgetChatState extends State<WidgetChat> with LanguagesChat
+    [f] build(context) -> Container(), Column(), Row(), Icon(), Text(), Expanded(), ListView.builder(), Align(), widgetInputText() -> chat.onSubmitted()
+
+[F] lib/dices/dices.dart
+  [C] Dices extends LanguagesDices
+    [v] setState, inputItems
+    [v] (State: holdDices, nrRolls, diceValue, diceRef, ...)
+    [v] unityWidgetController: UnityWidgetController, unityCreated, unityDices, ...
+    [f] constructor()
+    [f] setCallbacks(cbUpdateDiceValues, cbUnityCreated, cbCheckPlayerToMove)
+    [f] clearDices()
+    [f] initDices(nrdices) -> sendResetToUnity()
+    [f] holdDice(dice)
+    [f] updateDiceImages()
+    [f] rollDices(context) -> Random(), callbackUpdateDiceValues()
+    [f] widgetUnitySettings(state) -> inputItems.widgetCheckbox(), send...ChangedToUnity()
+
+[F] lib/dices/unity_communication.dart
+  [X] UnityCommunication on Dices
+    [f] send...ToUnity() -> UnityMessage.toJson(), unityWidgetController.postMessage()
+    [f] onUnityMessage(message) -> jsonDecode(), callbackUpdateDiceValues()
+    [f] onUnityUnloaded()
+    [f] onUnityCreated(controller) -> unityWidgetController assignment, sendResetToUnity(), callbackUnityCreated()
+    [f] onUnitySceneLoaded(sceneInfo)
+
+[F] lib/dices/unity_message.dart
+  [C] UnityMessage
+    [f] constructor()
+    [f] toJson()
+    [sf] fromJson()
+
+[F] lib/dices/widget_dices.dart
+  [C] WidgetDices extends StatefulWidget -> _WidgetDicesState
+  [C] _WidgetDicesState extends State<WidgetDices> with TickerProviderStateMixin
+    [f] setupAnimation(ticket) -> AnimationController(), CurveTween()
+    [f] build(context) -> Positioned(), SizedBox(), UnityWidget(), Stack(), Container(), Image.asset(), GestureDetector() -> app.gameDices.holdDice(), AnimatedBuilder(), Listener() -> app.gameDices.rollDices()
+
+[F] lib/input_items/input_items.dart
+  [C] InputItems
+    [f] (Various UI widget factory methods: widgetImage, widgetInputText, widgetButton, widgetCheckbox, widgetSlider, widgetDropDownList, ...)
+
+[F] lib/models/board_cell.dart (Frontend)
+  [C] BoardCell
+    [v] index, label, value, fixed, xPos, yPos, ...
+    [f] constructor()
+    [f] setPosition()
+    [f] get displayText
+    [f] get isEmpty
+    [f] clear()
+    [f] setValue()
+    [f] fix()
+    [f] setFocus()
+    [f] copyWith()
+
+[F] lib/models/game.dart (Frontend)
+  [C] Game
+    [v] gameId, gameType, maxPlayers, players: List<Player>, gameStarted, gameFinished, playerToMove, diceValues, ...
+    [f] constructor()
+    [f] get isMyTurn
+    [f] get canRoll
+    [f] get currentPlayer -> players[]
+    [f] get myPlayer -> players[]
+    [f] calculateScores() -> player.calculateScores()
+    [f] advanceToNextPlayer() -> onPlayerTurnChanged?.call()
+    [f] setDiceValues(values) -> onDiceValuesChanged?.call()
+    [f] resetDice() -> onDiceValuesChanged?.call()
+    [f] selectCell(cellIndex) -> player.cells[], cell.fix(), calculateScores(), checkGameFinished(), advanceToNextPlayer()
+    [f] checkGameFinished() -> player.hasCompletedGame
+    [sf] fromJson(json) -> _getCellLabelsForGameType(), new Player(), new BoardCell(), new Game()
+    [f] toJson() -> player.id, player.username
+    [sf] _getCellLabelsForGameType(gameType)
+
+[F] lib/models/player.dart (Frontend)
+  [C] Player
+    [v] id, username, isActive, cells: List<BoardCell>, _totalScore, _upperSectionSum
+    [f] constructor()
+    [f] get totalScore
+    [f] get upperSectionSum
+    [f] calculateScores(bonusThreshold, bonusAmount, upperSectionEnd)
+    [f] clearUnfixedCells() -> cell.clear()
+    [f] get hasCompletedGame -> cells.every()
+    [sf] fromJson(json, cellLabels) -> List.generate(BoardCell()), new Player()
+    [f] toJson() -> cells.map(cell.value/fixed)
+
+[F] lib/scroll/animations_scroll.dart
+  [C] AnimationsScroll with LanguagesAnimationsScroll
+    [v] _getChosenLanguage, _standardLanguage, keyXPos, keyYPos, animationController, positionAnimation
+    [f] constructor()
+    [f] getChosenLanguage()
+
+[F] lib/scroll/languages_animations_scroll.dart
+  [M] LanguagesAnimationsScroll
+    [v] _scrollText
+    [f] languagesSetup()
+    [f] getText()
+
+[F] lib/scroll/widget_scroll.dart
+  [C] WidgetAnimationsScroll extends StatefulWidget -> _WidgetAnimationsScrollState
+  [C] _WidgetAnimationsScrollState extends State<WidgetAnimationsScroll> with TickerProviderStateMixin, LanguagesAnimationsScroll
+    [f] setupAnimation(ticket) -> AnimationController(), CurveTween()
+    [f] build(context) -> AnimatedBuilder(), Positioned(), SizedBox(), FittedBox(), DefaultTextStyle(), AnimatedTextKit() (External: animated_text_kit)
+
+[F] lib/services/game_service.dart (Frontend)
+  [C] GameService
+    [v] socketService : SocketService ([F]lib/services/socket_service.dart)
+    [v] _game : Game? ([F]lib/models/game.dart)
+    [v] onGameUpdated : Function(Game)?
+    [v] onError : Function(String)?
+    [f] constructor() -> socketService.onGameUpdate = _handleGameUpdate
+    [f] get game
+    [f] _handleGameUpdate(updatedGame) -> _game assignment, onGameUpdated?.call()
+    [f] createGame(...) -> socketService.createGame()
+    [f] joinGame(...) -> socketService.joinGame()
+    [f] rollDice(...) -> socketService.rollDice()
+    [f] calculateScoreForCell(cell, diceValues) -> _calculate...Score helpers
+    [f] selectCell(cellIndex) -> socketService.selectCell()
+    [f] _reportError(message) -> onError?.call()
+    [f] (_calculate...Score helpers) - Pure score logic
+
+[F] lib/services/http_service.dart
+  [C] HttpService
+    [v] baseUrl : String
+    [f] constructor()
+    [f] getDB(route) -> http.get (External: http)
+    [f] postDB(route, json) -> http.post (External: http)
+    [f] updateDB(route, json) -> http.post (External: http)
+    [f] deleteDB(route) -> http.delete (External: http)
+    [f] deleteUser(route, email) -> http.delete (External: http)
+    [f] login(userName, password) -> http.post (External: http)
+    [f] signup(userName, password) -> http.post (External: http)
+
+[F] lib/services/service_provider.dart
+  [C] ServiceProvider extends InheritedWidget
+    [v] socketService : SocketService ([F]lib/services/socket_service.dart)
+    [v] gameService : GameService ([F]lib/services/game_service.dart)
+    [f] constructor()
+    [sf] of(context) -> context.dependOnInheritedWidgetOfExactType()
+    [sf] initialize(child, context) -> new SocketService(), new GameService(), new ServiceProvider()
+    [f] updateShouldNotify(oldWidget)
+
+[F] lib/services/socket_service.dart
+  [C] SocketService
+    [v] context : BuildContext
+    [v] socket : io.Socket (External: socket_io_client)
+    [v] socketId : String
+    [v] isConnected : bool
+    [v] game : Game? ([F]lib/models/game.dart)
+    [v] onGameUpdate : Function(Game)?
+    [v] onChatMessage : Function(Map<String, dynamic>)?
+    [f] constructor()
+    [f] connect() -> io.io(), _setupEventHandlers(), socket.connect()
+    [f] _setupEventHandlers() -> socket.onConnect(), socket.onDisconnect(), socket.on('welcome'), socket.on('echo_response'), socket.on('onClientMsg'), socket.on('onServerMsg'), socket.on('userId'), socket.on('gameUpdate'), socket.on('chatMessage')
+    [f] _sendEcho() -> socket.emit('echo')
+    [f] _requestId() -> socket.emit('sendToServer')
+    [f] _handleUserId(data) -> _updateState()
+    [f] _handleClientMessage(data) -> app.callbackOnClientMsg(), _updateState()
+    [f] _handleServerMessage(data) -> app.callbackOnServerMsg(), _updateState()
+    [f] _handleGameUpdate(data) -> _processGameUpdate(), _updateState()
+    [f] _processGameUpdate(gameData) -> game = Game.fromJson(), onGameUpdate?.call()
+    [f] _handleChatMessage(data) -> onChatMessage?.call()
+    [f] createGame(...) -> socket.emit('sendToServer')
+    [f] joinGame(...) -> socket.emit('sendToServer')
+    [f] rollDice(...) -> socket.emit('sendToServer')
+    [f] selectCell(...) -> socket.emit('sendToServer')
+    [f] sendChatMessage(...) -> socket.emit('sendToServer')
+    [f] sendToClients(data) -> socket.emit('sendToClients')
+    [f] sendToServer(data) -> socket.emit('sendToServer')
+    [f] disconnect() -> socket.disconnect()
+    [f] _updateState() -> context.read<SetStateCubit>().setState()
+
+[F] lib/states/bloc/language/language_bloc.dart
+  [C] LanguageBloc extends Bloc<LanguageEvent, String>
+    [f] constructor() -> SharedPrefProvider.fetchPrefString() ([F]lib/shared_preferences.dart)
+    [f] _languageChanged(event, emit) -> SharedPrefProvider.setPrefString(), emit()
+
+[F] lib/states/bloc/language/language_event.dart
+  [C] LanguageEvent (abstract)
+  [C] LanguageChanged extends LanguageEvent
+
+[F] lib/states/cubit/state/state_cubit.dart
+  [C] SetStateCubit extends Cubit<int>
+    [f] setState() -> emit()
+
+[F] lib/top_score/top_score.dart
+  [C] TopScore with LanguagesTopScore
+    [v] _getChosenLanguage, _standardLanguage, animationController, loopAnimation, topScores
+    [f] constructor()
+    [f] loadTopScoreFromServer(gameType, cubit) -> HttpService.getDB(), jsonDecode(), cubit.setState()
+    [f] updateTopScore(name, score, gameType) -> HttpService.postDB(), jsonDecode()
+
+[F] lib/top_score/languages_top_score.dart
+  [M] LanguagesTopScore
+    [v] _topScores
+    [f] languagesSetup()
+    [f] getText()
+
+[F] lib/top_score/widget_top_scores.dart
+  [C] WidgetTopScore extends StatefulWidget -> _WidgetTopScoreState
+  [C] _WidgetTopScoreState extends State<WidgetTopScore> with TickerProviderStateMixin, LanguagesTopScore
+    [f] setupAnimation(ticket) -> AnimationController(), CurveTween()
+    [f] build(context) -> AnimatedBuilder(), Positioned(), Container(), FittedBox(), Text(), Scrollbar(), ListView.builder(), Row()
+
+[F] lib/tutorial/tutorial.dart
+  [C] Tutorial
+    [v] keyXPos, keyYPos, animationSide, animationController1/2/3, positionAnimation1/2/3
+    [f] setup(ticket) -> AnimationController(), CurveTween()
+    [f] widgetArrow(key, w, h, controller, text, side, scale) -> AnimatedBuilder(), RenderBox, Positioned(), Column()/Row(), SizedBox(), FittedBox(), Text(), Image.asset()
+
+[F] lib/utils/yatzy_mapping_client.dart
+  [v] _gameTypeMappingsClient : Map<String, List<String>>
+  [f] _getBaseGameTypeClient(gameType)
+  [f] _getBaseLabel(fullLabel)
+  [f] getSelectionLabel(gameType, index) : String?
+  [f] getSelectionIndex(gameType, label) : number
+
+[F] lib/views/application_view.dart
+  [C] ApplicationView extends StatefulWidget (@RoutePage) -> _ApplicationViewState
+  [C] _ApplicationViewState extends State<ApplicationView> with TickerProviderStateMixin
+    [f] initState() -> app.setup(), tutorial.setup(), WidgetsBinding.addPostFrameCallback(), app.animation.setupAnimation()
+    [f] postFrameCallback(context) -> topScore.loadTopScoreFromServer()
+    [f] build(context) -> BlocBuilder<SetStateCubit, int>(), app.widgetScaffold()
+
+[F] lib/views/settings_view.dart
+  [C] SettingsView extends StatefulWidget (@RoutePage) -> _SettingsViewHomeState
+  [C] _SettingsViewHomeState extends State<SettingsView> with TickerProviderStateMixin
+    [f] initState() -> TabController()
+    [f] build(context) -> BlocBuilder<SetStateCubit, int>(), app.widgetScaffoldSettings()
+
+[F] lib/widgets/spectator_game_board.dart
+  [C] SpectatorGameBoard extends StatefulWidget -> _SpectatorGameBoardState
+  [C] _SpectatorGameBoardState extends State<SpectatorGameBoard>
+    [v] _horizontalScrollController, _verticalScrollController
+    [f] build(context) -> Stack(), Column(), Container(), Text(), Row(), Expanded(), RawScrollbar(), SingleChildScrollView(), buildScoreTable(), Positioned.fill() (for overlay)
+    [f] getDiceFace(value) -> Container(), Column(), Row() (Draws dice dots)
+    [f] buildScoreTable(playerNames) -> Padding(), Table(), TableRow(), TableCell(), Text() (Builds UI table from gameData)
+
+
+**--- Key Interactions & Entry Points ---**
+
+*   **Backend:**
+    *   Entry: `backend/src/server.ts` starts the Express server and Socket.IO listener.
+    *   Database: `backend/src/db.ts` initializes and provides MongoDB connection.
+    *   HTTP API: Handled by route files in `backend/src/routes/` (e.g., login, signup, top scores).
+    *   WebSockets: `server.ts` sets up Socket.IO, delegates events to Controllers (`ChatController`, `GameController`, `PlayerController`).
+    *   Core Logic: Services (`GameService`, `GameLogService`, `TopScoreService`) handle business logic, interacting with DB and models. `GameService` is central for game state.
+    *   Models: Define data structures (`Game`, `Player`, `BoardCell`).
+*   **Frontend:**
+    *   Entry: `lib/main.dart` initializes Flutter, Bloc, DI, and runs `AppWidget`.
+    *   Root Widget: `lib/core/app_widget.dart` sets up `MaterialApp.router`, initializes services (`ServiceProvider`), and major application components (`Application`, `Dices`, `Chat`, etc.).
+    *   State Management: `BlocProvider` in `main.dart` (`LanguageBloc`, `SetStateCubit`). `SetStateCubit` is used widely for triggering UI updates.
+    *   Navigation: `auto_route` defined in `lib/router/`. Views are in `lib/views/`.
+    *   Networking: `SocketService` manages WebSocket connection. `HttpService` handles REST API calls (e.g., top scores). `ServiceProvider` makes these available.
+    *   Core Logic Container: `lib/application/application.dart` (and its extensions) holds much of the UI state and orchestrates interactions between UI, services, and dice logic. *Note: This class is quite large.*
+    *   UI Widgets: Specific UI parts are in `lib/application/widget_*`, `lib/chat/widget_chat.dart`, `lib/dices/widget_dices.dart`, `lib/top_score/widget_top_scores.dart`, etc.
+    *   Models: Frontend models in `lib/models/` represent UI state, potentially differing slightly from backend models.
+*   **Backend <-> Frontend:**
+    *   **HTTP:** Frontend `HttpService` calls backend API routes (e.g., `/GetTopScores`, `/UpdateTopScore`, `/api/login`).
+    *   **WebSockets:** Frontend `SocketService` connects to backend Socket.IO server.
+        *   Client sends actions (`sendToServer`, `sendToClients`) handled by backend Controllers. Key actions: `requestGame`, `requestJoinGame`, `sendDices`, `sendSelection`, `chatMessage`, `spectateGame`.
+        *   Server sends updates (`onServerMsg`, `onClientMsg`) handled by frontend `CommunicationApplication` extension (`callbackOnServerMsg`, `callbackOnClientMsg`). Key messages: `onGameStart`, `onGameUpdate`, `onGameFinished`, `sendDices`, `sendSelection`, `chatMessage`.

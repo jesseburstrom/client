@@ -25,6 +25,9 @@ class SocketService {
   /// Whether the socket is connected
   bool isConnected = false;
   
+  /// Flag to indicate if handlers have been set up for the current socket instance
+  bool _handlersSetUp = false;
+  
   /// Game instance
   Game? game;
   
@@ -50,44 +53,46 @@ class SocketService {
   
   /// Initialize and connect to the Socket.IO server
   void connect() {
-    // Get caller stack trace for debugging
     final stackTrace = StackTrace.current.toString();
     print('🔍 SocketService #$_instanceId connect() called from:\n$stackTrace');
     
-    // Prevent multiple connection attempts at the application level
-    if (_globalConnectionInProgress) {
+    // Global check - still useful to prevent rapid successive attempts
+    if (_globalConnectionInProgress && _connectingInProgress) {
       print('🚫 [Socket #$_instanceId] Global connection already in progress, skipping additional attempt');
       print('   Original connection initiated from: $_connectionInitiator');
       return;
     }
     
-    // Prevent multiple connection attempts at the instance level
-    if (_connectingInProgress) {
-      print('🚫 [Socket #$_instanceId] Connection already in progress, skipping additional attempt');
+    // Check if already connected - if yes, ensure handlers are set
+    if (isConnected) {
+      print('🚫 [Socket #$_instanceId] Already connected. Ensuring handlers are set...');
+      if (!_handlersSetUp) {
+         _setupEventHandlers(); // Set up handlers if somehow missed
+      }
       return;
     }
     
-    // Check if already connected
-    if (isConnected) {
-      print('🚫 [Socket #$_instanceId] Already connected to server, skipping additional connection attempt');
+    // Instance level check
+    if (_connectingInProgress) {
+      print('🚫 [Socket #$_instanceId] Connection already in progress for this instance, skipping.');
       return;
     }
     
     _connectingInProgress = true;
     _globalConnectionInProgress = true;
     _connectionInitiator = stackTrace;
+    _handlersSetUp = false; // Reset handlers flag for new connection attempt
     
     print('🔌 [Socket #$_instanceId] Initiating connection to server: $localhost');
     
     try {
-      // Initialize socket with proper options - ONLY ONCE
+      // Initialize socket with proper options
       socket = io.io(
         localhost, 
         <String, dynamic>{
           'transports': ['websocket', 'polling'],
-          'autoConnect': false,  // Start with autoConnect off
-          'forceNew': true,
-          'reconnection': true,
+          'autoConnect': false, // Control connection manually
+          'forceNew': true,     // Ensure a new connection instance
           'reconnectionAttempts': 3,
           'reconnectionDelay': 1000,
           'reconnectionDelayMax': 5000,
@@ -96,19 +101,29 @@ class SocketService {
         }
       );
       
-      // Set up event handlers before connection
+      // Clear existing handlers before setting new ones
+      _clearEventHandlers(); 
       _setupEventHandlers();
       
-      // Now manually connect after event handlers are set up
       print('🔌 [Socket #$_instanceId] Socket initialized, now connecting...');
       socket.connect();
       
-      // Debug connection status after a reasonable delay
-      Future.delayed(const Duration(seconds: 3), () {
-        print('🔍 [Socket #$_instanceId] Connection status after 3s: ${socket.connected ? '✅ Connected' : '❌ Not connected'}');
-        _connectingInProgress = false;
-        _globalConnectionInProgress = false;
+      // Use socket events to manage connection progress flags
+      socket.onConnect((_) {
+         print('✅ [Socket #$_instanceId] Connect event received.');
+         _connectingInProgress = false;
+         _globalConnectionInProgress = false; 
+         // Handlers are already set up
       });
+
+      socket.onConnectError((error) {
+          print('❌ [Socket #$_instanceId] Connect Error event received: $error');
+          _connectingInProgress = false;
+          _globalConnectionInProgress = false;
+          _handlersSetUp = false; // Reset on error
+          // UI update happens in the handler
+      });
+
     } catch (e) {
       print('❌ [Socket #$_instanceId] Error initializing socket connection: $e');
       _connectingInProgress = false;
@@ -116,35 +131,62 @@ class SocketService {
     }
   }
   
+  /// Remove all registered event listeners
+  void _clearEventHandlers() {
+    if (socket != null) {
+       print('🧼 [Socket #$_instanceId] Clearing existing event handlers...');
+       socket.off('connect');
+       socket.off('disconnect');
+       socket.off('connect_error');
+       socket.off('welcome');
+       socket.off('echo_response');
+       socket.off('onClientMsg');
+       socket.off('onServerMsg');
+       socket.off('userId');
+       socket.off('gameUpdate');
+       socket.off('chatMessage');
+       _handlersSetUp = false;
+    } else {
+       print('🧼 [Socket #$_instanceId] No socket instance to clear handlers from.');
+    }
+  }
+  
   /// Set up Socket.IO event handlers
   void _setupEventHandlers() {
-    print('🔄 [Socket #$_instanceId] Setting up event handlers');
+    if (_handlersSetUp) {
+       print('🔄 [Socket #$_instanceId] Handlers already set up for this socket instance, skipping.');
+       return;
+    }
+    if (socket == null) {
+       print('❌ [Socket #$_instanceId] Cannot set up handlers: Socket is null.');
+       return;
+    }
+
+    print('🔄 [Socket #$_instanceId] Setting up event handlers...');
     
     // Connection events
     socket.onConnect((_) {
       print('✅ [Socket #$_instanceId] Connected to server with socket ID: ${socket.id}');
       isConnected = true;
       socketId = socket.id ?? '';
-      
-      // Test the connection by sending an echo
+      _connectingInProgress = false; // Ensure flags are reset on successful connect
+      _globalConnectionInProgress = false;
       _sendEcho();
-      
-      // Request ID from server
       _requestId();
-      
-      // Notify UI to update
       _updateState();
     });
     
     socket.onDisconnect((_) {
       print('❌ [Socket #$_instanceId] Disconnected from server');
       isConnected = false;
+      _handlersSetUp = false; // Reset handlers flag on disconnect
       _updateState();
     });
     
     socket.onConnectError((error) {
       print('❌ [Socket #$_instanceId] Connection error: $error');
       isConnected = false;
+      _handlersSetUp = false; // Reset handlers flag on error
       _updateState();
     });
     
@@ -171,6 +213,9 @@ class SocketService {
     socket.on('userId', _handleUserId);
     socket.on('gameUpdate', _handleGameUpdate);
     socket.on('chatMessage', _handleChatMessage);
+
+    _handlersSetUp = true; // Mark handlers as set up
+    print('✅ [Socket #$_instanceId] Event handlers set up.');
   }
   
   /// Send an echo message to test the connection
@@ -423,11 +468,16 @@ class SocketService {
   
   /// Disconnect from the server
   void disconnect() {
-    if (isConnected) {
-      print('🔌 [Socket #$_instanceId] Disconnecting from server');
+    print('🔌 [Socket #$_instanceId] Disconnecting socket...');
+    _clearEventHandlers(); // Remove listeners before disconnecting
+    if (socket != null) {
       socket.disconnect();
-      isConnected = false;
     }
+    isConnected = false;
+    _handlersSetUp = false;
+    _connectingInProgress = false;
+    _globalConnectionInProgress = false; // Allow new connections
+    _updateState();
   }
   
   /// Update the UI state

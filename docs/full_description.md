@@ -1,445 +1,901 @@
-# Project Description: jesseburstrom-client (Yatzy Game Client-Server System)
+Okay, here is a detailed description of your Yatzy game project based on the provided file structure and contents.
 
-## 1. Project Overview
+## Project Overview: Multiplayer Yatzy Game (Flutter & Node.js)
 
-`jesseburstrom-client` is a client-server application primarily focused on implementing a multiplayer Yatzy game. It consists of a Flutter frontend (`lib/`) providing the user interface and game interaction, and a Node.js/Express backend (`backend/`) handling game logic, real-time communication, authentication, and data persistence.
+This project implements a multiplayer Yatzy game featuring a Flutter frontend and a Node.js (Express/TypeScript) backend. It leverages WebSockets (Socket.IO) for real-time gameplay and communication, MongoDB for data persistence (game logs, top scores, potentially user auth), and includes unique features like multiple game modes, spectator functionality, and integration with Unity for 3D dice rendering.
 
-The system appears to support:
+**Core Technologies:**
 
-*   Multiple Yatzy game types (Ordinary, Mini, Maxi, and variants with special rules like Regret/Extra moves).
-*   Real-time multiplayer gameplay via WebSockets (Socket.IO).
-*   User authentication (Sign up/Log in).
-*   Top score tracking per game type.
-*   A spectator mode for watching ongoing games.
-*   Integration with Unity via `flutter_unity_widget` for potentially rendering 3D dice (controlled by a setting).
+*   **Frontend:** Flutter (Dart)
+*   **Backend:** Node.js, Express.js, TypeScript
+*   **Real-time Communication:** Socket.IO
+*   **Database:** MongoDB
+*   **3D Rendering (Optional):** Unity (integrated via `flutter_unity_widget`)
+
+**Key Features:**
+
+*   Real-time multiplayer Yatzy gameplay.
+*   Multiple game modes (Ordinary, Mini, Maxi, including variants with Regret/Extra Move rules).
+*   Persistent Top Scores leaderboard per game mode.
+*   Game logging/history stored in the database.
 *   In-game chat functionality.
+*   Spectator mode to watch ongoing games.
+*   User authentication (Login/Signup routes exist, likely JWT-based).
+*   Optional 3D dice rendering via Unity integration.
+*   Basic settings configuration (Username, Language, Game Type, Visuals).
+*   Localization support (English/Swedish examples shown).
 
-The backend README also mentions a React client, suggesting the backend might serve multiple frontend implementations, but this description focuses on the provided Flutter frontend and Node.js backend.
+---
 
-## 2. Technology Stack
+## Backend Description (`backend/`)
 
-*   **Frontend (`lib/`):**
-    *   Framework: Flutter
-    *   Language: Dart
-    *   State Management: flutter_bloc / Cubit (`LanguageBloc`, `SetStateCubit`)
-    *   Dependency Injection: get_it, injectable
-    *   Routing: auto_route
-    *   Networking:
-        *   HTTP: http package (`HttpService`)
-        *   WebSocket: socket_io_client (`SocketService`)
-    *   UI: Material Design, auto_size_text, animated_text_kit
-    *   Local Storage: shared_preferences
-    *   Unity Integration: flutter_unity_widget
+The backend is a Node.js application built with the Express.js framework and written in TypeScript. It serves as the central authority for game logic, state management, and communication between clients.
 
-*   **Backend (`backend/`):**
-    *   Runtime: Node.js
-    *   Framework: Express.js
-    *   Language: TypeScript
-    *   Real-time Communication: Socket.IO
-    *   Database: MongoDB (using `mongodb` driver)
-    *   Authentication: JSON Web Tokens (JWT), bcrypt (password hashing)
-    *   API: RESTful API endpoints, WebSocket events
-    *   Utilities: cors, dotenv, uuid
+**Core Components & Architecture:**
 
-## 3. Architecture
+1.  **Server (`server.ts`):**
+    *   Initializes an Express application and an HTTP server.
+    *   Sets up Socket.IO on top of the HTTP server for real-time communication.
+    *   Configures CORS to allow connections from the frontend (including handling development vs. production origins via an `isOnline` flag).
+    *   Integrates middleware (like `express.json` for parsing request bodies).
+    *   Initializes the MongoDB database connection (`db.ts`).
+    *   Instantiates and wires up Controllers and Services.
+    *   Registers API routes defined in the `routes/` directory.
+    *   Sets up Socket.IO event listeners, delegating handling to controllers.
+    *   Includes logic for serving static frontend build files (handling different paths for local dev vs. online deployment).
 
-The project follows a standard **Client-Server architecture**:
+2.  **Database (`db.ts`):**
+    *   Manages the MongoDB connection using the native `mongodb` driver.
+    *   Provides functions `initializeDbConnection` and `getDbConnection` to access specific databases (`react-auth-db`, `top-scores`, `yatzy-game-log-db`).
+    *   Includes a connection test write operation on startup.
 
-*   **Backend (Server):** Acts as the central authority. It manages game state, validates actions, handles player connections, persists data (users, game logs, top scores), and facilitates real-time communication between clients. It exposes a REST API for certain actions (auth, top scores, initial spectator data) and uses Socket.IO for real-time game events and chat.
-    *   **Layers:**
-        *   **Routes (`src/routes/`):** Define REST API endpoints.
-        *   **Controllers (`src/controllers/`):** Handle incoming Socket.IO events and REST requests, orchestrate responses, interact with services.
-        *   **Services (`src/services/`):** Encapsulate core business logic (game management, logging). `GameService` is central to multiplayer logic.
-        *   **Models (`src/models/`):** Define data structures (Game, Player, BoardCell).
-        *   **Database (`db.ts`, `GameLogService`):** Handles MongoDB connections and data persistence.
-*   **Frontend (Client):** Provides the user interface and interacts with the backend. It maintains a local representation of the game state, sends user actions to the backend, and updates the UI based on responses and real-time updates received from the backend.
-    *   **Layers (typical Flutter structure):**
-        *   **Views (`views/`):** Top-level screen widgets managed by the router.
-        *   **Widgets (`widgets/`, `application/widget*.dart`, etc.):** Reusable UI components.
-        *   **State Management (`states/`, `application/application.dart`):** Manages UI state and application-level state (using Bloc/Cubit and a central `Application` class).
-        *   **Services (`services/`):** Handle communication with the backend (`HttpService`, `SocketService`) and potentially other tasks. The Flutter `GameService` acts as an interface layer over `SocketService` for game actions.
-        *   **Models (`models/`):** Client-side representation of data structures.
-        *   **Routing (`router/`):** Manages navigation between views.
+3.  **Networking (Socket.IO in `server.ts`):**
+    *   Handles client connections, disconnections, and message routing.
+    *   Uses robust Socket.IO configuration supporting both `websocket` and `polling` transports, with ping timeouts for connection stability.
+    *   Listens for client events (`sendToServer`, `sendToClients`) and forwards them to the appropriate controllers.
+    *   Broadcasts game state updates (`onServerMsg`) and client-specific messages (`onClientMsg`) to players and spectators.
 
-## 4. Directory Structure Breakdown
+4.  **API Routes (`routes/`):**
+    *   Defines RESTful endpoints using Express Router.
+    *   `logInRoute.ts`, `signUpRoute.ts`: Handle user authentication (likely using bcrypt for password hashing and JWT for session tokens).
+    *   `logRoute.ts`, `getLogRoute.ts`: Potentially for user activity logging (seems related to the auth DB).
+    *   `getTopScores.ts`, `updateTopScore.ts`: API for fetching and submitting high scores for different game modes, interacting with the `top-scores` DB.
+    *   `spectateGameRoute.ts`: An *HTTP GET* endpoint `/api/spectate/:gameId` used to fetch the initial state and log for a game being spectated.
 
-*   **`jesseburstrom-client/`**
-    *   **`backend/`**: Contains the Node.js/Express server code.
-        *   `node_modules/`: Project dependencies (ignored by git).
-        *   `dist/`: Compiled TypeScript output (ignored by git).
-        *   `.env`: Environment variables (ignored by git).
-        *   `package.json`, `package-lock.json`: Node.js project definition and dependencies.
-        *   `tsconfig.json`: TypeScript compiler configuration.
-        *   `src/`: Source code for the backend.
-            *   `controllers/`: Handles incoming requests/events (Game, Player, Chat).
-            *   `db.ts`: MongoDB connection setup.
-            *   `models/`: Data structure definitions (Game, Player, BoardCell, Dice).
-            *   `routes/`: REST API endpoint definitions.
-            *   `services/`: Business logic (GameService, GameLogService).
-            *   `utils/`: Utility functions and game configuration (gameConfig, yatzyMapping).
-            *   `server.ts`: Main server entry point, sets up Express and Socket.IO.
-    *   **`lib/`**: Contains the Flutter frontend code.
-        *   `application/`: Core application logic, state, UI widgets for the main game view.
-        *   `chat/`: Chat feature implementation (state, UI).
-        *   `core/`: Core setup files (DI modules, root AppWidget).
-        *   `dices/`: Dice logic, UI, and Unity integration files.
-        *   `input_items/`: Reusable input widgets (buttons, text fields, etc.).
-        *   `models/`: Frontend data models (BoardCell, Game, Player).
-        *   `router/`: AutoRoute configuration and generated files.
-        *   `scroll/`: Scrolling text animation feature.
-        *   `services/`: Frontend services (HttpService, SocketService, GameService, ServiceProvider).
-        *   `states/`: Bloc/Cubit state management setup.
-        *   `top_score/`: Top score display feature.
-        *   `tutorial/`: In-app tutorial feature.
-        *   `utils/`: Client-side utility functions (yatzyMappingClient).
-        *   `views/`: Top-level screen widgets (ApplicationView, SettingsView).
-        *   `widgets/`: Other reusable widgets (SpectatorGameBoard).
-        *   `injection.dart`, `injection.config.dart`: Dependency injection setup.
-        *   `main.dart`: Flutter application entry point.
-        *   `shared_preferences.dart`: Utility for local storage.
-        *   `startup.dart`: Global configuration variables/flags.
+5.  **Controllers (`controllers/`):**
+    *   `ChatController.ts`: Handles receiving chat messages via Socket.IO (`sendToClients`, `sendToServer` with `chatMessage` action) and broadcasts them to relevant players in a specific game using `GameService` to find participants.
+    *   `GameController.ts`: Manages core game flow events via Socket.IO (`requestGame`, `requestJoinGame`, `removeGame`, `useRegret`, `useExtraMove`, `spectateGame`). Handles receiving player actions like dice rolls (`sendDices`) and score selections (`sendSelection`), validating turns, interacting with `GameService` and `GameLogService`, and triggering state updates.
+    *   `PlayerController.ts`: Primarily handles initial player connection setup (`getId`) and potentially player-specific events (though most game actions are delegated to `GameController`).
 
-## 5. Interconnection & Data Flow
+6.  **Services (`services/`):**
+    *   `GameService.ts`: The core logic hub. Manages the state of active games (`Map<gameId, Game>`). Handles game creation, finding available games, player joining/leaving/disconnecting (including turn management and game finishing logic), adding/removing spectators, processing dice rolls and selections, broadcasting game state updates and game lists to clients via Socket.IO (`io.emit`, `io.to`). Interacts with `GameLogService` to record game events and `TopScoreService` to update scores when a game finishes.
+    *   `GameLogService.ts`: Responsible for interacting with the `yatzy-game-log-db` MongoDB database (`game_moves` collection). Logs game start, individual moves (roll, select, regret, extra move, disconnect, spectate), and game end (with final scores). Provides a method to retrieve the full log for a game (used by spectator mode).
+    *   `TopScoreService.ts`: Handles interactions with the `top-scores` MongoDB database. Provides methods to fetch top scores for different game types and to insert new scores.
 
-Communication between the Flutter frontend and the Node.js backend happens via two primary mechanisms:
+7.  **Models (`models/`):**
+    *   `BoardCell.ts`: Represents a single cell on the Yatzy scorecard (index, label, value, fixed status).
+    *   `Dice.ts`: Encapsulates dice logic (rolling, keeping specific dice). *Note: The backend `GameService` seems to rely on client dice rolls, using this model mainly for internal state perhaps.*
+    *   `Game.ts`: Represents the state of a single Yatzy game instance (ID, type, players, status flags, current player, dice values, roll count, turn number, etc.). Includes methods for adding/removing players, managing turns, applying selections, checking finish conditions, and serialization (`toJSON`, `fromJSON`).
+    *   `Player.ts`: Represents a player (ID, username, active status, scorecard `cells`, calculated scores, special move counts like `regretsLeft`). Includes methods for score calculation and serialization.
 
-1.  **REST API (HTTP):** Used for actions that don't require real-time updates or are typically request-response based.
-    *   **Authentication:** `/api/signup`, `/api/login` (POST). Frontend `HttpService` sends credentials, backend `logInRoute`/`signUpRoute` handle validation/creation, interact with MongoDB (`react-auth-db`), and return JWTs.
-    *   **Top Scores:** `/GetTopScores` (GET), `/UpdateTopScore` (POST). Frontend `HttpService` calls these, backend routes interact with MongoDB (`top-scores`).
-    *   **Spectator Initial Data:** `/api/spectate/:gameId` (GET). Frontend `HttpService` (or potentially direct call within Settings) fetches initial game state and log from backend `spectateGameRoute`, which uses `GameService` and `GameLogService`.
-    *   **(Potential) User Logging:** `/api/log/:userId` (POST), `/api/getLog/:userId` (GET). Requires JWT auth.
+8.  **Utilities (`utils/`):**
+    *   `gameConfig.ts`: Defines constants and structures for different game types (cell labels, bonus rules, dice count, max rolls).
+    *   `yatzyMapping.ts`: Provides utility functions (`getSelectionLabel`, `getSelectionIndex`) to map between the numerical index of a scorecard cell and its string label (e.g., 0 -> "Ones", 8 -> "Pair"), essential for processing selections received from the client.
+    *   `index.ts`: General utility functions (currently includes `randomInt`, `delay`, etc., might not be heavily used by core game logic).
 
-2.  **WebSocket (Socket.IO):** Used for real-time game events, multiplayer state synchronization, and chat.
-    *   **Connection:** Flutter `SocketService` establishes a persistent connection to the backend Socket.IO server defined in `server.ts`.
-    *   **Client -> Server Events (`sendToServer`):**
-        *   `getId`: Client requests its server-assigned ID (`PlayerController`).
-        *   `requestGame`/`createGame`: Client requests to create/join a game (`GameController` -> `GameService`).
-        *   `requestJoinGame`/`joinGame`: Client requests to join a specific game (`GameController` -> `GameService`).
-        *   `useRegret`/`useExtraMove`: Client uses a special move (`GameController` -> `GameService`).
-        *   `spectateGame` (WS): Client requests to start spectating via WebSocket (`GameController` -> `GameService.addSpectator`).
-        *   `chatMessage`: Client sends a chat message intended for the server or broadcast (`ChatController`).
-    *   **Client -> Other Clients Events (`sendToClients`):**
-        *   `sendDices`: Client informs server/others about its dice roll result (`GameController` -> `GameService.processDiceRoll` -> Broadcast).
-        *   `sendSelection`: Client informs server/others about its score selection (`GameController` -> `GameService.processSelection` -> Broadcast).
-        *   `chatMessage`: Client sends a chat message to be broadcast (`ChatController` -> Broadcast).
-    *   **Server -> Client Events (`onServerMsg`, `onClientMsg`):**
-        *   `onGetId` / `userId`: Server sends the client its unique socket ID (response to `getId`).
-        *   `onRequestGames`: Server broadcasts the list of available games (`GameService.broadcastGameList`).
-        *   `onGameStart`: Server informs players that a game they are in has started (`GameService.createOrJoinGame`).
-        *   `onGameUpdate`: Server broadcasts the updated state of a game to all players and spectators (`GameService.notifyGameUpdate`). This is the primary mechanism for state sync.
-        *   `onGameFinished`: Server informs players/spectators that a game has ended (`GameService.handleGameFinished`).
-        *   `onGameAborted`: Server informs a player if the game they were in was aborted (potentially).
-        *   `chatMessage` (`onClientMsg` or `onServerMsg`): Server relays chat messages to relevant clients (`ChatController`).
-        *   `sendDices` / `sendSelection` (`onClientMsg`): Server relays dice rolls or selections made by one player to other players in the game (`GameService.processDiceRoll`/`forwardSelectionToPlayers`).
+---
 
-    *   **State Synchronization:** The backend `GameService` maintains the authoritative game state. Client actions trigger events sent to the server. The server validates the action, updates the state in the corresponding `Game` object instance, logs the move via `GameLogService`, and then broadcasts the updated game state (`onGameUpdate`) to all connected clients (players and spectators) in that game room. The Flutter client receives this update in `SocketService._handleServerMessage` -> `app.callbackOnServerMsg` -> `_processGameUpdate` and updates its local UI state.
+## Frontend Description (`lib/`)
 
-## 6. Key Features Detailed
+The frontend is a Flutter application providing the user interface for playing Yatzy, managing settings, and viewing top scores. It communicates with the backend via Socket.IO for real-time updates and HTTP for less frequent data retrieval/submission.
 
-*   **Real-time Multiplayer:** Managed by the backend `GameService` and `Socket.IO`. `GameService` tracks active games and players. Actions are sent via Socket.IO, processed by the server, and state updates are broadcast back to clients.
-*   **Yatzy Game Logic:**
-    *   Backend: `Game` and `Player` models (`backend/src/models/`) manage state (turns, scores, cells, rolls). `GameService` orchestrates turn advancement, game start/end. Score calculation logic seems to primarily reside on the *client* (`application/application_functions_internal_calc_dice_values.dart`), which sends the calculated score with its selection (`sendSelection`). The server logs this score. *Note: Server-side validation of scores would be a good improvement.*
-    *   Frontend: `Application` class holds local state. `application_functions_internal_calc_dice_values.dart` contains score calculation logic used to display potential scores. `cellClick` sends the selection (including label and calculated score) to the backend.
-*   **Authentication:** Handled via REST API (`/api/signup`, `/api/login`). Uses bcrypt for password hashing and JWT for session management. `react-auth-db` in MongoDB stores user credentials.
-*   **Database Persistence:** MongoDB is used for:
-    *   User accounts (`react-auth-db` -> `users` collection).
-    *   (Potential) User activity logs (`react-auth-db` -> `logs` collection).
-    *   Yatzy game moves and results (`yatzy-game-log-db` -> `game_moves` collection, managed by `GameLogService`).
-    *   Top scores (`top-scores` database -> collections per game type).
-*   **Spectator Mode:**
-    *   Initiation: Client likely calls the REST endpoint (`/api/spectate/:gameId`) via `HttpService` to get initial game state and log history.
-    *   Real-time Updates: Client sends a `spectateGame` event via WebSocket. Backend `GameService.addSpectator` registers the socket ID. Subsequent `onGameUpdate` broadcasts from `GameService.notifyGameUpdate` are sent to spectators as well as players.
-    *   UI: `widgets/spectator_game_board.dart` is likely used to render the read-only game state.
-*   **Unity Integration:** `flutter_unity_widget` is used. The `Dices` widget can display the Unity view. `UnityCommunication` extension handles message passing between Flutter and Unity for dice state, rolls, and settings (like transparency, effects).
-*   **State Management (Flutter):** Uses Bloc/Cubit (`LanguageBloc` for language, `SetStateCubit` for triggering general UI updates) and a central `Application` class instance (`app`) which holds much of the game UI state directly. `ServiceProvider` provides access to `SocketService` and `GameService`.
+**Core Components & Architecture:**
 
-## 7. Setup & Running
+1.  **Initialization (`main.dart`, `startup.dart`):**
+    *   Sets up the Flutter application (`runApp`).
+    *   Initializes shared preferences (`SharedPrefProvider`) for storing settings.
+    *   Configures dependency injection (`getIt`, `injectable`).
+    *   Sets up global state management using Flutter Bloc (`LanguageBloc`, `SetStateCubit`).
+    *   Initializes global variables/configuration in `startup.dart` (like `isOnline`, `localhost` URL, default language, instances of core classes like `app`, `dices`, `chat`).
+    *   Wraps the application in `ServiceProvider` (`app_widget.dart`) to make services accessible.
+    *   Crucially, `app_widget.dart`'s `builder` initializes the connection via `SocketService.connect()` after the first frame.
+
+2.  **Routing (`router/`):**
+    *   Uses the `auto_route` package for declarative navigation.
+    *   Defines routes for the main views: `SettingsView` (initial) and `ApplicationView` (game screen).
+
+3.  **State Management (`states/`):**
+    *   Uses `flutter_bloc`.
+    *   `LanguageBloc`: Manages the application's current language.
+    *   `SetStateCubit`: A simple cubit used extensively for triggering general UI rebuilds (`context.read<SetStateCubit>().setState()`). This suggests a mix of Bloc for specific features and a more basic "setState" approach for broader UI updates managed within the `Application` class.
+
+4.  **Core Application Logic (`application/`):**
+    *   `Application.dart`: A central class holding much of the frontend game state and UI logic. It's instantiated globally in `startup.dart`. Contains game state variables (`gameType`, `nrPlayers`, `gameData`, `myPlayerId`, `playerToMove`, board state arrays like `cellValue`, `fixedCell`, `appText`, `appColors`). Manages interactions with the `Dices` component and handles UI updates via callbacks and the `SetStateCubit`.
+    *   `CommunicationApplication.dart`: An extension containing the crucial `callbackOnServerMsg` and `callbackOnClientMsg` methods. These methods parse messages received from the `SocketService` and update the `Application` state accordingly (handling game start, updates, aborts, finish, chat messages, dice/selection updates from other players). Also handles sending chat messages.
+    *   `WidgetApplicationScaffold.dart`: Extension defining the main scaffold/layout for the `ApplicationView`, arranging different widgets (game board, dice, chat, top scores, scroll text) based on screen orientation. Includes logic for floating action buttons (Settings, New Game, Regret, Extra Move).
+    *   `WidgetApplication.dart`: Contains the `WidgetSetupGameBoard` (builds the Yatzy scorecard UI based on `Application` state) and `WidgetDisplayGameStatus` widgets.
+    *   `WidgetApplicationSettings.dart`: Extension defining the UI for the `SettingsView`, including game type selection, player count, username input, available game list (with join buttons), spectator buttons, and general settings tabs (language, animations, Unity options). Includes the `SpectatorGameBoard` when spectating.
+    *   `LanguagesApplication.dart`: Mixin holding localized strings for the application UI elements.
+    *   `ApplicationFunctionsInternal*.dart`: Extensions containing helper functions for cell clicks, local UI updates after selection, board coloring, and dice score calculations.
+
+5.  **Networking (`services/`):**
+    *   `SocketService.dart`: The *modern* implementation for handling Socket.IO communication. Manages connection state, sends/receives events (`sendToServer`, `sendToClients`, `onClientMsg`, `onServerMsg`), and interacts with the `Application` class via callbacks (`app.callbackOnClientMsg`, `app.callbackOnServerMsg`). It's provided via `ServiceProvider`.
+    *   `HttpService.dart`: The *modern* implementation for making HTTP requests (GET, POST, PUT, DELETE) to the backend API using the `http` package. Used for fetching/updating top scores, potentially login/signup. It's provided via `ServiceProvider`.
+    *   `GameService.dart`: A frontend service that likely acts as an intermediary between UI components and the `SocketService` for game-specific actions. It holds a reference to the `SocketService`.
+    *   `ServiceProvider.dart`: Uses `InheritedWidget` to make `SocketService` and `GameService` instances available throughout the widget tree via `ServiceProvider.of(context)`.
+
+6.  **Dice Component (`dices/`):**
+    *   `Dices.dart`: Manages the state of the dice (values, held status, rolls left). Includes logic for rolling dice locally (for single-player or visual feedback).
+    *   `UnityCommunication.dart`: Handles the communication *to* and *from* the embedded Unity widget using `flutter_unity_widget`. Defines methods to send messages (reset, start, update dice, update colors, toggle features) and callbacks (`onUnityMessage`, `onUnityCreated`) to handle messages received *from* Unity (like dice roll results).
+    *   `WidgetDices.dart`: The UI widget that either displays the 2D dice images or embeds the `UnityWidget` based on the `unityDices` setting.
+
+7.  **Other Features (`chat/`, `top_score/`, `scroll/`, `tutorial/`):**
+    *   `chat/`: Contains the `Chat` logic class and `WidgetChat` UI for the in-game chatbox.
+    *   `top_score/`: Contains the `TopScore` logic class (fetching/updating scores via `HttpService`) and `WidgetTopScore` UI.
+    *   `scroll/`: Implements an animated scrolling text widget (`WidgetAnimationsScroll`).
+    *   `tutorial/`: Contains logic and widgets for displaying tutorial arrows/hints (`WidgetArrow`).
+
+8.  **Models (`models/`):**
+    *   Defines frontend representations of `Game`, `Player`, and `BoardCell`, used to structure data received from the backend and manage UI state.
+
+9.  **Utilities (`utils/`):**
+    *   `yatzy_mapping_client.dart`: Provides client-side mapping between cell indices and string labels, ensuring consistency with the backend when sending/interpreting selections.
+
+---
+
+## Key Interactions & Workflow
+
+1.  **App Start:** Flutter app initializes, `ServiceProvider` creates `SocketService` and `GameService`. `AppWidget` triggers `SocketService.connect()`.
+2.  **Connection:** `SocketService` connects to the backend Socket.IO server, receives a unique `socketId`.
+3.  **Settings:** User configures game settings (type, players, username) in `SettingsView`.
+4.  **Create/Join Game:**
+    *   User clicks "Create Game".
+    *   `Application` -> `onStartGameButton` -> `SocketService.sendToServer` (action: `requestGame`).
+    *   Backend `GameController` -> `GameService.createOrJoinGame`.
+    *   Backend broadcasts updated game list (`onRequestGames`) via `onServerMsg`.
+    *   *Or* User clicks an available game to join.
+    *   `Application` -> `onAttemptJoinGame` -> `SocketService.sendToServer` (action: `requestJoinGame`).
+    *   Backend `GameController` -> `GameService.joinGame`.
+    *   Backend broadcasts updated game list.
+5.  **Game Start:** When a game is full, backend `GameService` marks it as started and broadcasts `onGameStart` via `onServerMsg`.
+6.  **Navigation:** Frontend receives `onGameStart`, `CommunicationApplication.callbackOnServerMsg` processes it, updates `Application` state, and navigates to `ApplicationView`.
+7.  **Gameplay Turn:**
+    *   Backend determines `playerToMove` and includes it in `onServerMsg` updates.
+    *   Frontend `Application` updates UI based on `isMyTurn`.
+    *   **Dice Roll:**
+        *   If `unityDices` is true: User interacts with Unity, Unity performs roll, sends result via `onUnityMessage` -> `UnityCommunication.onUnityMessage` -> `Dices.callbackUpdateDiceValues`.
+        *   If `unityDices` is false: User clicks "Roll" button (`WidgetDices`), `Dices.rollDices` calculates locally, calls `Dices.callbackUpdateDiceValues`.
+        *   `Dices.callbackUpdateDiceValues` calls `Application.callbackUpdateDiceValues` which sends dice values (`sendDices`) to backend via `SocketService.sendToClients`.
+        *   Backend `GameController.handleSendDices` -> `GameService.processDiceRoll` (logs roll) -> broadcasts `sendDices` via `onClientMsg` to *other* players and spectators, and sends full state update (`onServerMsg`) to *all*.
+    *   **Score Selection:**
+        *   User clicks a cell (`WidgetSetupGameBoard`).
+        *   `Application.cellClick` calculates local score, creates message with `selectionLabel`, sends (`sendSelection`) via `SocketService.sendToClients`. Updates UI *optimistically* via `applyLocalSelection`.
+        *   Backend `GameController.handleSendSelection` -> `GameService.processSelection` (validates turn, logs selection, updates game state, advances turn).
+        *   Backend sends full state update (`onGameUpdate`) via `onServerMsg` to all players/spectators. Frontend `callbackOnServerMsg` receives this authoritative state.
+8.  **Chat:** User types message, `Chat.onSubmitted` -> `Application.chatCallbackOnSubmitted` -> `SocketService.sendToClients` (action: `chatMessage`). Backend `ChatController` relays message via `onClientMsg` to other players. Frontend `callbackOnClientMsg` -> `Application.updateChat` updates UI.
+9.  **Spectating:**
+    *   User clicks "Spectate" button in `SettingsView`.
+    *   `Application.onSpectateGame` -> `SocketService.sendToServer` (action: `spectateGame`).
+    *   Backend `GameController.handleSpectateGame` -> fetches game state/log, sends initial state (`onGameStart` with `spectator: true`) via `onServerMsg`. Adds spectator to `GameService`.
+    *   Frontend `callbackOnServerMsg` receives spectator data, sets `isSpectating` flag, updates UI to show `SpectatorGameBoard`.
+    *   Subsequent `onGameUpdate` messages are received and displayed by `SpectatorGameBoard`.
+10. **Game End:** Backend `GameService` detects game end, logs final scores, updates top scores via `TopScoreService`, broadcasts `onGameFinished` via `onServerMsg`. Frontend `callbackOnServerMsg` handles this, shows dialog, navigates back to `SettingsView`.
+
+### Codebase Analysis: jesseburstrom-client
+
+**Version:** 1.0
+**Date:** 2024-10-27
+
+**Format:**
+[F] File Path
+  [C] Class Name
+    [f] methodOrFunctionName() -> [Dependency: Class/Function/Module (Location)]
+    [v] propertyName : Type
+    [extends/with/implements] BaseClass/Mixin/Interface (Location)
+  [f] topLevelFunctionName() -> [Dependency: Class/Function/Module (Location)]
+
+**--- Backend (Node.js/TypeScript) ---**
+
+[F] backend/src/server.ts
+  [f] (Top Level Script)
+    -> express (External)
+    -> routes/index -> routes() ([F]backend/src/routes/index.ts)
+    -> db -> initializeDbConnection() ([F]backend/src/db.ts)
+    -> path (External: Node)
+    -> cors (External)
+    -> socket.io -> Server ([F]backend/node_modules/socket.io)
+    -> http -> createServer (External: Node)
+    -> services/GameService ([F]backend/src/services/GameService.ts)
+    -> services/GameLogService ([F]backend/src/services/GameLogService.ts)
+    -> services/TopScoreService ([F]backend/src/services/TopScoreService.ts)
+    -> controllers/GameController ([F]backend/src/controllers/GameController.ts)
+    -> controllers/PlayerController ([F]backend/src/controllers/PlayerController.ts)
+    -> controllers/ChatController ([F]backend/src/controllers/ChatController.ts)
+    -> routes/spectateGameRoute -> spectateGameRoute, initializeSpectateRoute ([F]backend/src/routes/spectateGameRoute.ts)
+    - Creates: Express app, httpServer, io (Socket.IO Server)
+    - Creates: gameLogService, topScoreService, gameService, gameController, playerController, chatController
+    - Configures: CORS, express.json, express.static
+    - Loops through `routes()` result, calls `app[method](path, handler)`
+    - Calls: `initializeSpectateRoute(gameService, gameLogService)`
+    - Sets up Socket.IO connection ('connect' event)
+      - Inside 'connect':
+        -> socket.emit('welcome')
+        -> socket.on('echo', ...) -> socket.emit('echo')
+        -> gameController.registerSocketHandlers(socket)
+        -> playerController.registerSocketHandlers(socket)
+        -> chatController.registerSocketHandlers(socket)
+        -> socket.on('sendToServer', ...)
+        -> socket.on('sendToClients', ...)
+        -> socket.on('disconnect', ...) -> gameService.handlePlayerDisconnect(socket.id)
+    - Defines HTTP GET '/flutter', '*' routes -> res.sendFile()
+    - Calls: `initializeDbConnection()`
+    - Calls: `httpServer.listen()`
+
+[F] backend/src/db.ts
+  [v] client : MongoClient (External: mongodb)
+  [f] initializeDbConnection() -> MongoClient.connect (External: mongodb)
+  [f] getDbConnection(dbName: string) : Db -> client.db() (External: mongodb)
+
+[F] backend/src/routes/index.ts
+  [f] routes() -> Array<RouteObject>
+    -> ./logInRoute ([F]backend/src/routes/logInRoute.ts)
+    -> ./logRoute ([F]backend/src/routes/logRoute.ts)
+    -> ./getLogRoute ([F]backend/src/routes/getLogRoute.ts)
+    -> ./signUpRoute ([F]backend/src/routes/signUpRoute.ts)
+    -> ./getTopScores ([F]backend/src/routes/getTopScores.ts)
+    -> ./updateTopScore ([F]backend/src/routes/updateTopScore.ts)
+    <- backend/src/server.ts
+
+[F] backend/src/routes/logInRoute.ts
+  [v] logInRoute : { path, method, handler }
+    [f] handler(req, res)
+      -> bcrypt (External)
+      -> jsonwebtoken (External)
+      -> ../db -> getDbConnection() ([F]backend/src/db.ts)
+      -> db.collection('users').findOne()
+      -> bcrypt.compare()
+      -> jwt.sign()
+      -> res.status().json() / res.sendStatus()
+
+[F] backend/src/routes/logRoute.ts
+  [v] logRoute : { path, method, handler }
+    [f] handler(req, res)
+      -> jsonwebtoken (External)
+      -> ../db -> getDbConnection() ([F]backend/src/db.ts)
+      -> jwt.verify()
+      -> db.collection('logs').findOneAndUpdate()
+      -> res.status().json()
+
+[F] backend/src/routes/getLogRoute.ts
+  [v] getLogRoute : { path, method, handler }
+    [f] handler(req, res)
+      -> jsonwebtoken (External)
+      -> ../db -> getDbConnection() ([F]backend/src/db.ts)
+      -> jwt.verify()
+      -> db.collection('logs').find().toArray()
+      -> res.status().json()
+
+[F] backend/src/routes/signUpRoute.ts
+  [v] signUpRoute : { path, method, handler }
+    [f] handler(req, res)
+      -> bcrypt (External)
+      -> jsonwebtoken (External)
+      -> ../db -> getDbConnection() ([F]backend/src/db.ts)
+      -> db.collection('users').findOne()
+      -> bcrypt.hash()
+      -> db.collection('users').insertOne()
+      -> db.collection('logs').insertOne()
+      -> jwt.sign()
+      -> res.status().json() / res.sendStatus()
+
+[F] backend/src/routes/getTopScores.ts
+  [v] getTopScores : { path, method, handler }
+    [f] handler(req, res)
+      -> ../db -> getDbConnection() ([F]backend/src/db.ts)
+      -> db.collection(...).find().sort().toArray()
+      -> res.status().json() / res.sendStatus()
+
+[F] backend/src/routes/updateTopScore.ts
+  [v] updateTopScore : { path, method, handler }
+    [f] handler(req, res)
+      -> ../db -> getDbConnection() ([F]backend/src/db.ts)
+      -> db.collection(...).insertOne()
+      -> db.collection(...).find().sort().toArray()
+      -> res.status().json() / res.sendStatus()
+
+[F] backend/src/routes/spectateGameRoute.ts
+  [v] gameServiceInstance : GameService ([F]backend/src/services/GameService.ts)
+  [v] gameLogServiceInstance : GameLogService ([F]backend/src/services/GameLogService.ts)
+  [f] initializeSpectateRoute(gs, gls) <- backend/src/server.ts
+  [v] spectateGameRoute : { path, method, handler }
+    [f] handler(req, res)
+      -> gameServiceInstance.getGame()
+      -> gameLogServiceInstance.getGameLog()
+      -> game.toJSON()
+      -> res.status().json()
+
+[F] backend/src/controllers/ChatController.ts
+  [C] ChatController
+    [v] io : Server (External: socket.io)
+    [v] gameService : GameService ([F]backend/src/services/GameService.ts)
+    [f] constructor(io, gameService) <- backend/src/server.ts
+    [f] registerSocketHandlers(socket) <- backend/src/server.ts
+      -> socket.on('sendToClients', ...) -> this.handleChatMessage()
+      -> socket.on('sendToServer', ...) -> this.handleServerChatMessage()
+    [f] handleChatMessage(socket, data)
+      -> gameService.getGame()
+      -> io.to(playerId).emit('onClientMsg')
+    [f] handleServerChatMessage(socket, data)
+      -> gameService.getGame()
+      -> io.to(playerId).emit('onClientMsg')
+      -> socket.to(room).emit('onClientMsg')
+    [f] broadcastToPlayersInSameGame(socket, data)
+      -> gameService.getAllGames()
+      -> io.to(playerId).emit('onClientMsg')
+
+[F] backend/src/controllers/GameController.ts
+  [C] GameController
+    [v] gameService : GameService ([F]backend/src/services/GameService.ts)
+    [v] gameLogService : GameLogService ([F]backend/src/services/GameLogService.ts)
+    [f] constructor(gameService, gameLogService) <- backend/src/server.ts
+    [f] registerSocketHandlers(socket) <- backend/src/server.ts
+      -> socket.on('sendToServer', ...) -> handles various actions (requestGame, joinGame, useRegret, etc.)
+      -> socket.on('sendToClients', ...) -> handles sendDices, sendSelection
+    [f] handleRequestGame(socket, data) -> PlayerFactory.createPlayer(), gameService.createOrJoinGame()
+    [f] handleRequestJoinGame(socket, data) -> gameService.getGame(), PlayerFactory.createPlayer(), gameService.joinGame(), gameService.notifyGameUpdate(), gameService.broadcastGameList()
+    [f] handleRemoveGame(socket, data) -> gameService.getGame(), gameService.removeGame(), gameService.broadcastGameList()
+    [f] handleSendDices(socket, data) -> gameService.getGame(), gameService.processDiceRoll()
+    [f] handleSendSelection(socket, data) -> gameService.getGame(), gameService.processSelection(), gameService.forwardSelectionToPlayers()
+    [f] handleUseRegret(socket, data) -> gameService.getGame(), gameService.logRegret(), gameService.notifyGameUpdate()
+    [f] handleUseExtraMove(socket, data) -> gameService.getGame(), gameService.logExtraMove(), gameService.notifyGameUpdate()
+    [f] handleSpectateGame(socket, data) -> gameService.getGame(), gameLogService.getGameLog(), game.toJSON(), gameLogService.logSpectate(), socket.emit('onServerMsg'), gameService.addSpectator()
+
+[F] backend/src/controllers/PlayerController.ts
+  [C] PlayerController
+    [v] gameService : GameService ([F]backend/src/services/GameService.ts)
+    [v] gameLogService : GameLogService ([F]backend/src/services/GameLogService.ts)
+    [v] playerRegistry : Map<string, boolean>
+    [f] constructor(gameService, gameLogService) <- backend/src/server.ts
+    [f] registerSocketHandlers(socket) <- backend/src/server.ts
+      -> socket.on('sendToServer', ...) -> this.handleGetId()
+    [f] handleGetId(socket) -> playerRegistry.set(), socket.emit('onServerMsg'), gameService.broadcastGameListToPlayer()
+
+[F] backend/src/services/GameLogService.ts
+  [C] GameLogService
+    [f] constructor() <- backend/src/server.ts
+    [f] getCollection() : Collection<GameLog> -> getDbConnection().collection() ([F]backend/src/db.ts)
+    [f] getDatabaseName()
+    [f] getCollectionName()
+    [f] logGameStart(game: Game) -> this.getCollection().replaceOne()
+    [f] logMove(gameId, move: GameMove) -> this.getCollection().updateOne(), this.getCollection().findOne(), this.getCollection().insertOne()
+    [f] logGameEnd(gameId, finalScores) -> this.getCollection().updateOne()
+    [f] getGameLog(gameId) : Promise<GameLog | null> -> this.getCollection().findOne()
+    [f] logSpectate(gameId, spectatorId, spectatorName) -> this.getGameLog(), this.getCollection().updateOne()
+
+[F] backend/src/services/GameService.ts
+  [C] GameService
+    [v] games : Map<number, Game>
+    [v] spectators : Map<number, Set<string>>
+    [v] gameIdCounter : number
+    [v] io : Server (External: socket.io)
+    [v] gameLogService : GameLogService ([F]backend/src/services/GameLogService.ts)
+    [v] topScoreService : TopScoreService ([F]backend/src/services/TopScoreService.ts)
+    [f] constructor(io, gameLogService, topScoreService) <- backend/src/server.ts
+    [f] addSpectator(gameId, spectatorId) -> games.get(), spectators.set/get(), game.toJSON(), io.to().emit('onServerMsg')
+    [f] removeSpectator(spectatorId) -> spectators.delete()
+    [f] createGame(gameType, maxPlayers) : Game -> new Game(), games.set(), gameLogService.logGameStart()
+    [f] findAvailableGame(gameType, maxPlayers) : Game | null -> games.values() iteration
+    [f] getGame(gameId) : Game | undefined -> games.get()
+    [f] getAllGames() : Game[] -> Array.from(games.values())
+    [f] removeGame(gameId) : boolean -> games.get(), game.players.map(), player.getScore(), gameLogService.logGameEnd(), games.delete()
+    [f] joinGame(gameId, player: Player) : Game | null -> games.get(), game.addPlayer(), gameLogService.logGameStart()
+    [f] handlePlayerDisconnect(playerId) <- backend/src/server.ts (socket disconnect)
+      -> games iteration, game.findPlayerIndex(), gameLogService.logMove(), game.markPlayerAborted(), this.handleGameFinished(), this.notifyGameUpdate(), this.broadcastGameList(), this.removeSpectator()
+    [f] broadcastGameList() -> games.values().map(game.toJSON()), io.emit('onServerMsg')
+    [f] broadcastGameListToPlayer(playerId) -> games.values().map(game.toJSON()), io.to(playerId).emit('onServerMsg')
+    [f] notifyGameUpdate(game: Game) -> game.toJSON(), io.to(player.id).emit('onServerMsg'), spectators.get(), io.to(spectatorId).emit('onServerMsg')
+    [f] handlePlayerStartingNewGame(playerId) -> this.handlePlayerDisconnect()
+    [f] handlePlayerAbort(playerId) -> this.handlePlayerDisconnect()
+    [f] handleGameFinished(game: Game) -> game.players.map(), player.getScore(), gameLogService.logGameEnd(), topScoreService.updateTopScore(), this.notifyGameFinished(), games.delete(), spectators.delete(), this.broadcastGameList()
+    [f] notifyGameFinished(game: Game) -> game.toJSON(), io.to(player.id).emit('onServerMsg'), spectators.get(), io.to(spectatorId).emit('onServerMsg')
+    [f] processDiceRoll(gameId, playerId, diceValues, keptDice) -> games.get(), game.findPlayerIndex(), gameLogService.logMove(), game.setDiceValues(), game.incrementRollCount(), io.to(player.id).emit('onClientMsg'), spectators.get(), io.to(spectatorId).emit('onClientMsg'), this.notifyGameUpdate()
+    [f] processSelection(gameId, playerId, selectionLabel, score) -> games.get(), game.findPlayerIndex(), gameLogService.logMove(), game.applySelection(), game.isGameFinished(), this.handleGameFinished(), game.setDiceValues(), game.advanceToNextActivePlayer(), this.notifyGameUpdate()
+    [f] forwardSelectionToPlayers(gameId, senderId, selectionData) -> games.get(), getSelectionLabel(), game.findPlayerIndex(), io.to(player.id).emit('onClientMsg')
+    [f] createOrJoinGame(gameType, maxPlayers, player: Player) : Game -> this.handlePlayerStartingNewGame(), this.findAvailableGame(), this.createGame(), game.addPlayer(), gameLogService.logGameStart(), this.notifyGameUpdate(), this.broadcastGameList()
+    [f] logRegret(gameId, playerId) -> games.get(), game.findPlayerIndex(), gameLogService.logMove()
+    [f] logExtraMove(gameId, playerId) -> games.get(), game.findPlayerIndex(), gameLogService.logMove()
+
+[F] backend/src/services/TopScoreService.ts
+  [C] TopScoreService
+    [f] constructor() <- backend/src/server.ts
+    [f] getDb() : Db -> getDbConnection() ([F]backend/src/db.ts)
+    [f] getCollection(gameType) : Collection<TopScoreEntry> -> this.getDb().collection()
+    [f] getTopScores(gameType, limit) : Promise<TopScoreEntry[]> -> this.getCollection().find().sort().limit().toArray()
+    [f] updateTopScore(gameType, name, score) : Promise<boolean> -> this.getCollection().insertOne()
+
+[F] backend/src/models/BoardCell.ts
+  [C] BoardCell
+    [v] index, label, value, fixed, isNonScoreCell
+    [f] constructor()
+    [f] toJSON() : any
+    [sf] fromJson(data, defaultLabel) : BoardCell -> new BoardCell()
+
+[F] backend/src/models/Dice.ts
+  [C] Dice
+    [v] values : number[]
+    [v] diceCount : number
+    [f] constructor()
+    [f] roll() : number[] -> Math.random()
+    [f] rollSelected(keptDice: boolean[]) : number[] -> Math.random()
+    [f] getValues() : number[]
+    [f] setValues(values: number[])
+    [f] reset()
+
+[F] backend/src/models/Game.ts
+  [C] Game
+    [v] id, gameType, players: Player[], maxPlayers, connectedPlayers, gameStarted, gameFinished, playerToMove, diceValues: number[], userNames: string[], gameId, playerIds: string[], abortedPlayers: boolean[], rollCount: number, turnNumber: number
+    -> PlayerFactory ([F]backend/src/models/Player.ts)
+    -> uuidv4 (External: uuid)
+    -> getSelectionIndex ([F]backend/src/utils/yatzyMapping.ts)
+    [f] constructor(id, gameType, maxPlayers) -> PlayerFactory.createEmptyPlayer()
+    [f] addPlayer(player: Player, position: number) : boolean -> this.findEmptySlot()
+    [f] removePlayer(playerId: string) : boolean -> this.findPlayerIndex(), this.advanceToNextActivePlayer()
+    [f] markPlayerAborted(playerId: string) : boolean -> this.findPlayerIndex(), this.advanceToNextActivePlayer()
+    [f] findPlayerIndex(playerId: string) : number -> players.findIndex()
+    [f] findEmptySlot() : number -> players.findIndex()
+    [f] isGameFull() : boolean
+    [f] getCurrentTurnNumber() : number
+    [f] incrementRollCount()
+    [f] advanceToNextActivePlayer()
+    [f] applySelection(playerIndex, selectionLabel, score) -> getSelectionIndex(), player.calculateScores()
+    [f] isGameFinished() : boolean -> player.hasCompletedGame()
+    [f] setDiceValues(values: number[])
+    [f] toJSON() : any -> player.toJSON()
+    [sf] fromJSON(data) : Game -> new Game(), Player.fromJSON(), PlayerFactory.createPlayer(), PlayerFactory.createEmptyPlayer()
+
+[F] backend/src/models/Player.ts
+  [C] Player
+    [v] id, username, isActive, cells: BoardCell[], score, upperSum, bonusAchieved, regretsLeft?, extraMovesLeft?
+    -> BoardCell ([F]backend/src/models/BoardCell.ts)
+    -> GameConfig, getBaseGameType ([F]backend/src/utils/gameConfig.ts)
+    [f] constructor(id, username, gameType, ...) -> new BoardCell()
+    [f] calculateScores() -> GameConfig
+    [f] hasCompletedGame() : boolean -> cells.every()
+    [f] getScore() : number
+    [f] toJSON() : any -> cell.toJSON()
+    [sf] fromJSON(data, gameType) : Player -> BoardCell.fromJson(), new Player()
+  [C] PlayerFactory
+    [sf] createPlayer(id, username, gameType) : Player -> new Player()
+    [sf] createEmptyPlayer(gameType) : Player -> new BoardCell(), new Player()
+
+[F] backend/src/utils/gameConfig.ts
+  [v] GameConfig : { [key: string]: GameTypeConfig }
+  [f] getBaseGameType(gameType: string) : keyof typeof GameConfig
+
+[F] backend/src/utils/index.ts
+  [f] randomInt(min, max) -> Math.random()
+  [f] delay(ms) -> Promise(setTimeout)
+  [f] isDefined(value)
+  [f] deepCopy(obj) -> JSON.parse(JSON.stringify())
+
+[F] backend/src/utils/yatzyMapping.ts
+  [v] gameTypeMappings : { [key: string]: string[] }
+  [f] getBaseGameType(gameType: string) : keyof typeof gameTypeMappings
+  [f] getSelectionLabel(gameType, index) : string | null
+  [f] getSelectionIndex(gameType, label) : number
+
+
+**--- Frontend (Flutter/Dart) ---**
+
+[F] lib/main.dart
+  [f] main()
+    -> WidgetsFlutterBinding (External: Flutter)
+    -> SharedPrefProvider.loadPrefs() ([F]lib/shared_preferences.dart)
+    -> configureInjection() ([F]lib/injection.dart)
+    -> runApp()
+    -> MultiBlocProvider (External: flutter_bloc)
+      -> LanguageBloc ([F]lib/states/bloc/language/language_bloc.dart)
+      -> SetStateCubit ([F]lib/states/cubit/state/state_cubit.dart)
+      -> AppWidget ([F]lib/core/app_widget.dart)
+
+[F] lib/core/app_widget.dart
+  [C] AppWidget extends StatelessWidget
+    [v] _appRouter : AppRouter ([F]lib/router/router.dart)
+    [f] build(context)
+      -> topScore = TopScore() ([F]lib/top_score/top_score.dart)
+      -> animationsScroll = AnimationsScroll() ([F]lib/scroll/animations_scroll.dart)
+      -> tutorial = Tutorial() ([F]lib/tutorial/tutorial.dart)
+      -> dices = Dices() ([F]lib/dices/dices.dart)
+      -> app = Application() ([F]lib/application/application.dart)
+      -> chat = Chat() ([F]lib/chat/chat.dart)
+      -> ServiceProvider.initialize() ([F]lib/services/service_provider.dart)
+        -> SocketService ([F]lib/services/socket_service.dart)
+        -> GameService ([F]lib/services/game_service.dart)
+      -> MaterialApp.router() (External: Flutter)
+        -> ServiceProvider.of(context).socketService.connect()
+        -> app.setSocketService(service)
+
+[F] lib/injection.dart
+  [v] getIt : GetIt (External: get_it)
+  [f] configureInjection(environment) -> getIt.initApiInjection() (Generated: [F]lib/injection.config.dart)
+
+[F] lib/injection.config.dart (Generated)
+  [X] GetItInjectableX on GetIt
+    [f] init() -> GetItHelper, injectableModule.router, LanguageBloc, SetStateCubit
+
+[F] lib/core/injectable_modules.dart
+  [C] InjectableModule (abstract)
+    [f] router : AppRouter -> new AppRouter() ([F]lib/router/router.dart)
+
+[F] lib/router/router.dart
+  [C] AppRouter extends $AppRouter (Generated: [F]lib/router/router.gr.dart)
+    [v] routes -> List<AutoRoute> (Defines SettingsView, ApplicationView)
+
+[F] lib/router/router.gr.dart (Generated)
+  [C] $AppRouter extends RootStackRouter
+  [C] ApplicationView extends PageRouteInfo
+  [C] SettingsView extends PageRouteInfo
+
+[F] lib/shared_preferences.dart
+  [C] SharedPrefProvider (abstract)
+    [v] prefs : SharedPreferences (External: shared_preferences)
+    [sf] loadPrefs() -> SharedPreferences.getInstance()
+    [sf] fetchPref...(key) -> prefs.get...()
+    [sf] setPref...(key, value) -> prefs.set...()
+
+[F] lib/startup.dart
+  [v] (Global Variables: isOnline, isDebug, localhost, applicationStarted, userName, ...)
+
+[F] lib/application/application.dart
+  [C] Application with LanguagesApplication
+    [v] context, inputItems, gameDices : Dices
+    [v] (State variables: isSpectating, gameType, nrPlayers, gameData, gameId, myPlayerId, board state arrays, ...)
+    [v] animation : AnimationsApplication ([F]lib/application/animations_application.dart)
+    [v] socketService : SocketService? ([F]lib/services/socket_service.dart)
+    [f] constructor() -> gameDices.setCallbacks(), languagesSetup()
+    [f] getChosenLanguage() -> chosenLanguage (Global)
+    [f] getStandardLanguage() -> standardLanguage (Global)
+    [f] callbackCheckPlayerToMove() -> playerToMove == myPlayerId
+    [f] callbackUnityCreated() -> gameDices.sendStartToUnity()
+    [f] callbackUpdateDiceValues() -> updateDiceValues(), socketService?.sendToClients()
+    [f] updateDiceValues() -> clearFocus(), yatzyFunctions[i](), context.read<SetStateCubit>().setState()
+    [f] setAppText()
+    [f] setup() -> topScore.loadTopScoreFromServer(), gameDices.initDices(), yatzyFunctions assignment, state initialization
+    [f] setSocketService(service)
+
+[F] lib/application/application_functions_internal.dart
+  [X] ApplicationFunctionsInternal on Application
+    [f] clearFocus()
+    [f] cellClick(player, cell) -> getSelectionLabel(), socketService?.sendToClients(), applyLocalSelection()
+    [f] applyLocalSelection(player, cell, score) -> gameDices.sendResetToUnity(), fixedCell assignment, score calculations, colorBoard(), gameDices.clearDices(), context.read<SetStateCubit>().setState()
+    [f] colorBoard()
+
+[F] lib/application/communication_application.dart
+  [X] CommunicationApplication on Application
+    [f] resetDices() -> gameDices.clearDices(), clearFocus()
+    [f] handlePlayerAbort(abortedPlayerIndex) -> advanceToNextActivePlayer(), colorBoard()
+    [f] advanceToNextActivePlayer() -> colorBoard(), resetDices(), gameDices.sendResetToUnity(), gameDices.sendStartToUnity()
+    [f] callbackOnServerMsg(data) -> ServiceProvider.of().socketService, SharedPrefProvider.fetchPrefObject(), _processGameUpdate(), setup(), router.push/pop, _checkIfPlayerAborted(), showDialog()
+    [f] _checkIfPlayerAborted() -> handlePlayerAbort(), _advanceToNextActivePlayer(), colorBoard()
+    [f] _advanceToNextActivePlayer() -> resetDices(), gameDices.sendResetToUnity(), gameDices.sendStartToUnity()
+    [f] _processGameUpdate(data) -> game = Game.fromJson(), context.read<SetStateCubit>().setState() // Handles spectator logic here as well
+    [f] chatCallbackOnSubmitted(text) -> chat.scrollController, socketService?.sendToClients()
+    [f] updateChat(text) -> chat.messages.add(), chat.scrollController.animateTo()
+    [f] callbackOnClientMsg(data) -> app.callbackOnClientMsg(), updateDiceValues(), gameDices.updateDiceImages(), gameDices.sendDicesToUnity(), updateChat(), router.push()
+
+[F] lib/application/application_functions_internal_calc_dice_values.dart
+  [X] ApplicationCalcDiceValues on Application
+    [f] (Pure score calculation functions: zero, calcOnes, calcPair, calcYatzy, etc.) -> calcDiceNr(), gameDices.diceValue
+
+[F] lib/application/animations_application.dart
+  [C] AnimationsApplication
+    [v] animationControllers, animationDurations, cellAnimationControllers, ...
+    [f] animateBoard() -> controller.forward()
+    [f] setupAnimation(ticket, nrPlayers, ...) -> AnimationController(), CurveTween()
+
+[F] lib/application/languages_application.dart
+  [M] LanguagesApplication
+    [f] languagesSetup()
+    [f] getText(textVariable)
+    [v] (_ones, _twos, ..., _settings_, ...) : Map<String, String>
+
+[F] lib/application/widget_application.dart
+  [C] WidgetSetupGameBoard extends StatefulWidget -> _WidgetSetupGameBoardState
+  [C] _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with LanguagesApplication
+    [f] build(context) -> app.setup(), app.setAppText(), AnimatedBuilder(), Positioned(), Container(), FittedBox(), Text(), GestureDetector() -> app.cellClick(), context.read<SetStateCubit>().setState()
+  [C] WidgetDisplayGameStatus extends StatefulWidget -> _WidgetDisplayGameStatusState
+  [C] _WidgetDisplayGameStatusState extends State<WidgetDisplayGameStatus> with LanguagesApplication
+    [f] build(context) -> AutoSizeText(), Text() (Displays game state from `app`)
+
+[F] lib/application/widget_application_scaffold.dart
+  [X] WidgetApplicationScaffold on Application
+    [f] widgetScaffold(context, state) -> MediaQuery, Scaffold(), Stack(), Positioned(), WidgetDices(), WidgetTopScore(), WidgetSetupGameBoard(), WidgetDisplayGameStatus(), WidgetChat(), WidgetAnimationsScroll(), widgetFloatingButton()
+
+[F] lib/application/widget_application_settings.dart
+  [X] WidgetApplicationSettings on Application
+    [f] widgetWaitingGame(context) -> inputItems.widgetButton(), Text() -> onAttemptJoinGame(), onSpectateGame()
+    [f] onSpectateGame(context, gameId) -> ServiceProvider.of().socketService.sendToServer(), context.read<SetStateCubit>().setState()
+    [f] onAttemptJoinGame(context, i) -> ServiceProvider.of().socketService.sendToServer()
+    [f] onStartGameButton(context, state) -> ServiceProvider.of().socketService.sendToServer(), setup(), AutoRouter.of().push/pop(), SharedPrefProvider.setPrefObject()
+    [f] onChangeUserName(value)
+    [f] widgetScaffoldSettings(context, state) -> DefaultTabController(), Scaffold(), AppBar(), TabBar(), TabBarView(), ListView(), Card(), Container(), Column(), Row(), Text(), inputItems various widgets, ElevatedButton(), widgetWaitingGame(), SpectatorGameBoard() ([F]lib/widgets/spectator_game_board.dart), gameDices.widgetUnitySettings()
+
+[F] lib/chat/chat.dart
+  [C] ChatMessage
+  [C] Chat
+    [v] _getChosenLanguage, _standardLanguage, setState, inputItems, callbackOnSubmitted
+    [v] chatTextController, scrollController, focusNode, listenerKey, messages: List<ChatMessage>
+    [f] constructor()
+    [f] onSubmitted(value, context) -> chatTextController.clear(), messages.add(), callbackOnSubmitted(), setState(), scrollController.animateTo()
+
+[F] lib/chat/languages_chat.dart
+  [M] LanguagesChat
+    [v] _sendMessage
+    [f] languagesSetup()
+    [f] getText()
+
+[F] lib/chat/widget_chat.dart
+  [C] WidgetChat extends StatefulWidget -> _WidgetChatState
+  [C] _WidgetChatState extends State<WidgetChat> with LanguagesChat
+    [f] build(context) -> Container(), Column(), Row(), Icon(), Text(), Expanded(), ListView.builder(), Align(), widgetInputText() -> chat.onSubmitted()
+
+[F] lib/dices/dices.dart
+  [C] Dices extends LanguagesDices
+    [v] setState, inputItems
+    [v] (State: holdDices, nrRolls, diceValue, diceRef, ...)
+    [v] unityWidgetController: UnityWidgetController, unityCreated, unityDices, ...
+    [f] constructor()
+    [f] setCallbacks(cbUpdateDiceValues, cbUnityCreated, cbCheckPlayerToMove)
+    [f] clearDices()
+    [f] initDices(nrdices) -> sendResetToUnity()
+    [f] holdDice(dice)
+    [f] updateDiceImages()
+    [f] rollDices(context) -> Random(), callbackUpdateDiceValues()
+    [f] widgetUnitySettings(state) -> inputItems.widgetCheckbox(), send...ChangedToUnity()
+
+[F] lib/dices/unity_communication.dart
+  [X] UnityCommunication on Dices
+    [f] send...ToUnity() -> UnityMessage.toJson(), unityWidgetController.postMessage()
+    [f] onUnityMessage(message) -> jsonDecode(), callbackUpdateDiceValues()
+    [f] onUnityUnloaded()
+    [f] onUnityCreated(controller) -> unityWidgetController assignment, sendResetToUnity(), callbackUnityCreated()
+    [f] onUnitySceneLoaded(sceneInfo)
+
+[F] lib/dices/unity_message.dart
+  [C] UnityMessage
+    [f] constructor()
+    [f] toJson()
+    [sf] fromJson()
+
+[F] lib/dices/widget_dices.dart
+  [C] WidgetDices extends StatefulWidget -> _WidgetDicesState
+  [C] _WidgetDicesState extends State<WidgetDices> with TickerProviderStateMixin
+    [f] setupAnimation(ticket) -> AnimationController(), CurveTween()
+    [f] build(context) -> Positioned(), SizedBox(), UnityWidget(), Stack(), Container(), Image.asset(), GestureDetector() -> app.gameDices.holdDice(), AnimatedBuilder(), Listener() -> app.gameDices.rollDices()
+
+[F] lib/input_items/input_items.dart
+  [C] InputItems
+    [f] (Various UI widget factory methods: widgetImage, widgetInputText, widgetButton, widgetCheckbox, widgetSlider, widgetDropDownList, ...)
+
+[F] lib/models/board_cell.dart (Frontend)
+  [C] BoardCell
+    [v] index, label, value, fixed, xPos, yPos, ...
+    [f] constructor()
+    [f] setPosition()
+    [f] get displayText
+    [f] get isEmpty
+    [f] clear()
+    [f] setValue()
+    [f] fix()
+    [f] setFocus()
+    [f] copyWith()
+
+[F] lib/models/game.dart (Frontend)
+  [C] Game
+    [v] gameId, gameType, maxPlayers, players: List<Player>, gameStarted, gameFinished, playerToMove, diceValues, ...
+    [f] constructor()
+    [f] get isMyTurn
+    [f] get canRoll
+    [f] get currentPlayer -> players[]
+    [f] get myPlayer -> players[]
+    [f] calculateScores() -> player.calculateScores()
+    [f] advanceToNextPlayer() -> onPlayerTurnChanged?.call()
+    [f] setDiceValues(values) -> onDiceValuesChanged?.call()
+    [f] resetDice() -> onDiceValuesChanged?.call()
+    [f] selectCell(cellIndex) -> player.cells[], cell.fix(), calculateScores(), checkGameFinished(), advanceToNextPlayer()
+    [f] checkGameFinished() -> player.hasCompletedGame
+    [sf] fromJson(json) -> _getCellLabelsForGameType(), new Player(), new BoardCell(), new Game()
+    [f] toJson() -> player.id, player.username
+    [sf] _getCellLabelsForGameType(gameType)
+
+[F] lib/models/player.dart (Frontend)
+  [C] Player
+    [v] id, username, isActive, cells: List<BoardCell>, _totalScore, _upperSectionSum
+    [f] constructor()
+    [f] get totalScore
+    [f] get upperSectionSum
+    [f] calculateScores(bonusThreshold, bonusAmount, upperSectionEnd)
+    [f] clearUnfixedCells() -> cell.clear()
+    [f] get hasCompletedGame -> cells.every()
+    [sf] fromJson(json, cellLabels) -> List.generate(BoardCell()), new Player()
+    [f] toJson() -> cells.map(cell.value/fixed)
+
+[F] lib/scroll/animations_scroll.dart
+  [C] AnimationsScroll with LanguagesAnimationsScroll
+    [v] _getChosenLanguage, _standardLanguage, keyXPos, keyYPos, animationController, positionAnimation
+    [f] constructor()
+    [f] getChosenLanguage()
+
+[F] lib/scroll/languages_animations_scroll.dart
+  [M] LanguagesAnimationsScroll
+    [v] _scrollText
+    [f] languagesSetup()
+    [f] getText()
+
+[F] lib/scroll/widget_scroll.dart
+  [C] WidgetAnimationsScroll extends StatefulWidget -> _WidgetAnimationsScrollState
+  [C] _WidgetAnimationsScrollState extends State<WidgetAnimationsScroll> with TickerProviderStateMixin, LanguagesAnimationsScroll
+    [f] setupAnimation(ticket) -> AnimationController(), CurveTween()
+    [f] build(context) -> AnimatedBuilder(), Positioned(), SizedBox(), FittedBox(), DefaultTextStyle(), AnimatedTextKit() (External: animated_text_kit)
+
+[F] lib/services/game_service.dart (Frontend)
+  [C] GameService
+    [v] socketService : SocketService ([F]lib/services/socket_service.dart)
+    [v] _game : Game? ([F]lib/models/game.dart)
+    [v] onGameUpdated : Function(Game)?
+    [v] onError : Function(String)?
+    [f] constructor() -> socketService.onGameUpdate = _handleGameUpdate
+    [f] get game
+    [f] _handleGameUpdate(updatedGame) -> _game assignment, onGameUpdated?.call()
+    [f] createGame(...) -> socketService.createGame()
+    [f] joinGame(...) -> socketService.joinGame()
+    [f] rollDice(...) -> socketService.rollDice()
+    [f] calculateScoreForCell(cell, diceValues) -> _calculate...Score helpers
+    [f] selectCell(cellIndex) -> socketService.selectCell()
+    [f] _reportError(message) -> onError?.call()
+    [f] (_calculate...Score helpers) - Pure score logic
+
+[F] lib/services/http_service.dart
+  [C] HttpService
+    [v] baseUrl : String
+    [f] constructor()
+    [f] getDB(route) -> http.get (External: http)
+    [f] postDB(route, json) -> http.post (External: http)
+    [f] updateDB(route, json) -> http.post (External: http)
+    [f] deleteDB(route) -> http.delete (External: http)
+    [f] deleteUser(route, email) -> http.delete (External: http)
+    [f] login(userName, password) -> http.post (External: http)
+    [f] signup(userName, password) -> http.post (External: http)
+
+[F] lib/services/service_provider.dart
+  [C] ServiceProvider extends InheritedWidget
+    [v] socketService : SocketService ([F]lib/services/socket_service.dart)
+    [v] gameService : GameService ([F]lib/services/game_service.dart)
+    [f] constructor()
+    [sf] of(context) -> context.dependOnInheritedWidgetOfExactType()
+    [sf] initialize(child, context) -> new SocketService(), new GameService(), new ServiceProvider()
+    [f] updateShouldNotify(oldWidget)
+
+[F] lib/services/socket_service.dart
+  [C] SocketService
+    [v] context : BuildContext
+    [v] socket : io.Socket (External: socket_io_client)
+    [v] socketId : String
+    [v] isConnected : bool
+    [v] game : Game? ([F]lib/models/game.dart)
+    [v] onGameUpdate : Function(Game)?
+    [v] onChatMessage : Function(Map<String, dynamic>)?
+    [f] constructor()
+    [f] connect() -> io.io(), _setupEventHandlers(), socket.connect()
+    [f] _setupEventHandlers() -> socket.onConnect(), socket.onDisconnect(), socket.on('welcome'), socket.on('echo_response'), socket.on('onClientMsg'), socket.on('onServerMsg'), socket.on('userId'), socket.on('gameUpdate'), socket.on('chatMessage')
+    [f] _sendEcho() -> socket.emit('echo')
+    [f] _requestId() -> socket.emit('sendToServer')
+    [f] _handleUserId(data) -> _updateState()
+    [f] _handleClientMessage(data) -> app.callbackOnClientMsg(), _updateState()
+    [f] _handleServerMessage(data) -> app.callbackOnServerMsg(), _updateState()
+    [f] _handleGameUpdate(data) -> _processGameUpdate(), _updateState()
+    [f] _processGameUpdate(gameData) -> game = Game.fromJson(), onGameUpdate?.call()
+    [f] _handleChatMessage(data) -> onChatMessage?.call()
+    [f] createGame(...) -> socket.emit('sendToServer')
+    [f] joinGame(...) -> socket.emit('sendToServer')
+    [f] rollDice(...) -> socket.emit('sendToServer')
+    [f] selectCell(...) -> socket.emit('sendToServer')
+    [f] sendChatMessage(...) -> socket.emit('sendToServer')
+    [f] sendToClients(data) -> socket.emit('sendToClients')
+    [f] sendToServer(data) -> socket.emit('sendToServer')
+    [f] disconnect() -> socket.disconnect()
+    [f] _updateState() -> context.read<SetStateCubit>().setState()
+
+[F] lib/states/bloc/language/language_bloc.dart
+  [C] LanguageBloc extends Bloc<LanguageEvent, String>
+    [f] constructor() -> SharedPrefProvider.fetchPrefString() ([F]lib/shared_preferences.dart)
+    [f] _languageChanged(event, emit) -> SharedPrefProvider.setPrefString(), emit()
+
+[F] lib/states/bloc/language/language_event.dart
+  [C] LanguageEvent (abstract)
+  [C] LanguageChanged extends LanguageEvent
+
+[F] lib/states/cubit/state/state_cubit.dart
+  [C] SetStateCubit extends Cubit<int>
+    [f] setState() -> emit()
+
+[F] lib/top_score/top_score.dart
+  [C] TopScore with LanguagesTopScore
+    [v] _getChosenLanguage, _standardLanguage, animationController, loopAnimation, topScores
+    [f] constructor()
+    [f] loadTopScoreFromServer(gameType, cubit) -> HttpService.getDB(), jsonDecode(), cubit.setState()
+    [f] updateTopScore(name, score, gameType) -> HttpService.postDB(), jsonDecode()
+
+[F] lib/top_score/languages_top_score.dart
+  [M] LanguagesTopScore
+    [v] _topScores
+    [f] languagesSetup()
+    [f] getText()
+
+[F] lib/top_score/widget_top_scores.dart
+  [C] WidgetTopScore extends StatefulWidget -> _WidgetTopScoreState
+  [C] _WidgetTopScoreState extends State<WidgetTopScore> with TickerProviderStateMixin, LanguagesTopScore
+    [f] setupAnimation(ticket) -> AnimationController(), CurveTween()
+    [f] build(context) -> AnimatedBuilder(), Positioned(), Container(), FittedBox(), Text(), Scrollbar(), ListView.builder(), Row()
+
+[F] lib/tutorial/tutorial.dart
+  [C] Tutorial
+    [v] keyXPos, keyYPos, animationSide, animationController1/2/3, positionAnimation1/2/3
+    [f] setup(ticket) -> AnimationController(), CurveTween()
+    [f] widgetArrow(key, w, h, controller, text, side, scale) -> AnimatedBuilder(), RenderBox, Positioned(), Column()/Row(), SizedBox(), FittedBox(), Text(), Image.asset()
+
+[F] lib/utils/yatzy_mapping_client.dart
+  [v] _gameTypeMappingsClient : Map<String, List<String>>
+  [f] _getBaseGameTypeClient(gameType)
+  [f] _getBaseLabel(fullLabel)
+  [f] getSelectionLabel(gameType, index) : String?
+  [f] getSelectionIndex(gameType, label) : number
+
+[F] lib/views/application_view.dart
+  [C] ApplicationView extends StatefulWidget (@RoutePage) -> _ApplicationViewState
+  [C] _ApplicationViewState extends State<ApplicationView> with TickerProviderStateMixin
+    [f] initState() -> app.setup(), tutorial.setup(), WidgetsBinding.addPostFrameCallback(), app.animation.setupAnimation()
+    [f] postFrameCallback(context) -> topScore.loadTopScoreFromServer()
+    [f] build(context) -> BlocBuilder<SetStateCubit, int>(), app.widgetScaffold()
+
+[F] lib/views/settings_view.dart
+  [C] SettingsView extends StatefulWidget (@RoutePage) -> _SettingsViewHomeState
+  [C] _SettingsViewHomeState extends State<SettingsView> with TickerProviderStateMixin
+    [f] initState() -> TabController()
+    [f] build(context) -> BlocBuilder<SetStateCubit, int>(), app.widgetScaffoldSettings()
+
+[F] lib/widgets/spectator_game_board.dart
+  [C] SpectatorGameBoard extends StatefulWidget -> _SpectatorGameBoardState
+  [C] _SpectatorGameBoardState extends State<SpectatorGameBoard>
+    [v] _horizontalScrollController, _verticalScrollController
+    [f] build(context) -> Stack(), Column(), Container(), Text(), Row(), Expanded(), RawScrollbar(), SingleChildScrollView(), buildScoreTable(), Positioned.fill() (for overlay)
+    [f] getDiceFace(value) -> Container(), Column(), Row() (Draws dice dots)
+    [f] buildScoreTable(playerNames) -> Padding(), Table(), TableRow(), TableCell(), Text() (Builds UI table from gameData)
+
+
+**--- Key Interactions & Entry Points ---**
 
 *   **Backend:**
-    1.  Navigate to the `backend/` directory.
-    2.  Install dependencies: `npm install`
-    3.  Create a `.env` file based on requirements (likely `JWT_SECRET`, potentially MongoDB connection string although it defaults to local).
-    4.  Run in development: `npm run nod` (uses `nodemon` and `ts-node`).
-    5.  Build for production: `npm run build` (or similar, uses `tsc`), then `node dist/server.js`.
+    *   Entry: `backend/src/server.ts` starts the Express server and Socket.IO listener.
+    *   Database: `backend/src/db.ts` initializes and provides MongoDB connection.
+    *   HTTP API: Handled by route files in `backend/src/routes/` (e.g., login, signup, top scores).
+    *   WebSockets: `server.ts` sets up Socket.IO, delegates events to Controllers (`ChatController`, `GameController`, `PlayerController`).
+    *   Core Logic: Services (`GameService`, `GameLogService`, `TopScoreService`) handle business logic, interacting with DB and models. `GameService` is central for game state.
+    *   Models: Define data structures (`Game`, `Player`, `BoardCell`).
 *   **Frontend:**
-    1.  Navigate to the root directory (`jesseburstrom-client/`).
-    2.  Ensure Flutter SDK is installed.
-    3.  Run on a device/emulator: `flutter run`
-*   **Configuration:** The `isOnline` flag in `backend/src/server.ts` and `lib/startup.dart` controls static file serving paths and potentially backend URLs (`localhost` variable in `lib/startup.dart`). Ensure the `localhost` URL in `lib/startup.dart` correctly points to the running backend server, especially when testing on a physical device (use the backend machine's local network IP, not `localhost` or `127.0.0.1`).
-
-## 8. Potential Improvements / Notes
-
-*   **Server-Side Score Validation:** The server currently seems to trust the score sent by the client during `sendSelection`. Adding server-side calculation based on the logged dice roll would improve robustness.
-*   **Error Handling:** More specific error messages could be sent back to the client from the backend. Frontend error handling could be more robust (e.g., showing Snackbars for connection issues or invalid actions).
-*   **State Management:** The Flutter frontend relies heavily on a global `app` instance and a simple `SetStateCubit`. For larger applications, refining state management (e.g., more specific Blocs/Cubits per feature) could improve maintainability.
-*   **Model Synchronization:** Ensure frontend models (`lib/models/`) stay perfectly synchronized with backend models (`backend/src/models/`) and the data structures used in JSON communication.
-*   **Configuration Management:** Centralize the `isOnline` flag and backend URL configuration.
-*   **Code Clarity:** Some areas, especially in the frontend state management and communication handling (`Application`, `CommunicationApplication`), could potentially be refactored for better separation of concerns.
-*   **Dice Model Usage:** The backend `Dice.ts` model doesn't seem actively used in the primary game flow described by the controllers/services, which rely on client-sent dice values. Its purpose might be vestigial or for future features.
-
-This description provides a comprehensive overview of the project structure, technologies, and interactions, suitable for understanding the codebase's flow and key components.
-
-## Jesseburstrom Client/Server Codebase Analysis (Dependency Graphs)
-
-**Objective:** Provide a compact overview of class/function relationships and dependencies, including file references, suitable for AI parsing.
-
----
-### Backend (Node.js / TypeScript - ./backend/)
----
-
-**1. Entry Point & Core Setup (`server.ts`)**
-   - **File:** `backend/src/server.ts`
-   - **Responsibilities:** Initializes Express app, HTTP server, Socket.IO server, CORS, static file serving, connects to DB, instantiates services/controllers, sets up core Socket.IO event listeners (`connect`, `disconnect`).
-   - **Dependencies:**
-     - `express`, `cors`, `http`, `socket.io`, `path` (Node modules)
-     - `./db.ts` -> `initializeDbConnection`
-     - `./routes/index.ts` -> `routes()`
-     - `./services/GameService.ts` -> `GameService`
-     - `./services/GameLogService.ts` -> `GameLogService`
-     - `./controllers/GameController.ts` -> `GameController`
-     - `./controllers/PlayerController.ts` -> `PlayerController`
-     - `./controllers/ChatController.ts` -> `ChatController`
-     - `./routes/spectateGameRoute.ts` -> `spectateGameRoute`, `initializeSpectateRoute`
-   - **Interactions:**
-     - Calls `initializeDbConnection()`.
-     - Iterates `routes()` -> `app[method](path, handler)`.
-     - Instantiates `GameLogService`.
-     - Instantiates `GameService` (passes `io`, `gameLogService`).
-     - Instantiates Controllers (passes `gameService`, `gameLogService`, `io`).
-     - Calls `initializeSpectateRoute()` (passes services).
-     - `io.on('connect', ...)`: Sets up socket listeners.
-       - Calls `controller.registerSocketHandlers(socket)` for each controller.
-       - Calls `gameService.handlePlayerDisconnect(socket.id)` on disconnect.
-
-**2. Database (`db.ts`)**
-   - **File:** `backend/src/db.ts`
-   - **Responsibilities:** Manages MongoDB connection.
-   - **Exports:**
-     - `initializeDbConnection`: Connects to MongoDB.
-     - `getDbConnection`: Returns a DB instance for a specific database name.
-   - **Dependencies:** `mongodb` (Node module)
-
-**3. Routes (`./routes/*.ts`)**
-   - **File:** `backend/src/routes/index.ts`
-     - **Responsibilities:** Aggregates all route definitions.
-     - **Imports:** All other files in `./routes/`.
-     - **Exports:** `routes()` function returning an array of route objects.
-   - **File:** `backend/src/routes/logInRoute.ts`, `signUpRoute.ts`, `logRoute.ts`, `getLogRoute.ts`
-     - **Responsibilities:** Define API endpoints for user auth and logging.
-     - **Dependencies:** `express`, `bcrypt`, `jsonwebtoken` (Node modules), `../db.ts` -> `getDbConnection`.
-     - **Interactions:** Access MongoDB via `getDbConnection`. Use `bcrypt` for hashing/comparison. Use `jwt` for token signing/verification.
-   - **File:** `backend/src/routes/getTopScores.ts`, `updateTopScore.ts`
-     - **Responsibilities:** Define API endpoints for high scores.
-     - **Dependencies:** `express`, `../db.ts` -> `getDbConnection`.
-     - **Interactions:** Access MongoDB (`top-scores` DB) via `getDbConnection`.
-   - **File:** `backend/src/routes/spectateGameRoute.ts`
-     - **Responsibilities:** Define API endpoint for getting spectator data; holds service references.
-     - **Dependencies:** `express`, `../services/GameService.ts`, `../services/GameLogService.ts`.
-     - **Exports:** `spectateGameRoute` (object), `initializeSpectateRoute` (function).
-     - **Interactions (Handler):** Uses injected `GameService` (`getGame`) and `GameLogService` (`getGameLog`).
-
-**4. Controllers (`./controllers/*.ts`)**
-   - **File:** `backend/src/controllers/GameController.ts`
-     - **Responsibilities:** Handles game logic Socket.IO events (`requestGame`, `requestJoinGame`, `sendDices`, `sendSelection`, `useRegret`, `useExtraMove`, `spectateGame`).
-     - **Dependencies:** `socket.io` (types), `../services/GameService.ts`, `../services/GameLogService.ts`, `../models/Player.ts`, `../models/Game.ts`, `../utils/yatzyMapping.ts`.
-     - **Interactions:**
-       - Constructor takes `GameService`, `GameLogService`.
-       - `registerSocketHandlers` sets up listeners for specific actions.
-       - Calls `gameService.createOrJoinGame()`, `gameService.getGame()`, `gameService.joinGame()`, `gameService.removeGame()`, `gameService.processDiceRoll()`, `gameService.processSelection()`, `gameService.logRegret()`, `gameService.logExtraMove()`, `gameLogService.getGameLog()`, `gameService.addSpectator()`.
-       - Uses `PlayerFactory.createPlayer()`.
-       - Uses `getSelectionLabel()`, `getSelectionIndex()`.
-       - Uses `game.applySelection()`, `game.toJSON()`.
-   - **File:** `backend/src/controllers/PlayerController.ts`
-     - **Responsibilities:** Handles player-specific Socket.IO events (`getId`).
-     - **Dependencies:** `socket.io` (types), `../services/GameService.ts`, `../services/GameLogService.ts`.
-     - **Interactions:**
-       - Constructor takes `GameService`, `GameLogService`.
-       - `registerSocketHandlers` sets up listeners.
-       - Calls `gameService.broadcastGameListToPlayer()`.
-   - **File:** `backend/src/controllers/ChatController.ts`
-     - **Responsibilities:** Handles chat message Socket.IO events (`chatMessage`).
-     - **Dependencies:** `socket.io` (types), `../services/GameService.ts`.
-     - **Interactions:**
-       - Constructor takes `io`, `GameService`.
-       - `registerSocketHandlers` sets up listeners.
-       - Uses `gameService.getGame()` to find players.
-       - Uses `io.to(playerId).emit()` to send messages.
-
-**5. Services (`./services/*.ts`)**
-   - **File:** `backend/src/services/GameService.ts`
-     - **Responsibilities:** Core game state management (creating, finding, joining, removing games), player connection/disconnection handling, processing game actions (rolls, selections), managing spectators, broadcasting updates.
-     - **Dependencies:** `../models/Game.ts`, `../models/Player.ts`, `socket.io` (types), `./GameLogService.ts`.
-     - **Interactions:**
-       - Constructor takes `io`, `GameLogService`.
-       - Manages `games` Map, `spectators` Map.
-       - Calls `gameLogService.logGameStart()`, `gameLogService.logMove()`, `gameLogService.logGameEnd()`, `gameLogService.logRegret()`, `gameLogService.logExtraMove()`.
-       - Creates/manipulates `Game` and `Player` instances.
-       - Uses `io.emit()`, `io.to().emit()` extensively for broadcasting/sending messages (`onServerMsg`, `onClientMsg`).
-   - **File:** `backend/src/services/GameLogService.ts`
-     - **Responsibilities:** Handles interaction with the MongoDB `game_moves` collection for logging game events.
-     - **Dependencies:** `mongodb` (types), `../db.ts` -> `getDbConnection`, `../models/Game.ts`.
-     - **Interactions:**
-       - Uses `getDbConnection()` to get the DB instance.
-       - Calls `db.collection().replaceOne()`, `db.collection().updateOne()`, `db.collection().findOne()`, `db.collection().insertOne()`.
-     - **Exports:** `GameMove`, `GameLog` interfaces.
-
-**6. Models (`./models/*.ts`)**
-   - **File:** `backend/src/models/Game.ts`
-     - **Responsibilities:** Represents the state of a single game instance.
-     - **Dependencies:** `./Player.ts`, `uuid`, `../utils/yatzyMapping.ts`.
-     - **Interactions:** Contains `Player` objects. Uses `PlayerFactory`. Calls `player.calculateScores()`, `player.hasCompletedGame()`. Uses `getSelectionIndex()`.
-   - **File:** `backend/src/models/Player.ts`
-     - **Responsibilities:** Represents the state of a single player within a game.
-     - **Dependencies:** `./BoardCell.ts`, `../utils/gameConfig.ts`.
-     - **Interactions:** Contains `BoardCell` objects. Uses `GameConfig`.
-   - **File:** `backend/src/models/BoardCell.ts`
-     - **Responsibilities:** Represents a single cell on the scorecard. Minimal dependencies.
-   - **File:** `backend/src/models/Dice.ts`
-     - **Responsibilities:** Basic dice rolling logic (appears less used server-side, client sends results). Minimal dependencies.
-
-**7. Utils (`./utils/*.ts`)**
-   - **File:** `backend/src/utils/gameConfig.ts`
-     - **Responsibilities:** Provides configuration (labels, thresholds, counts) for different Yatzy game types.
-     - **Used by:** `Player.ts`.
-   - **File:** `backend/src/utils/yatzyMapping.ts`
-     - **Responsibilities:** Maps between cell labels (strings) and cell indices (numbers).
-     - **Used by:** `GameController.ts`, `Game.ts`.
-   - **File:** `backend/src/utils/index.ts`
-     - **Responsibilities:** Generic utility functions. (Appears less used in core logic shown).
-
----
-### Frontend (Flutter / Dart - ./lib/)
----
-
-**1. Entry Point & Core Setup**
-   - **File:** `lib/main.dart`
-     - **Responsibilities:** Initializes Flutter bindings, `SharedPrefProvider`, Dependency Injection (`configureInjection`), BLoC providers (`LanguageBloc`, `SetStateCubit`), runs `AppWidget`.
-     - **Dependencies:** `flutter/material.dart`, `flutter_bloc`, `injectable`, `./injection.dart`, `./shared_preferences.dart`, `./core/app_widget.dart`, `./states/*`.
-   - **File:** `lib/core/app_widget.dart`
-     - **Responsibilities:** Root widget. Sets up `MaterialApp.router`. Initializes legacy global state objects (`app`, `dices`, `chat`, `topScore`, etc.). Initializes `ServiceProvider`. Connects `SocketService` in `addPostFrameCallback`. Links `SocketService` to `Application` instance (`app.setSocketService`).
-     - **Dependencies:** `flutter/material.dart`, `auto_route`, `flutter_bloc`, `../application/*`, `../dices/*`, `../chat/*`, `../top_score/*`, `../scroll/*`, `../tutorial/*`, `../injection.dart`, `../router/router.dart`, `../services/service_provider.dart`, `../startup.dart`, `../states/cubit/state/state_cubit.dart`.
-   - **File:** `lib/startup.dart`
-     - **Responsibilities:** Defines global variables (legacy state management, URLs, flags like `isOnline`). Initializes instances of legacy classes (`inputItems`, etc.).
-     - **Dependencies:** References many classes (`InputItems`, `Tutorial`, `TopScore`, `AnimationsScroll`, `Application`, `Chat`, `Dices`).
-
-**2. Dependency Injection & Router**
-   - **File:** `lib/injection.dart`, `lib/injection.config.dart`, `lib/core/injectable_modules.dart`
-     - **Responsibilities:** Configures GetIt for dependency injection using `injectable`. Primarily injects `AppRouter`.
-     - **Dependencies:** `get_it`, `injectable`, `../router/router.dart`.
-   - **File:** `lib/router/router.dart`, `lib/router/router.gr.dart`
-     - **Responsibilities:** Defines navigation routes using `auto_route`. Routes: `SettingsView`, `ApplicationView`.
-     - **Dependencies:** `auto_route`, `../views/*.dart`.
-
-**3. Views**
-   - **File:** `lib/views/settings_view.dart`
-     - **Responsibilities:** UI for settings, creating/joining games, viewing available games, spectating.
-     - **Dependencies:** `flutter/material.dart`, `auto_route`, `flutter_bloc`, `../application/widget_application_settings.dart`, `../startup.dart`, `../states/cubit/state/state_cubit.dart`.
-     - **Interactions:** Uses `app.widgetScaffoldSettings()` to build UI. Uses `SetStateCubit` for updates. Calls `app.onStartGameButton()`, `app.onAttemptJoinGame()`, `app.onSpectateGame()`. Includes `SpectatorGameBoard`.
-   - **File:** `lib/views/application_view.dart`
-     - **Responsibilities:** Main game view UI container.
-     - **Dependencies:** `flutter/material.dart`, `auto_route`, `flutter_bloc`, `../application/widget_application_scaffold.dart`, `../startup.dart`, `../states/cubit/state/state_cubit.dart`, `../tutorial/tutorial.dart`, `../scroll/animations_scroll.dart`.
-     - **Interactions:** Uses `app.widgetScaffold()` to build UI. Initializes `app.setup()`, `tutorial.setup()`, `app.animation.setupAnimation()`. Uses `SetStateCubit`. Calls `topScore.loadTopScoreFromServer()`.
-
-**4. Application Logic (Legacy Global State)**
-   - **File:** `lib/application/application.dart`
-     - **Responsibilities:** Holds main legacy game state (board, players, game type, etc.). References other components (`Dices`, `InputItems`, `AnimationsApplication`). Provides callbacks to `Dices`. Links to `SocketService`.
-     - **Dependencies:** `flutter/material.dart`, `flutter_bloc`, `./application_functions_internal.dart`, `../dices/dices.dart`, `../dices/unity_communication.dart`, `../input_items/input_items.dart`, `../services/socket_service.dart`, `../startup.dart`, `../states/cubit/state/state_cubit.dart`, `./animations_application.dart`, `./languages_application.dart`.
-     - **Interactions:** `setup()` initializes board state. `setSocketService()` stores service ref. `callbackUpdateDiceValues()`, `callbackUnityCreated()`, `callbackCheckPlayerToMove()` are called by `Dices`. `updateDiceValues()` calls `yatzyFunctions` and triggers state update.
-   - **File:** `lib/application/communication_application.dart` (Extension)
-     - **Responsibilities:** Handles incoming socket messages (`callbackOnServerMsg`, `callbackOnClientMsg`) by updating the state in `Application`. Handles chat submission (`chatCallbackOnSubmitted`).
-     - **Dependencies:** `flutter/material.dart`, `flutter_bloc`, `../chat/chat.dart`, `../injection.dart`, `../router/router.dart`, `../router/router.gr.dart`, `../services/service_provider.dart`, `../shared_preferences.dart`, `../startup.dart`, `../states/cubit/state/state_cubit.dart`, `./application.dart`.
-     - **Interactions:** Calls `router`, `SetStateCubit`, reads `socketService`, interacts with `gameDices`, updates `app` state (`gameData`, `myPlayerId`, etc.). Calls `app.setup()`.
-   - **File:** `lib/application/application_functions_internal.dart` (Extension)
-     - **Responsibilities:** Contains game interaction logic (`cellClick`, `applyLocalSelection`, `colorBoard`).
-     - **Dependencies:** `flutter/material.dart`, `provider`, `../dices/unity_communication.dart`, `../startup.dart`, `./application.dart`, `../utils/yatzy_mapping_client.dart`, `../states/cubit/state/state_cubit.dart`.
-     - **Interactions:** Called by UI gestures. Calls `socketService.sendToClients()`. Calls `getSelectionLabel()`. Updates `app` state (`appColors`, `fixedCell`, `cellValue`, `appText`). Calls `gameDices.sendResetToUnity()`, `gameDices.clearDices()`. Calls `SetStateCubit`.
-   - **File:** `lib/application/application_functions_internal_calc_dice_values.dart` (Extension)
-     - **Responsibilities:** Contains pure functions to calculate potential scores based on current dice values.
-     - **Dependencies:** `./application.dart`.
-     - **Interactions:** Reads `app.gameDices.diceValue`. Called by `app.updateDiceValues()`.
-   - **File:** `lib/application/widget_application_scaffold.dart` (Extension)
-     - **Responsibilities:** Builds the main scaffold widget for the application view. Includes layout logic, floating action buttons.
-     - **Dependencies:** `auto_route`, `flutter/material.dart`, `flutter_bloc`, `./communication_application.dart`, `../chat/widget_chat.dart`, `../dices/unity_communication.dart`, `../dices/widget_dices.dart`, `../top_score/widget_top_scores.dart`, `../router/router.gr.dart`, `../scroll/widget_scroll.dart`, `../services/service_provider.dart`, `../startup.dart`, `../states/cubit/state/state_cubit.dart`, `./application.dart`, `./widget_application.dart`.
-     - **Interactions:** Calls other widget builders (`WidgetDices`, `WidgetTopScore`, `WidgetSetupGameBoard`, etc.). Handles FAB presses (calls `app.setup`, `gameDices.rollDices`, interacts with router, sends messages via `socketService`).
-   - **File:** `lib/application/widget_application_settings.dart` (Extension)
-     - **Responsibilities:** Builds the settings view UI. Includes logic for displaying available games, joining games, spectating.
-     - **Dependencies:** `auto_route`, `flutter/material.dart`, `flutter_bloc`, `../dices/unity_communication.dart`, `../router/router.gr.dart`, `../services/service_provider.dart`, `../shared_preferences.dart`, `../startup.dart`, `../states/bloc/language/language_bloc.dart`, `../states/bloc/language/language_event.dart`, `../states/cubit/state/state_cubit.dart`, `../widgets/spectator_game_board.dart`, `./application.dart`.
-     - **Interactions:** Reads `app.games`. Calls `inputItems.widgetButton`, `inputItems.widgetCheckbox`, etc. Calls `onAttemptJoinGame`, `onStartGameButton`, `onSpectateGame`, `onChangeUserName`. Interacts with `LanguageBloc`, `SetStateCubit`. Includes `SpectatorGameBoard`.
-   - **File:** `lib/application/widget_application.dart` (`WidgetSetupGameBoard`, `WidgetDisplayGameStatus`)
-     - **Responsibilities:** Builds the game board UI and the game status display.
-     - **Dependencies:** `dart:math`, `auto_size_text`, `flutter/material.dart`, `flutter_bloc`, `./application_functions_internal.dart`, `../dices/unity_communication.dart`, `../startup.dart`, `../states/cubit/state/state_cubit.dart`, `./languages_application.dart`.
-     - **Interactions:** Reads `app` state (`nrPlayers`, `totalFields`, `board*` arrays, `appText`, `appColors`, `focusStatus`). Calls `app.cellClick`. Uses `SetStateCubit`.
-
-**5. Services (Modern)**
-   - **File:** `lib/services/service_provider.dart`
-     - **Responsibilities:** InheritedWidget to provide access to modern services (`SocketService`, `GameService`). Initializes these services.
-     - **Dependencies:** `flutter/material.dart`, `./socket_service.dart`, `./game_service.dart`.
-   - **File:** `lib/services/socket_service.dart`
-     - **Responsibilities:** Manages the Socket.IO connection, event handling (listening and emitting), holds socket ID. Replaces legacy `Net`.
-     - **Dependencies:** `flutter/material.dart`, `socket_io_client`, `flutter_bloc`, `../application/communication_application.dart`, `dart:convert`, `../models/game.dart`, `../states/cubit/state/state_cubit.dart`, `../startup.dart`.
-     - **Interactions:** Connects to the server URL from `startup.dart`. Emits events (`sendToServer`, `sendToClients`). Listens for events (`onConnect`, `onDisconnect`, `onServerMsg`, `onClientMsg`, etc.). Calls legacy `app.callbackOnServerMsg`/`app.callbackOnClientMsg`. Uses `SetStateCubit`.
-   - **File:** `lib/services/http_service.dart`
-     - **Responsibilities:** Handles HTTP requests (GET, POST, UPDATE, DELETE). Replaces legacy `Net`.
-     - **Dependencies:** `dart:convert`, `package:http/http.dart`.
-     - **Interactions:** Makes HTTP calls to the base URL from `startup.dart`.
-   - **File:** `lib/services/game_service.dart`
-     - **Responsibilities:** Intended to manage client-side game logic (currently less utilized, `Application` holds most state). Listens for updates from `SocketService`.
-     - **Dependencies:** `../models/game.dart`, `../models/board_cell.dart`, `./socket_service.dart`.
-     - **Interactions:** Takes `SocketService` in constructor. `_handleGameUpdate` updates internal `_game` state. Provides methods like `createGame`, `joinGame`, `rollDice`, `selectCell` which call corresponding `SocketService` methods.
-
-**6. State Management**
-   - **File:** `lib/states/bloc/language/*`
-     - **Responsibilities:** Manages the selected language using `flutter_bloc`. Persists state using `SharedPrefProvider`.
-     - **Dependencies:** `injectable`, `flutter_bloc`, `../../shared_preferences.dart`.
-   - **File:** `lib/states/cubit/state/state_cubit.dart`
-     - **Responsibilities:** Simple Cubit used globally to trigger UI rebuilds (equivalent to `setState`).
-     - **Dependencies:** `flutter_bloc`.
-
-**7. Models**
-   - **File:** `lib/models/game.dart`, `player.dart`, `board_cell.dart`
-     - **Responsibilities:** Client-side data models representing game, player, and cell state. Simpler than server-side counterparts.
-     - **Dependencies:** `flutter/foundation.dart`.
-     - **Interactions:** `Game.fromJson` used in `SocketService` (or `Application`) to update state from server data. `Player.calculateScores` used locally.
-
-**8. UI Components & Features**
-   - **File:** `lib/dices/*`
-     - **Responsibilities:** Manages dice UI (2D/3D), dice state (`diceValue`, `holdDices`), communication with Unity (`flutter_unity_widget`).
-     - **Dependencies:** `dart:math`, `flutter/cupertino.dart`, `flutter_unity_widget`, `../input_items/input_items.dart`, `dart:convert`, `./unity_message.dart`.
-     - **Interactions:** `WidgetDices` displays dice. `Dices` class holds state, `rollDices` performs client-side roll. `UnityCommunication` extension sends/receives messages to/from Unity. Calls `callbackUpdateDiceValues`, `callbackUnityCreated`.
-   - **File:** `lib/chat/*`
-     - **Responsibilities:** Manages chat UI and local message list.
-     - **Dependencies:** `flutter/cupertino.dart`, `../input_items/input_items.dart`.
-     - **Interactions:** `WidgetChat` displays messages and input field. `Chat` class holds `messages`. `onSubmitted` calls `app.chatCallbackOnSubmitted`.
-   - **File:** `lib/top_score/*`
-     - **Responsibilities:** Fetches and displays top scores.
-     - **Dependencies:** `dart:convert`, `flutter/animation.dart`, `../services/http_service.dart`, `../startup.dart`.
-     - **Interactions:** `WidgetTopScore` displays the list. `TopScore` class uses `HttpService` (`getDB`, `postDB`) to interact with the backend API.
-   - **File:** `lib/scroll/*`
-     - **Responsibilities:** Displays scrolling text animation.
-     - **Dependencies:** `animated_text_kit`, `flutter/material.dart`, `../startup.dart`.
-   - **File:** `lib/tutorial/*`
-     - **Responsibilities:** Provides tutorial overlay arrows.
-     - **Dependencies:** `flutter/material.dart`.
-   - **File:** `lib/input_items/input_items.dart`
-     - **Responsibilities:** Reusable UI input widgets (buttons, checkboxes, text fields, etc.).
-     - **Dependencies:** `flutter/material.dart`.
-   - **File:** `lib/widgets/spectator_game_board.dart`
-     - **Responsibilities:** Displays the game board state for a spectator based on received `gameData`.
-     - **Dependencies:** `flutter/material.dart`.
-
-**9. Utils & Shared Preferences**
-   - **File:** `lib/utils/yatzy_mapping_client.dart`
-     - **Responsibilities:** Client-side mapping between cell labels and indices. *Must match server version.*
-     - **Used By:** `ApplicationFunctionsInternal`.
-   - **File:** `lib/shared_preferences.dart`
-     - **Responsibilities:** Wrapper around `shared_preferences` package for storing/retrieving simple key-value data.
-     - **Dependencies:** `dart:convert`, `shared_preferences`.
-     - **Used By:** `main.dart`, `LanguageBloc`, `communication_application.dart`.
-
----
-**(End of Analysis)**
-
-**Full Codebase in txt format**
+    *   Entry: `lib/main.dart` initializes Flutter, Bloc, DI, and runs `AppWidget`.
+    *   Root Widget: `lib/core/app_widget.dart` sets up `MaterialApp.router`, initializes services (`ServiceProvider`), and major application components (`Application`, `Dices`, `Chat`, etc.).
+    *   State Management: `BlocProvider` in `main.dart` (`LanguageBloc`, `SetStateCubit`). `SetStateCubit` is used widely for triggering UI updates.
+    *   Navigation: `auto_route` defined in `lib/router/`. Views are in `lib/views/`.
+    *   Networking: `SocketService` manages WebSocket connection. `HttpService` handles REST API calls (e.g., top scores). `ServiceProvider` makes these available.
+    *   Core Logic Container: `lib/application/application.dart` (and its extensions) holds much of the UI state and orchestrates interactions between UI, services, and dice logic. *Note: This class is quite large.*
+    *   UI Widgets: Specific UI parts are in `lib/application/widget_*`, `lib/chat/widget_chat.dart`, `lib/dices/widget_dices.dart`, `lib/top_score/widget_top_scores.dart`, etc.
+    *   Models: Frontend models in `lib/models/` represent UI state, potentially differing slightly from backend models.
+*   **Backend <-> Frontend:**
+    *   **HTTP:** Frontend `HttpService` calls backend API routes (e.g., `/GetTopScores`, `/UpdateTopScore`, `/api/login`).
+    *   **WebSockets:** Frontend `SocketService` connects to backend Socket.IO server.
+        *   Client sends actions (`sendToServer`, `sendToClients`) handled by backend Controllers. Key actions: `requestGame`, `requestJoinGame`, `sendDices`, `sendSelection`, `chatMessage`, `spectateGame`.
+        *   Server sends updates (`onServerMsg`, `onClientMsg`) handled by frontend `CommunicationApplication` extension (`callbackOnServerMsg`, `callbackOnClientMsg`). Key messages: `onGameStart`, `onGameUpdate`, `onGameFinished`, `sendDices`, `sendSelection`, `chatMessage`.
 
 Directory structure:
 └── jesseburstrom-client/
@@ -473,7 +929,8 @@ Directory structure:
     │       │   └── updateTopScore.ts
     │       ├── services/
     │       │   ├── GameLogService.ts
-    │       │   └── GameService.ts
+    │       │   ├── GameService.ts
+    │       │   └── TopScoreService.ts
     │       └── utils/
     │           ├── gameConfig.ts
     │           ├── index.ts
@@ -7224,6 +7681,7 @@ import { createServer } from "http";
 // Import services
 import { GameService } from "./services/GameService";
 import { GameLogService } from "./services/GameLogService"; // <-- Import GameLogService
+import { TopScoreService } from "./services/TopScoreService";
 
 // Import controllers
 import { GameController } from "./controllers/GameController";
@@ -7310,7 +7768,8 @@ io.use((socket, next) => {
 
 // Create service instances
 const gameLogService = new GameLogService(); // <-- Create GameLogService instance
-const gameService = new GameService(io, gameLogService); // <-- Pass log service to GameService
+const topScoreService = new TopScoreService(); // <-- Create TopScoreService instance
+const gameService = new GameService(io, gameLogService, topScoreService); // <-- Pass both services
 
 // Create controller instances
 const gameController = new GameController(gameService, gameLogService); // <-- Pass log service
@@ -9663,6 +10122,7 @@ import { Game } from '../models/Game';
 import { Player, PlayerFactory } from '../models/Player';
 import { Server, Socket } from 'socket.io'; // Import Socket type
 import { GameLogService, GameMove } from './GameLogService'; // <-- Import log service and types
+import { TopScoreService } from './TopScoreService'; // <-- Import TopScoreService
 import { getSelectionLabel } from '../utils/yatzyMapping'; // <-- Import mapping utility
 
 /**
@@ -9674,10 +10134,12 @@ export class GameService {
   private gameIdCounter: number = 0;
   private io: Server;
   private gameLogService: GameLogService; // <-- Add log service instance
+  private topScoreService: TopScoreService; // <-- Add top score service instance
 
-  constructor(io: Server, gameLogService: GameLogService) { // <-- Inject log service
+  constructor(io: Server, gameLogService: GameLogService, topScoreService: TopScoreService) { // <-- Inject services
     this.io = io;
     this.gameLogService = gameLogService; // <-- Store log service instance
+    this.topScoreService = topScoreService; // <-- Store top score service instance
   }
 
   // --- Spectator Management ---
@@ -9962,6 +10424,19 @@ export class GameService {
         console.error(`❌ [GameService] Error logging game ${game.id} end:`, error);
       });
 
+    // **** Update Top Scores ****
+    console.log(`🏆 [GameService] Attempting to update top scores for game ${game.id} (Type: ${game.gameType})`);
+    finalScores.forEach(playerScore => {
+      if (playerScore.username && playerScore.score > 0) { // Basic check
+         this.topScoreService.updateTopScore(game.gameType, playerScore.username, playerScore.score)
+           .then(success => {
+              if (success) console.log(`🏆 [TopScoreService] Score updated/added for ${playerScore.username}`);
+           })
+           .catch(err => console.error(`❌ [TopScoreService] Error updating score for ${playerScore.username}:`, err));
+      }
+    });
+    // **************************
+
     // Notify all active players
     this.notifyGameFinished(game);
 
@@ -10055,16 +10530,22 @@ export class GameService {
         this.io.to(player.id).emit('onClientMsg', gameData);
       }
     }
+// Also send to spectators
+const gameSpectators = this.spectators.get(game.id);
+if (gameSpectators && gameSpectators.size > 0) {
+  console.log(`[Spectator] Sending dice update to ${gameSpectators.size} spectators`);
+  for (const spectatorId of gameSpectators) {
+    this.io.to(spectatorId).emit('onClientMsg', gameData);
+  }
+}
 
-    // Also send to spectators
-    const gameSpectators = this.spectators.get(game.id);
-    if (gameSpectators && gameSpectators.size > 0) {
-      console.log(`[Spectator] Sending dice update to ${gameSpectators.size} spectators`);
-      for (const spectatorId of gameSpectators) {
-        this.io.to(spectatorId).emit('onClientMsg', gameData);
-      }
-    }
+// --- Notify ALL players AND spectators via onServerMsg (for full state sync) ---
+// This is the crucial addition for spectators to get updated dice/roll count
+console.log(`🔄 Notifying full game update (onServerMsg) after dice roll for game ${game.id}`);
+this.notifyGameUpdate(game);
+// --- End Notify ALL ---
 
+return true;
     return true;
   }
 
@@ -10132,6 +10613,12 @@ export class GameService {
     // Check if game finished after this selection
     if (game.isGameFinished()) {
       console.log(`🏁 [GameService] Game ${gameId} finished after selection`);
+
+      // **** CRUCIAL FIX: Send final update BEFORE handling finish ****
+      console.log(`🔄 Notifying final game update (onServerMsg) before finishing game ${game.id}`);
+      this.notifyGameUpdate(game); // Send state including the last selection
+      // ***************************************************************
+
       this.handleGameFinished(game); // This handles logging end, notifying, removing game
     } else {
       // Clear dice for next player
@@ -10374,6 +10861,84 @@ declare module '../models/Player' {
   }
 }
 
+
+
+================================================
+File: backend/src/services/TopScoreService.ts
+================================================
+// backend/src/services/TopScoreService.ts
+import { Collection, Db } from 'mongodb';
+import { getDbConnection } from '../db';
+
+const DB_NAME = 'top-scores';
+
+interface TopScoreEntry {
+  name: string;
+  score: number;
+}
+
+export class TopScoreService {
+  private getDb(): Db {
+    return getDbConnection(DB_NAME);
+  }
+
+  private getCollection(gameType: string): Collection<TopScoreEntry> {
+    const db = this.getDb();
+    // Normalize collection name (e.g., MaxiR3 -> maxiR3)
+    const collectionName = gameType.charAt(0).toLowerCase() + gameType.slice(1);
+    return db.collection<TopScoreEntry>(collectionName);
+  }
+
+  /**
+   * Gets the top scores for a given game type.
+   * @param gameType - The type of game (e.g., "Ordinary", "MaxiR3").
+   * @param limit - The maximum number of scores to return.
+   * @returns An array of top score entries.
+   */
+  async getTopScores(gameType: string, limit: number = 20): Promise<TopScoreEntry[]> {
+    try {
+      const collection = this.getCollection(gameType);
+      const results = await collection
+        .find({}, { projection: { _id: 0 } }) // Exclude the _id field
+        .sort({ score: -1 }) // Sort by score descending
+        .limit(limit) // Limit the results
+        .toArray();
+      console.log(`📊 [TopScoreService] Fetched ${results.length} top scores for ${gameType}`);
+      return results;
+    } catch (error) {
+      console.error(`❌ [TopScoreService] Error fetching top scores for ${gameType}:`, error);
+      return []; // Return empty array on error
+    }
+  }
+
+  /**
+   * Attempts to add a new score to the top scores list if it qualifies.
+   * Currently, it just adds the score; filtering/limiting logic might be needed.
+   * @param gameType - The type of game.
+   * @param name - The player's name.
+   * @param score - The player's score.
+   * @returns True if the score was inserted, false otherwise.
+   */
+  async updateTopScore(gameType: string, name: string, score: number): Promise<boolean> {
+     // Basic validation
+     if (!name || typeof score !== 'number' || !gameType) {
+       console.warn(`❌ [TopScoreService] Invalid data for updateTopScore: name=${name}, score=${score}, gameType=${gameType}`);
+       return false;
+     }
+     // Add score - simplistic approach for now.
+     // A real implementation might check if the score is high enough first,
+     // or prune the list after insertion to maintain a fixed size (e.g., top 20).
+     try {
+       const collection = this.getCollection(gameType);
+       const result = await collection.insertOne({ name, score });
+       console.log(`✅ [TopScoreService] Inserted score ${score} for ${name} in ${gameType} (Inserted ID: ${result.insertedId})`);
+       return result.acknowledged;
+     } catch (error) {
+       console.error(`❌ [TopScoreService] Error inserting top score for ${gameType}:`, error);
+       return false;
+     }
+  }
+}
 
 
 ================================================
@@ -11036,7 +11601,7 @@ class Application with LanguagesApplication  {
   }
 
   setup() {
-    topScore.loadTopScoreFromServer(gameType);
+    topScore.loadTopScoreFromServer(gameType, context.read<SetStateCubit>());
     gameStarted = true;
     playerToMove = 0;
     winnerId = -1;
@@ -12038,8 +12603,77 @@ extension CommunicationApplication on Application {
           _processGameUpdate(data);
           break;
         case "onGameAborted":
-          await router.push(const SettingsView());
+          print('🚪 Received onGameAborted');
+          // Reset state and go back to settings
+          gameId = -1;
+          myPlayerId = -1;
+          gameFinished = false;
+          isSpectating = false; // Ensure spectator mode is also reset
+          spectatedGameId = -1;
+          gameData = {};
+          Future.microtask(() => context.read<SetStateCubit>().setState());
+          await router.pushAndPopUntil(const SettingsView(), predicate: (_) => false);
           break;
+
+        // **** ADDED CASE ****
+        case "onGameFinished":
+          print('🏁 Received onGameFinished from server for game ${data["gameId"]}');
+          gameData = Map<String, dynamic>.from(data); // Store the final state
+          gameFinished = true; // Set local game finished flag
+
+          // Update the UI to reflect the finished state (for both player and spectator)
+          Future.microtask(() => context.read<SetStateCubit>().setState());
+
+          if (!isSpectating) {
+            // Logic for the actual player
+            String winnerMsg = "Game Over!";
+            // Optional: Determine winner from finalScores if available
+            // List<dynamic>? finalScores = data['finalScores'];
+            // if (finalScores != null && finalScores.isNotEmpty) {
+            //    finalScores.sort((a, b) => b['score'].compareTo(a['score']));
+            //    winnerMsg = "Game Over! Winner: ${finalScores[0]['username']} (${finalScores[0]['score']})";
+            // }
+
+            // Show dialog and navigate back
+            showDialog(
+              context: context,
+              barrierDismissible: false, // User must acknowledge
+              builder: (BuildContext dialogContext) {
+                return AlertDialog(
+                  title: const Text('Game Finished'),
+                  content: Text(winnerMsg),
+                  actions: <Widget>[
+                    TextButton(
+                      child: const Text('OK'),
+                      onPressed: () {
+                        Navigator.of(dialogContext).pop(); // Close dialog
+                        // Navigate back to settings, clearing the game stack
+                        router.pushAndPopUntil(const SettingsView(), predicate: (_) => false);
+                        // Reset local game state if necessary
+                        gameId = -1;
+                        myPlayerId = -1;
+                        gameFinished = false;
+                         // Trigger another state update after navigation if needed
+                         // Future.microtask(() => context.read<SetStateCubit>().setState());
+                      },
+                    ),
+                  ],
+                );
+              },
+            );
+          } else {
+             // Spectator logic: The setState call above will trigger the SpectatorGameBoard
+             // to rebuild and show its finished state. We might add a small delay
+             // before potentially clearing the spectator state automatically, or let
+             // the user manually stop spectating.
+             print('🏁 Spectator received game finished signal.');
+             // Optionally show a snackbar
+             ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Game #${data["gameId"]} has finished.'), duration: const Duration(seconds: 5)),
+             );
+          }
+          break;
+        // **** END ADDED CASE ****
       }
     } catch (e) {
       print('🎮 Error processing server message: $e');
@@ -12051,6 +12685,13 @@ extension CommunicationApplication on Application {
     if (gameData.isEmpty) {
       return;
     }
+    
+    // **** ADD THIS GUARD ****
+    if (isSpectating || gameId == -1) {
+      print('🎮 Skipping _checkIfPlayerAborted (Spectating or no active game data)');
+      return;
+    }
+    // **** END GUARD ****
 
     // Track if any player's status changed
     bool playerStatusChanged = false;
@@ -13623,37 +14264,38 @@ extension WidgetApplicationSettings on Application {
   // Method to handle spectating a game
   onSpectateGame(BuildContext context, int gameId) async {
     print('🎮 Attempting to spectate game: $gameId');
-    
+
     try {
       final serviceProvider = ServiceProvider.of(context);
-      
+
       // Create a message to request spectating
       Map<String, dynamic> msg = {
         "action": "spectateGame",
         "gameId": gameId,
-        "userName": userName
+        "userName": userName // Send username for logging/display?
       };
-      
+
       // Send the spectate request
       if (serviceProvider.socketService.isConnected) {
         print('🎮 Sending spectate request via socket service');
+
+        // *** SET FLAG BEFORE sending request/setState ***
+        isSpectating = true;
+        spectatedGameId = gameId;
+        gameData = {}; // Clear previous game data immediately
+
         serviceProvider.socketService.sendToServer(msg);
-        
-        // Don't navigate to the game view, just update the UI
+
+        // *** Update the UI AFTER setting the flags ***
+        context.read<SetStateCubit>().setState(); // Update UI to show spectator board
+
         // Show a snackbar to indicate spectating has started
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Spectating game $gameId. Game data will be shown in the console.'),
+            content: Text('👁️ Spectating game #$gameId...'),
             duration: const Duration(seconds: 3),
           ),
         );
-
-        // Update the UI to show we're spectating
-        isSpectating = true;
-        spectatedGameId = gameId;
-
-        // Update the UI to reflect spectating status
-        context.read<SetStateCubit>().setState();
       } else {
         print('❌ Cannot spectate: Not connected to server');
       }
@@ -17609,6 +18251,7 @@ File: lib/top_score/top_score.dart
 import 'dart:convert';
 
 import 'package:flutter/animation.dart';
+import '../states/cubit/state/state_cubit.dart';
 import '../services/http_service.dart';
 import 'languages_top_score.dart';
 import '../startup.dart';
@@ -17638,33 +18281,22 @@ class TopScore with LanguagesTopScore {
     return _standardLanguage;
   }
 
-  Future loadTopScoreFromServer(String gameType) async {
-    // Check if we've already loaded this game type in this session
-    if (_loadedGameTypes[gameType] == true) {
-      print('📊 [TopScore] Already loaded $gameType top scores in this session, skipping duplicate request');
-      return;
-    }
-    
-    // Set the flag immediately to prevent concurrent duplicate requests
-    _loadedGameTypes[gameType] = true;
-    
+  Future<void> loadTopScoreFromServer(String gameType, SetStateCubit cubit) async {
     print('📊 [TopScore] Loading top scores for game type: $gameType');
     try {
-      var httpService= HttpService(baseUrl: localhost);
-      var serverResponse =
-          await httpService.getDB("/GetTopScores?count=20&type=$gameType");
+      var httpService = HttpService(baseUrl: localhost);
+      var serverResponse = await httpService.getDB("/GetTopScores?count=20&type=$gameType");
+      
       if (serverResponse.statusCode == 200) {
-        topScores = jsonDecode(serverResponse.body);
-        print('📊 [TopScore] Successfully loaded ${topScores.length} scores for $gameType');
+        final loadedScores = jsonDecode(serverResponse.body);
+        topScores = loadedScores;
+        print('✅ [TopScore] Loaded ${loadedScores.length} scores for $gameType');
+        cubit.setState(); // Trigger UI update
       } else {
-        // Reset the flag in case of error to allow retrying
-        _loadedGameTypes[gameType] = false;
-        print('⚠️ [TopScore] Failed to load scores for $gameType: Status ${serverResponse.statusCode}');
+        print('⚠️ [TopScore] Failed to load scores (Status ${serverResponse.statusCode})');
       }
     } catch (e) {
-      // Reset the flag in case of error to allow retrying
-      _loadedGameTypes[gameType] = false;
-      print('❌ [TopScore] Error loading top scores: $e');
+      print('❌ [TopScore] Error loading scores: $e');
     }
   }
 
@@ -18141,7 +18773,7 @@ class _ApplicationViewState extends State<ApplicationView>
   }
 
   postFrameCallback(BuildContext context) async {
-    await topScore.loadTopScoreFromServer(app.gameType);
+    await topScore.loadTopScoreFromServer(app.gameType, context.read<SetStateCubit>());
     myState();
     mainPageLoaded = true;
   }
@@ -18245,29 +18877,36 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
   @override
   Widget build(BuildContext context) {
     // Print entire game data for debugging
-    print('🎲 Building spectator board');
+    print('🎲 Building spectator board. Game Finished: ${widget.gameData['gameFinished']}');
 
     // Extract player name(s)
     List<String> playerNames = [];
     if (widget.gameData['userNames'] != null) {
       playerNames = List<String>.from(widget.gameData['userNames']);
     }
-
-    if (playerNames.isEmpty) {
-      playerNames = ['J']; // Default from screenshot
+    if (playerNames.isEmpty && widget.gameData['players'] != null) {
+       // Attempt to get names from player objects if userNames is missing
+       try {
+          playerNames = List<String>.from(widget.gameData['players'].map((p) => p?['username'] ?? 'P?'));
+       } catch (_) { playerNames = ['P1']; } // Fallback
     }
+    if (playerNames.isEmpty) playerNames = ['Player 1'];
 
-    // Get current roll number
+    // Get current roll number and dice values
     int currentRoll = widget.gameData['rollCount'] ?? 0;
-
-    // Extract dice values
     List<int> diceValues = [];
     if (widget.gameData['diceValues'] != null) {
-      diceValues = List<int>.from(widget.gameData['diceValues']);
-      print('🎲 Found dice values: $diceValues');
+      try { // Add try-catch for safety
+         diceValues = List<int>.from(widget.gameData['diceValues']);
+      } catch (e) { print("Error parsing diceValues: $e"); }
     }
 
-    return Column(
+    // Check if game is finished
+    bool isFinished = widget.gameData['gameFinished'] ?? false;
+
+    return Stack( // Use Stack for overlay
+      children: [
+        Column(
       children: [
         // Game status header
         Container(
@@ -18367,7 +19006,42 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
                 ),
               ),
             ),
-          ),
+              ),
+            ),
+            // **** Game Finished Overlay ****
+            if (isFinished)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black.withOpacity(0.5),
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10, spreadRadius: 2)],
+                      ),
+                      child: const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'GAME OVER',
+                            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.red),
+                          ),
+                          SizedBox(height: 10),
+                          Text(
+                            "You can stop spectating from the settings screen.",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 14, color: Colors.black54),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            // **** End Game Finished Overlay ****
+          ],
         ),
       ],
     );

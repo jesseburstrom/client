@@ -23,6 +23,19 @@ class TopScore with LanguagesTopScore {
 
   List<dynamic> topScores = [];
 
+  /// Updates the internal topScores list with data received (e.g., from WebSocket)
+  /// and triggers a UI update.
+  void updateScoresFromData(List<Map<String, dynamic>> newScores, SetStateCubit cubit) {
+    print('📊 [TopScore] Updating scores directly from provided data (${newScores.length} entries)');
+    topScores = newScores; // Update the internal list
+    // No need to mark as loaded, as this comes from a push update
+    try {
+      cubit.setState(); // Trigger UI update
+    } catch (e) {
+      print('⚠️ [TopScore] Error calling setState via Cubit during updateScoresFromData: $e');
+    }
+  }
+
   Function getChosenLanguage() {
     return _getChosenLanguage;
   }
