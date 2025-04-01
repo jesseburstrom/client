@@ -35,13 +35,6 @@ export class GameController {
         case 'removeGame': // Should this be handled differently? Maybe game end.
           this.handleRemoveGame(socket, data);
           break;
-        // --- New Actions for Regret/Extra ---
-        case 'useRegret':
-            this.handleUseRegret(socket, data);
-            break;
-        case 'useExtraMove':
-            this.handleUseExtraMove(socket, data);
-            break;
         // --- Spectate Game Action ---
         case 'spectateGame':
             this.handleSpectateGame(socket, data);
@@ -73,6 +66,15 @@ export class GameController {
   // ... (handleRequestGame, handleRequestJoinGame, handleRemoveGame remain similar, ensure they use GameService correctly)
   handleRequestGame(socket: Socket, data: any): void {
     const { gameType, nrPlayers, userName } = data;
+    // --- Simplification: Validate gameType ---
+    if (!['Ordinary', 'Mini', 'Maxi'].includes(gameType)) {
+         console.warn(`[GameController] Invalid gameType requested: ${gameType}. Defaulting to Ordinary? Or reject.`);
+         // Decide how to handle invalid type - reject or default
+         // For now, reject:
+         socket.emit('onServerMsg', { action: 'error', message: `Invalid game type: ${gameType}` });
+         return;
+    }
+    // --- End Simplification ---
     const player = PlayerFactory.createPlayer(socket.id, userName, gameType); // Pass gameType
 
     const game = this.gameService.createOrJoinGame(gameType, nrPlayers, player);
@@ -212,78 +214,6 @@ export class GameController {
      if (success) {
          this.gameService.forwardSelectionToPlayers(gameId, socket.id, data); // Forward raw data for client-side processing
      }
-  }
-
-  // --- New Handlers for Regret/Extra Move ---
-  handleUseRegret(socket: Socket, data: any): void {
-      const { gameId } = data;
-      if (gameId === undefined) return; // Check gameId presence
-      const game = this.gameService.getGame(gameId);
-      if (!game) return;
-      const playerIndex = game.findPlayerIndex(socket.id);
-      if (playerIndex === -1 || playerIndex !== game.playerToMove) return;
-
-      const player = game.players[playerIndex];
-      if (!player) return; // Player not found in array
-
-      // Validate if player has regrets left
-      if (player.regretsLeft === undefined || player.regretsLeft <= 0) {
-          console.warn(`Player ${socket.id} tried to use regret with none left.`);
-          // Send error?
-          socket.emit('onServerMsg', { action: 'error', message: 'No regrets left.' });
-          return;
-      }
-
-      console.log(`✅ Player ${socket.id} used REGRET in game ${gameId}`);
-      // Decrement regrets server-side
-      player.regretsLeft--;
-      // Log the action via GameService
-      this.gameService.logRegret(gameId, socket.id);
-      // Reset player's roll count in game state
-      game.rollCount = 0;
-      // Notify all players of the updated game state (incl. regretsLeft and rollCount)
-      this.gameService.notifyGameUpdate(game);
-      // Client already handles UI reset, server confirms state change.
-  }
-
-  handleUseExtraMove(socket: Socket, data: any): void {
-      const { gameId } = data;
-      if (gameId === undefined) return; // Check gameId presence
-      const game = this.gameService.getGame(gameId);
-      if (!game) return;
-      const playerIndex = game.findPlayerIndex(socket.id);
-       if (playerIndex === -1 || playerIndex !== game.playerToMove) return;
-
-       const player = game.players[playerIndex];
-       if (!player) return; // Player not found
-
-       // Validate if player has extra moves left
-       if (player.extraMovesLeft === undefined || player.extraMovesLeft <= 0) {
-           console.warn(`Player ${socket.id} tried to use extra move with none left.`);
-           // Send error?
-           socket.emit('onServerMsg', { action: 'error', message: 'No extra moves left.' });
-           return;
-       }
-       // Validate if they are eligible (e.g., must have rolled at least once?) - Allow as client does for now.
-       // if (game.rollCount <= 0) {
-       //      console.warn(`Player ${socket.id} tried to use extra move before rolling.`);
-       //      socket.emit('onServerMsg', { action: 'error', message: 'Cannot use extra move before first roll.' });
-       //      return;
-       // }
-
-
-      console.log(`✅ Player ${socket.id} used EXTRA MOVE in game ${gameId}`);
-      // Decrement extra moves server-side
-      player.extraMovesLeft--;
-      // Decrement roll count server-side (effectively gives one more roll)
-       if (game.rollCount > 0) { // Only decrement if they've actually rolled
-           game.rollCount--;
-       }
-      // Log the action via GameService
-      this.gameService.logExtraMove(gameId, socket.id);
-      // Notify all players of the updated game state
-      this.gameService.notifyGameUpdate(game);
-      // Client already handles UI change, server confirms state change.
   }
 
   // Removed handleDisconnect as GameService now handles it via its own listener

@@ -671,67 +671,7 @@ export class GameService {
     return game; // <-- Ensure game is returned
   }
 
-  // --- New methods for logging special actions --- 
-  // (Restored these methods)
-  async logRegret(gameId: number, playerId: string) {
-    const game = this.getGame(gameId);
-    if (!game) {
-      console.error(`❌ [GameService] logRegret: Game ${gameId} not found`);
-      return;
-    }
-    
-    const playerIndex = game.findPlayerIndex(playerId);
-    if (playerIndex === -1) {
-      console.error(`❌ [GameService] logRegret: Player ${playerId} not found in game ${gameId}`);
-      return;
-    }
 
-    const regretMove: GameMove = {
-      turnNumber: game.getCurrentTurnNumber(),
-      playerIndex: playerIndex,
-      playerId: playerId,
-      action: 'regret',
-      timestamp: new Date(),
-    };
-    
-    console.log(`📝 [GameService] Logging regret for player ${playerId} in game ${gameId}`);
-    try {
-      await this.gameLogService.logMove(gameId, regretMove);
-      console.log(`✅ [GameService] Successfully logged regret for player ${playerId}`);
-    } catch (error) {
-      console.error(`❌ [GameService] Error logging regret for player ${playerId}:`, error);
-    }
-  }
-
-  async logExtraMove(gameId: number, playerId: string) {
-    const game = this.getGame(gameId);
-    if (!game) {
-      console.error(`❌ [GameService] logExtraMove: Game ${gameId} not found`);
-      return;
-    }
-    
-    const playerIndex = game.findPlayerIndex(playerId);
-    if (playerIndex === -1) {
-      console.error(`❌ [GameService] logExtraMove: Player ${playerId} not found in game ${gameId}`);
-      return;
-    }
-
-    const extraMove: GameMove = {
-      turnNumber: game.getCurrentTurnNumber(),
-      playerIndex: playerIndex,
-      playerId: playerId,
-      action: 'extraMove',
-      timestamp: new Date(),
-    };
-    
-    console.log(`📝 [GameService] Logging extra move for player ${playerId} in game ${gameId}`);
-    try {
-      await this.gameLogService.logMove(gameId, extraMove);
-      console.log(`✅ [GameService] Successfully logged extra move for player ${playerId}`);
-    } catch (error) {
-      console.error(`❌ [GameService] Error logging extra move for player ${playerId}:`, error);
-    }
-  }
 }
 
 // Add helper methods to Game model if they don't exist

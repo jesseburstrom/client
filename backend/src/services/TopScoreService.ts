@@ -6,7 +6,7 @@ import { Server } from 'socket.io';
 const DB_NAME = 'top-scores';
 
 // Define the supported game types explicitly
-const SUPPORTED_GAME_TYPES = ["Mini", "Ordinary", "Maxi", "MaxiR3", "MaxiE3", "MaxiRE3"];
+const SUPPORTED_GAME_TYPES = ["Mini", "Ordinary", "Maxi"];
 
 interface TopScoreEntry {
   name: string;
@@ -25,6 +25,13 @@ export class TopScoreService {
   }
 
   private getCollection(gameType: string): Collection<TopScoreEntry> {
+
+    // --- Simplification: Check if type is supported ---
+    if (!SUPPORTED_GAME_TYPES.includes(gameType)) {
+         console.warn(`[TopScoreService] Unsupported game type requested for collection: ${gameType}`);
+         return null;
+    }
+    // --- End Simplification ---
     const db = this.getDb();
     // Normalize collection name (e.g., MaxiR3 -> maxiR3)
     const collectionName = gameType.charAt(0).toLowerCase() + gameType.slice(1);
@@ -45,6 +52,11 @@ export class TopScoreService {
          return [];
       }
       const collection = this.getCollection(gameType);
+      // --- Simplification: Handle null collection ---
+     if (!collection) {
+          return []; // Return empty if type is not supported
+     }
+     // --- End Simplification ---
       // Build query dynamically based on limit
       let query = collection
         .find({}, { projection: { _id: 0 } })
@@ -114,6 +126,12 @@ export class TopScoreService {
 
      try {
        const collection = this.getCollection(gameType);
+      // --- Simplification: Handle null collection ---
+      if (!collection) {
+           console.warn(`❌ [TopScoreService] Cannot update score for unsupported game type: ${gameType}`);
+           return false;
+      }
+      // --- End Simplification ---
        const result = await collection.insertOne({ name, score });
        console.log(`✅ [TopScoreService] Inserted score ${score} for ${name} in ${gameType} (Inserted ID: ${result.insertedId})`);
        return result.acknowledged; // Return insertion status directly

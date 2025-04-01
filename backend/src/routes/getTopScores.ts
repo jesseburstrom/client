@@ -11,6 +11,14 @@ export const getTopScores = {
 
     var results;
     try {
+
+      // --- Simplification: Validate game type ---
+    const requestedType = req.query.type as string;
+    if (!['Ordinary', 'Mini', 'Maxi'].includes(requestedType)) {
+        console.warn(`[getTopScores Route] Invalid game type requested: ${requestedType}`);
+        return res.status(400).json({ message: `Invalid game type: ${requestedType}` });
+    }
+    // --- End Simplification ---
       switch (req.query.type) {
         case "Ordinary": {
           console.log("getting ordinary game topscores");
@@ -34,33 +42,6 @@ export const getTopScores = {
         case "Maxi": {
           results = await db
             .collection("maxi")
-            .find({}, { projection: { _id: 0 } })
-            .sort({ score: -1 })
-            .toArray();
-          break;
-        }
-
-        case "MaxiR3": {
-          results = await db
-            .collection("maxiR3")
-            .find({}, { projection: { _id: 0 } })
-            .sort({ score: -1 })
-            .toArray();
-          break;
-        }
-
-        case "MaxiE3": {
-          results = await db
-            .collection("maxiE3")
-            .find({}, { projection: { _id: 0 } })
-            .sort({ score: -1 })
-            .toArray();
-          break;
-        }
-
-        case "MaxiRE3": {
-          results = await db
-            .collection("maxiRE3")
             .find({}, { projection: { _id: 0 } })
             .sort({ score: -1 })
             .toArray();

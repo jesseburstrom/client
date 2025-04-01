@@ -1,5 +1,10 @@
 //import jwt from "jsonwebtoken";
 import { getDbConnection } from "../db";
+// --- Simplification: Import TopScoreService to trigger broadcast ---
+// Assuming TopScoreService is initialized and accessible, e.g., via dependency injection or a singleton pattern
+// If not easily accessible, this route would *not* broadcast updates. The service-based update is preferred.
+// For now, we'll comment this out as direct service access isn't set up here.
+// import { topScoreServiceInstance } from '../server'; // Example of how it might be accessed
 
 export const updateTopScore = {
   path: "/UpdateTopScore" ,
@@ -9,79 +14,29 @@ export const updateTopScore = {
 
     var results = [];
     try {
-      switch (req.body.type) {
-        case "Ordinary": {
-          await db
-            .collection("ordinary")
-            .insertOne({ name: req.body.name, score: req.body.score });
-          results = await db
-            .collection("ordinary")
-            .find({}, { projection: { _id: 0 } })
-            .sort({ score: -1 })
-            .toArray();
-          break;
-        }
 
-        case "Mini": {
-          await db
-            .collection("mini")
-            .insertOne({ name: req.body.name, score: req.body.score });
-          results = await db
-            .collection("mini")
-            .find({}, { projection: { _id: 0 } })
-            .sort({ score: -1 })
-            .toArray();
-          break;
-        }
+      // --- Simplification: Validate game type ---
+    const requestedType = req.body.type as string;
+    if (!['Ordinary', 'Mini', 'Maxi'].includes(requestedType)) {
+        console.warn(`[updateTopScore Route] Invalid game type requested: ${requestedType}`);
+        return res.status(400).json({ message: `Invalid game type: ${requestedType}` });
+    }
+    // --- End Simplification ---
 
-        case "Maxi": {
-          await db
-            .collection("maxi")
-            .insertOne({ name: req.body.name, score: req.body.score });
-          results = await db
-            .collection("maxi")
-            .find({}, { projection: { _id: 0 } })
-            .sort({ score: -1 })
-            .toArray();
-          break;
-        }
+    const collectionName = requestedType.charAt(0).toLowerCase() + requestedType.slice(1);
+    const collection = db.collection(collectionName);
 
-        case "MaxiR3": {
-          await db
-            .collection("maxiR3")
-            .insertOne({ name: req.body.name, score: req.body.score });
-          results = await db
-            .collection("maxiR3")
-            .find({}, { projection: { _id: 0 } })
-            .sort({ score: -1 })
-            .toArray();
-          break;
-        }
+    await collection.insertOne({ name: req.body.name, score: req.body.score });
+    results = await collection
+        .find({}, { projection: { _id: 0 } })
+        .sort({ score: -1 })
+        .toArray();
 
-        case "MaxiE3": {
-          await db
-            .collection("maxiE3")
-            .insertOne({ name: req.body.name, score: req.body.score });
-          results = await db
-            .collection("maxiE3")
-            .find({}, { projection: { _id: 0 } })
-            .sort({ score: -1 })
-            .toArray();
-          break;
-        }
-
-        case "MaxiRE3": {
-          await db
-            .collection("maxiRE3")
-            .insertOne({ name: req.body.name, score: req.body.score });
-          results = await db
-            .collection("maxiRE3")
-            .find({}, { projection: { _id: 0 } })
-            .sort({ score: -1 })
-            .toArray();
-          break;
-        }
-      }
+      // --- Simplification: Broadcasting should ideally happen via the Service ---
+        // If topScoreServiceInstance is available:
+        // await topScoreServiceInstance.broadcastTopScores();
+        // Otherwise, the broadcast won't happen via this HTTP route. Clients relying
+        // on the WebSocket update ('onTopScoresUpdate') are preferred.
       res.status(200).json(results);
     } catch (e) {
       console.log(e);

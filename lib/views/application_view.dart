@@ -74,7 +74,6 @@ class _ApplicationViewState extends State<ApplicationView>
   @override
   void initState() {
     super.initState();
-    app.setup();
     tutorial.setup(this);
 
     WidgetsBinding.instance

@@ -49,12 +49,9 @@ class Application with LanguagesApplication  {
 
   var stackedWidgets = <Widget>[];
 
-  // "Ordinary" , "Mini", "Maxi", "MaxiR3", "MaxiE3", "MaxiRE3"
+  // "Ordinary" , "Mini", "Maxi"
   var gameType = "Ordinary";
   var nrPlayers = 1;
-  var regretGame = false;
-  var regretMovesLeft = 0;
-  var extraMovesLeft = 0;
 
   // Used by animation
   var maxNrPlayers = 4;
@@ -210,9 +207,6 @@ class Application with LanguagesApplication  {
     gameStarted = true;
     playerToMove = 0;
     winnerId = -1;
-    regretGame = false;
-    regretMovesLeft = 0;
-    extraMovesLeft = 0;
 
     if (gameType == "Mini") {
       totalFields = 17;
@@ -240,14 +234,6 @@ class Application with LanguagesApplication  {
       gameDices.initDices(6);
       bonusSum = 84;
       bonusAmount = 100;
-      if (gameType == "MaxiR3" || gameType == "MaxiRE3") {
-        regretGame = true;
-        regretMovesLeft = 3;
-      }
-
-      if (gameType == "MaxiE3" || gameType == "MaxiRE3") {
-        extraMovesLeft = 3;
-      }
 
       yatzyFunctions =
           [calcOnes, calcTwos, calcThrees, calcFours, calcFives, calcSixes] +

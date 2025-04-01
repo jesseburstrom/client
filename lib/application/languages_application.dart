@@ -38,9 +38,6 @@ mixin LanguagesApplication  {
   final _toJoinNewGame = {"English": "To Join New Game!"};
   final _chooseMove = {"English": "\nChoose Move"};
   final _pressSettings = {"English": "Press Settings\nButton"};
-  final _restart = {"English": "Restart"};
-  final _regretsLeft = {"English": "Regrets Left"};
-  final _extraMovesLeft = {"English": "Extra Moves Left"};
 
   // Settings
 
@@ -136,12 +133,6 @@ mixin LanguagesApplication  {
 
   String get pressSettings_ => getText(_pressSettings);
 
-  String get restart_ => getText(_restart);
-
-  String get regretsLeft_ => getText(_regretsLeft);
-
-  String get extraMovesLeft_ => getText(_extraMovesLeft);
-
   // Settings
 
   String get gameTypeOrdinary_ => getText(_gameTypeOrdinary);
@@ -233,9 +224,6 @@ mixin LanguagesApplication  {
     _toJoinNewGame["Swedish"] = "För Att Starta Nytt Spel!";
     _chooseMove["Swedish"] = "\nVälj Drag";
     _pressSettings["Swedish"] = "Gå Till \ninställningar";
-    _restart["Swedish"] = "Starta Om";
-    _regretsLeft["Swedish"] = "Ångra Kvar";
-    _extraMovesLeft["Swedish"] = "Extra Kast Kvar";
 
     // Settings
 

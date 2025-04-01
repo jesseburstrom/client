@@ -48,7 +48,14 @@ export class PlayerController {
 
         default:
            // Only log if it's not an action handled elsewhere or a common one like chat
-           if (!['requestGame', 'requestJoinGame', 'useRegret', 'useExtraMove', 'chatMessage', 'sendDices', 'sendSelection'].includes(data.action)) {
+           // Add 'requestTopScores' and 'spectateGame' to the list of known, delegated actions
+              const knownDelegatedActions = [
+                  'requestGame', 'requestJoinGame', 'removeGame', // GameController actions
+                  'spectateGame',                                 // GameController action
+                  'chatMessage',                                  // ChatController action
+                  'requestTopScores'                              // Server.ts direct handler
+              ];
+              if (!knownDelegatedActions.includes(data.action)) {
              console.log(`PlayerController: Unknown or delegated action: ${data.action}`);
            }
       }
@@ -65,7 +72,6 @@ export class PlayerController {
     if (this.playerRegistry.has(socket.id)) {
         console.log(`Player ${socket.id} re-requested ID.`);
         socket.emit("onServerMsg", { action: "getId", id: socket.id });
-        this.gameService.broadcastGameListToPlayer(socket.id);
         return;
     }
 
@@ -73,7 +79,6 @@ export class PlayerController {
     console.log(`Player ${socket.id} connected and requested ID.`);
     socket.emit("onServerMsg", { action: "getId", id: socket.id });
     socket.emit("userId", socket.id); // Keep dedicated event if client uses it
-    this.gameService.broadcastGameListToPlayer(socket.id);
   }
 
   // Removed handleCreateGame, handleJoinGame, handleRollDice, handleSelectCell

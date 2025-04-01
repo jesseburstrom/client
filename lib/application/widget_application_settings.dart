@@ -146,6 +146,55 @@ extension WidgetApplicationSettings on Application {
     }
   }
 
+  // --- Simplified Game Type Selection ---
+  Widget _buildGameTypeSelection(Function state) {
+    return Padding(
+      padding: const EdgeInsets.all(12.0),
+      child: Card(
+        elevation: 4,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Colors.white,
+                Colors.blue.shade50,
+              ],
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Column(
+              children: [
+                Text("Game Type", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)), // Use headingStyle if available
+                const SizedBox(height: 8),
+                inputItems.widgetStringRadioButton( // Use widgetStringRadioButton
+                    state,
+                    [ // Simplified list of values
+                      "Mini",
+                      "Ordinary",
+                      "Maxi",
+                    ],
+                    [ // Simplified list of translations
+                      gameTypeMini_,
+                      gameTypeOrdinary_,
+                      gameTypeMaxi_,
+                    ],
+                        (x) => {gameType = x},
+                    gameType),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  // --- End Simplified Game Type Selection ---
   onStartGameButton(BuildContext context, Function state) async {
     try {
       final serviceProvider = ServiceProvider.of(context);
@@ -371,61 +420,9 @@ extension WidgetApplicationSettings on Application {
                     child: ListView(
                         primary: true,
                         children: <Widget>[
-                              // Game Type Selection
-                              Padding(
-                                padding: const EdgeInsets.all(12.0),
-                                child: Card(
-                                  elevation: 4,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  // Add decorative patterns to card
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(12),
-                                      gradient: LinearGradient(
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                        colors: [
-                                          Colors.white,
-                                          Colors.blue.shade50,
-                                        ],
-                                      ),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(12.0),
-                                      child: Column(
-                                        children: [
-                                          Text("Game Type", style: headingStyle),
-                                          const SizedBox(height: 8),
-                                          inputItems.widgetStringRadioButtonSplit(
-                                              state,
-                                              [
-                                                "Mini",
-                                                "Ordinary",
-                                                "Maxi",
-                                                "MaxiR3",
-                                                "MaxiE3",
-                                                "MaxiRE3"
-                                              ],
-                                              [
-                                                gameTypeMini_,
-                                                gameTypeOrdinary_,
-                                                gameTypeMaxi_,
-                                                gameTypeMaxiR3_,
-                                                gameTypeMaxiE3_,
-                                                gameTypeMaxiRE3_
-                                              ],
-                                              (x) => {gameType = x},
-                                              gameType,
-                                              3),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-
+                          // --- Use the simplified game type selection ---
+                          _buildGameTypeSelection(state),
+                          // --- End simplified game type selection ---
                               // Number of Players Selection
                               Padding(
                                 padding: const EdgeInsets.symmetric(horizontal: 12.0),

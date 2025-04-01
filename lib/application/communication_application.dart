@@ -92,7 +92,6 @@ extension CommunicationApplication on Application {
   callbackOnServerMsg(dynamic data) async {
     try {
       final router = getIt<AppRouter>();
-      print('📩 Received server message: $data');
 
       // *** ADD NULL CHECK FOR data ***
       if (data == null || data is! Map) {
@@ -132,7 +131,14 @@ extension CommunicationApplication on Application {
           break;
         case "onGameStart":
           print('🎮 Received game start event for game ${data["gameId"]}');
-          
+          // --- ADD GUARD AGAINST DUPLICATE PROCESSING ---
+          final incomingGameId = data["gameId"];
+          if (gameId == incomingGameId && gameStarted) { // Check if we are already in this game and it's started
+            print('🎮 Ignoring duplicate onGameStart for game $gameId');
+            return; // Prevent reprocessing
+          }
+          // --- END GUARD ---
+
           // Check if this is a spectator message
           if (data["spectator"] == true) {
             print('👁️ Received spectator game data for game ${data["gameId"]}');
@@ -199,19 +205,15 @@ extension CommunicationApplication on Application {
           
           // Only join if we are in this game
           if (myIndex >= 0) {
-            // Check if this is a game we're already in - if so, treat it as an update
-            if (gameId == data["gameId"] && gameId != -1) {
-              print('🎮 Received onGameStart for our current game - treating as update');
-              // Process this as a game update instead of a new game
-              // Apply casting here too for consistency
-              _processGameUpdate((data as Map).map((key, value) => MapEntry(key.toString(), value)));
-              return;
-            }
             
             myPlayerId = myIndex;
             // Apply casting here
-            gameData = (data as Map).map((key, value) => MapEntry(key.toString(), value));
+            gameData = (data).map((key, value) => MapEntry(key.toString(), value));
             gameId = gameData["gameId"]; // Use the casted map
+
+            // --- Set gameStarted flag BEFORE calling setup ---
+            gameStarted = true; // Mark game as started locally *before* setup
+
             playerIds = gameData["playerIds"]; // Use the casted map
             playerActive = List.filled(playerIds.length, true);
             gameType = gameData["gameType"]; // Use the casted map
@@ -229,7 +231,13 @@ extension CommunicationApplication on Application {
                   gameDices.sendStartToUnity();
                 }
               }
-              await router.pop();
+              // Pop back to settings first? Or directly update the existing view?
+              // Let's assume we just need to ensure the state is correct.
+              // A simple setState might be enough if already on ApplicationView.
+              // If coming from SettingsView, pop might be needed.
+              // The existing router logic seems to handle popping if needed.
+              context.read<SetStateCubit>().setState(); // Ensure UI update
+              // await router.pop(); // Maybe not needed if guard prevents re-entry?
             } else {
               applicationStarted = true;
               await router.pushAndPopUntil(const ApplicationView(),
@@ -240,9 +248,15 @@ extension CommunicationApplication on Application {
           }
           break;
         case "onRequestGames":
+          // --- Add Check: Only process if not currently in a game ---
+          // This prevents the game list update from interfering right after starting a game.
+          // It assumes the user sees the list primarily from the SettingsView.
+          // If (gameId == -1 && !gameStarted) { // Only update list if not in an active game
+          print('📩 Processing onRequestGames...');
           data = List<dynamic>.from(data["Games"]);
           games = data;
-          _checkIfPlayerAborted();
+          _checkIfPlayerAborted(); // This check is likely safe now
+          context.read<SetStateCubit>().setState(); // Update settings view if visible
           break;
         case "onGameUpdate":
           _processGameUpdate(data);

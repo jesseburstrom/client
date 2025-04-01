@@ -11,8 +11,6 @@ export class Player {
   score: number; // Total score
   upperSum: number; // Sum for bonus calculation
   bonusAchieved: boolean;
-  regretsLeft?: number;
-  extraMovesLeft?: number;
 
   // Game type needed for score calculation context
   private gameType: string;
@@ -26,26 +24,11 @@ export class Player {
     score: number = 0,
     upperSum: number = 0,
     bonusAchieved: boolean = false,
-    regretsLeft?: number,
-    extraMovesLeft?: number
   ) {
     this.id = id;
     this.username = username;
     this.gameType = gameType; // Store gameType
     this.isActive = isActive;
-
-    // Initialize regrets/extra moves based on gameType if not provided
-    if (regretsLeft === undefined) {
-        if (gameType === 'MaxiR3' || gameType === 'MaxiRE3') this.regretsLeft = 3;
-    } else {
-        this.regretsLeft = regretsLeft;
-    }
-    if (extraMovesLeft === undefined) {
-        if (gameType === 'MaxiE3' || gameType === 'MaxiRE3') this.extraMovesLeft = 3;
-    } else {
-        this.extraMovesLeft = extraMovesLeft;
-    }
-
 
     // Initialize cells if not provided
     if (cells) {
@@ -145,8 +128,6 @@ export class Player {
            score: this.score,
            upperSum: this.upperSum,
            bonusAchieved: this.bonusAchieved,
-           regretsLeft: this.regretsLeft,
-           extraMovesLeft: this.extraMovesLeft,
            // Include gameType if needed for deserialization context, though fromJson handles it
            // gameType: this.gameType
        };
@@ -169,8 +150,6 @@ export class Player {
             data.score ?? 0,
             data.upperSum ?? 0,
             data.bonusAchieved ?? false,
-            data.regretsLeft,
-            data.extraMovesLeft
         );
     }
 }
@@ -179,11 +158,27 @@ export class Player {
 // Factory remains useful for creating standard instances easily
 export class PlayerFactory {
   static createPlayer(id: string, username: string, gameType: string = 'Ordinary'): Player {
+      // --- Simplification: Ensure only allowed types are created ---
+  const baseType = getBaseGameType(gameType);
+  const allowedTypes = ['Ordinary', 'Mini', 'Maxi'];
+  if (!allowedTypes.includes(baseType as string)) {
+       console.warn(`[PlayerFactory] Attempting to create player for invalid base type derived from ${gameType}. Using Ordinary.`);
+       gameType = 'Ordinary'; // Default to Ordinary if invalid type provided
+  }
+  // --- End Simplification ---
     return new Player(id, username, gameType);
   }
 
   static createEmptyPlayer(gameType: string = 'Ordinary'): Player {
     // Create an inactive player instance
+     // --- Simplification: Ensure only allowed types are created ---
+    const baseType = getBaseGameType(gameType);
+    const allowedTypes = ['Ordinary', 'Mini', 'Maxi'];
+    if (!allowedTypes.includes(baseType as string)) {
+         console.warn(`[PlayerFactory] Attempting to create empty player for invalid base type derived from ${gameType}. Using Ordinary.`);
+         gameType = 'Ordinary'; // Default to Ordinary if invalid type provided
+    }
+    // --- End Simplification ---
     const config = GameConfig[getBaseGameType(gameType)];
     const cells = config.cellLabels.map((label, index) =>
         new BoardCell(index, label, config.nonNumericCells.includes(label))
