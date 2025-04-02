@@ -1,7485 +1,1496 @@
-Okay, here is a detailed technical description of the `jesseburstrom-client` project, covering both the Flutter frontend (`lib/`) and the Express backend (`backend/`).
+Okay, here is a detailed technical description of the project based on the provided file structure and contents, focusing on the Flutter frontend (`lib/`) and Express backend (`backend/src/`).
 
-**Project Overview**
+## Project Overview
 
-This project implements a client-server system for playing various versions of the Yatzy dice game (Ordinary, Mini, Maxi). It features:
+This project is a networked Yatzy game implementation featuring a Flutter frontend for the user interface and gameplay, an Express.js backend handling game logic, real-time communication, and data persistence, and an optional Unity component for 3D dice visualization. The system supports multiple game types (Ordinary, Maxi), multiplayer gameplay, spectating, chat functionality, and top score tracking.
 
-1.  **Real-time Multiplayer:** Players can create or join games, see opponent actions (dice rolls, score selections) in real-time.
-2.  **Multiple Game Types:** Supports different rule sets and board layouts for Yatzy.
-3.  **Spectator Mode:** Allows users to watch ongoing games without participating.
-4.  **User Authentication:** Basic email/password signup and login using JWT.
-5.  **Top Scores:** Tracks and displays high scores per game type.
-6.  **Chat:** In-game chat functionality between players.
-7.  **Unity Integration (Optional):** Leverages Unity via `flutter_unity_widget` for potentially rendering 3D dice.
-8.  **Game Logging:** Persists game moves and events to a database.
+**Core Technologies:**
 
-**Technology Stack**
+*   **Frontend:** Flutter (Dart)
+*   **Backend:** Node.js with Express.js (TypeScript)
+*   **Real-time Communication:** Socket.IO
+*   **Database:** MongoDB
+*   **3D Engine (Optional):** Unity (C#)
 
-*   **Backend:**
-    *   Runtime: Node.js
-    *   Framework: Express.js
-    *   Language: TypeScript
-    *   Database: MongoDB
-    *   Real-time Communication: Socket.IO
-    *   Authentication: JSON Web Tokens (JWT), bcrypt (for password hashing)
-    *   Other: CORS, dotenv
-*   **Frontend:**
-    *   Framework: Flutter
-    *   Language: Dart
-    *   State Management: flutter_bloc (Bloc, Cubit) - Primarily `LanguageBloc` and `SetStateCubit`. Significant state also appears managed directly within the `Application` class.
-    *   Navigation: auto_route
-    *   Networking: http package (via `HttpService`), socket_io_client (via `SocketService`)
-    *   Dependency Injection: get_it, injectable
-    *   Local Storage: shared_preferences
-    *   Unity Integration: flutter_unity_widget
-    *   UI: Material Design widgets, AutoSizeText
+## Architecture
 
----
+The application follows a client-server architecture:
 
-**Backend Description (`backend/`)**
+1.  **Flutter Frontend:** Acts as the primary client, responsible for rendering the UI, handling user input (dice rolls, selections), communicating game actions to the backend via WebSockets, displaying game state received from the backend, and interacting with the Unity engine for dice animations.
+2.  **Express Backend:** Serves as the authoritative game server. It manages game rooms, enforces game rules, processes player actions received via WebSockets, maintains game state, persists game logs and top scores to MongoDB, and broadcasts updates to connected clients (players and spectators).
+3.  **Unity Engine:** Integrated into the Flutter app using `flutter_unity_widget`. It receives commands from Flutter (e.g., roll dice, reset) and sends back results (dice values after roll). This is primarily a visual enhancement.
+4.  **MongoDB:** Used for data persistence, specifically:
+    *   `yatzy-game-log-db`: Stores detailed game logs, including moves, player info, start/end times (`GameLogService`).
+    *   `top-scores`: Stores high scores for different game types (`TopScoreService`).
+    *   `react-auth-db` (Potentially legacy/separate): Appears to store user authentication and generic logging data via REST routes.
 
-The backend is a Node.js application built with Express and TypeScript, responsible for managing game state, user authentication, real-time communication, and data persistence.
+## Frontend (Flutter - `lib/` folder)
 
-1.  **Architecture:**
-    *   Follows a layered approach: Routes -> Controllers -> Services -> Models/DB.
-    *   **Routes (`routes/`):** Define HTTP API endpoints. Files like `logInRoute.ts`, `signUpRoute.ts`, `getTopScores.ts`, `spectateGameRoute.ts` map paths and HTTP methods to handler functions. `index.ts` aggregates these routes.
-    *   **Controllers (`controllers/`):** Handle incoming requests (both HTTP via routes and Socket.IO events). They parse requests, call appropriate services, and format responses. `GameController`, `PlayerController`, and `ChatController` manage specific domains of functionality, particularly Socket.IO interactions.
-    *   **Services (`services/`):** Contain the core business logic.
-        *   `GameService`: Manages the lifecycle and state of active games (creating, joining, player actions, disconnections, spectator management). Interacts heavily with Socket.IO to broadcast updates.
-        *   `GameLogService`: Handles interaction with the MongoDB `yatzy-game-log-db` database to store game starts, moves (rolls, selections, disconnects), spectating actions, and final scores.
-        *   `TopScoreService`: Manages reading and writing high scores to the `top-scores` MongoDB database. Uses Socket.IO to broadcast score updates.
-    *   **Models (`models/`):** Define the data structures for core entities like `Game`, `Player`, `BoardCell`, and `Dice`. These classes often include logic related to their state (e.g., `Player.calculateScores`, `Game.advanceToNextActivePlayer`).
-    *   **Database (`db.ts`):** Manages the MongoDB connection using the official `mongodb` driver. It initializes the connection and provides a function (`getDbConnection`) to access specific databases (`react-auth-db`, `yatzy-game-log-db`, `top-scores`). Includes a basic connection test.
-    *   **Utils (`utils/`):** Contains helper constants and functions, like `gameConfig.ts` (defining rules/layouts for different Yatzy types) and `yatzyMapping.ts` (mapping between cell indices and labels, crucial for client-server consistency).
+The Flutter frontend constitutes the user-facing part of the application.
 
-2.  **Real-time Communication (Socket.IO):**
-    *   Initialized in `server.ts` and attached to the HTTP server.
-    *   Configured with CORS settings to allow connections from the Flutter frontend.
-    *   Uses both WebSocket and polling transports for robustness.
-    *   The `GameService`, `ChatController`, and `TopScoreService` leverage the `io` instance passed from `server.ts` to emit events to specific clients (`io.to(socketId).emit(...)`) or broadcast to all connected clients (`io.emit(...)`).
-    *   Controllers register event handlers (`socket.on(...)`) for messages like `sendToServer` (client actions), `sendToClients` (client-to-client forwarding, mainly chat), `connect`, and `disconnect`.
-    *   `GameService` plays a key role in managing game rooms/state and broadcasting updates (`onGameUpdate`, `onGameStart`, `onGameFinished`) to relevant players and spectators.
+**1. Core Structure & Framework:**
+    *   Built using the Flutter framework with Dart.
+    *   Uses `MaterialApp` for the main application structure (`core/app_widget.dart`).
+    *   Dependency Injection is managed using `get_it` and `injectable` (`injection.dart`, `injection.config.dart`, `core/injectable_modules.dart`).
 
-3.  **API Routes & Authentication:**
-    *   Provides RESTful endpoints for signup (`/api/signup`) and login (`/api/login`).
-    *   Uses bcrypt to hash passwords during signup and compare during login.
-    *   Issues JWT tokens upon successful login, which are then expected in the `Authorization` header for protected routes (like `/api/log/:userId`, `/api/getLog/:userId`).
-    *   Other routes like `/GetTopScores`, `/UpdateTopScore`, and `/api/spectate/:gameId` handle data retrieval and updates, some potentially without strict JWT auth depending on implementation details not fully shown.
+**2. UI and Views:**
+    *   **Routing:** Navigation is handled by `auto_route` (`router/router.dart`, `router/router.gr.dart`), defining routes for different screens.
+    *   **Main Views:**
+        *   `SettingsView` (`views/settings_view.dart`, `application/widget_application_settings.dart`): Allows users to configure game settings (username, game type, number of players, language, Unity options), view/join ongoing games, create new games, and spectate.
+        *   `ApplicationView` (`views/application_view.dart`, `application/widget_application_scaffold.dart`): The main gameplay screen, displaying the game board, dice, player scores, game status, chat, and top scores.
+        *   `SpectatorGameBoard` (`widgets/spectator_game_board.dart`): A dedicated widget (likely used within `SettingsView` or a separate spectator view) to display the state of a game being spectated.
+    *   **Widgets:** Composable UI elements are used throughout, including custom widgets for the game board (`application/widget_application.dart`), dice (`dices/widget_dices.dart`), chat (`chat/widget_chat.dart`), top scores (`top_score/widget_top_scores.dart`), and potentially others.
+    *   **Layout:** Adapts layout based on screen orientation (portrait/landscape) as seen in `widget_application_scaffold.dart`.
 
-4.  **Data Persistence (MongoDB):**
-    *   `react-auth-db`: Stores user credentials (`email`, `passwordHash`) and potentially basic profile info (`users` collection) and activity logs (`logs` collection).
-    *   `yatzy-game-log-db`: Stores detailed game logs (`game_moves` collection), including game setup, player moves (rolls, selections), disconnects, spectating, and final scores. `GameLogService` interacts with this.
-    *   `top-scores`: Stores high scores, likely in separate collections per game type (`ordinary`, `mini`, `maxi`). `TopScoreService` interacts with this.
+**3. State Management:**
+    *   **Bloc/Cubit:** Used for state management, although the implementation seems mixed.
+        *   `LanguageBloc` (`states/bloc/language/`): Manages the application's language state.
+        *   `SetStateCubit` (`states/cubit/state/`): A general-purpose Cubit seemingly used to trigger UI updates (`context.read<SetStateCubit>().setState()`), which might indicate a mix of state management approaches or a simplified way to force rebuilds.
+    *   **Core Application State:** Managed within the `Application` class (`application/application.dart`), holding game state variables (`gameId`, `playerIds`, `cellValue`, `fixedCell`, `playerToMove`, `gameStarted`, `gameFinished`, etc.), references to other components like `Dices` and `Chat`, and methods for game logic and setup.
 
-5.  **Server Entry Point (`server.ts`):**
-    *   Sets up the Express app, CORS middleware, and JSON body parsing.
-    *   Creates an HTTP server and attaches Socket.IO to it.
-    *   Includes an `isOnline` flag to switch between serving build artifacts for deployment and local development directories.
-    *   Initializes the database connection (`initializeDbConnection`).
-    *   Instantiates controllers and services, injecting dependencies (like `io`, `GameLogService`, `TopScoreService`).
-    *   Registers all HTTP routes and Socket.IO event handlers.
-    *   Starts the HTTP server, listening on the specified port (8000).
+**4. Application Logic (`application/`):**
+    *   **`Application` class:** Central hub for frontend logic, holding state and coordinating interactions.
+    *   **Internal Functions:**
+        *   `application_functions_internal.dart`: Contains core gameplay logic like `cellClick` (sending selection to server using string labels via `yatzy_mapping_client.dart`), `applyLocalSelection` (optimistic UI update), `colorBoard`.
+        *   `application_functions_internal_calc_dice_values.dart`: Client-side calculation functions for determining possible scores for each Yatzy category based on current dice values. These are used to populate the scoreboard before a selection is made.
+    *   **Communication Logic:** `communication_application.dart` handles processing messages received from the backend (`callbackOnServerMsg`, `callbackOnClientMsg`) and updating the application state accordingly (game start, game updates, player aborts, chat messages, top scores). It also contains logic for joining/creating games and handling spectating states.
+    *   **Animations:** `animations_application.dart` handles animations, particularly for the game board cells.
 
----
+**5. Networking & Services:**
+    *   **`SocketService` (`services/socket_service.dart`):** The primary modern way of interacting with the backend's Socket.IO server. It wraps the `socket_io_client` package, manages the connection lifecycle, provides methods for sending specific game actions (`createGame`, `joinGame`, `rollDice`, `selectCell`, `sendChatMessage`) and generic messages (`sendToServer`, `sendToClients`), and receives/delegates server events to the `Application` class callbacks (`_handleServerMessage`, `_handleClientMessage`).
+    *   **`HttpService` (`services/http_service.dart`):** Provides methods for making standard HTTP requests (GET, POST, UPDATE, DELETE) to the backend REST API, likely used for actions like fetching/updating top scores directly via HTTP routes, and potentially legacy auth/logging.
+    *   **`ServiceProvider` (`services/service_provider.dart`):** An `InheritedWidget` used to provide access to `SocketService` and `GameService` (client-side `GameService`) throughout the widget tree. It initializes these services.
 
-**Frontend Description (`lib/`)**
+**6. Dice Handling (`dices/`):**
+    *   **`Dices` class:** Manages the state of the dice (values, held status, rolls).
+    *   **Unity Integration:** If `unityDices` is true, it uses `flutter_unity_widget`.
+        *   `UnityCommunication` (`dices/unity_communication.dart`): Sends messages (`UnityMessage`) to the Unity instance (start, reset, update colors, etc.) via `unityWidgetController.postMessage`.
+        *   Receives messages back from Unity (`onUnityMessage`), primarily dice roll results.
+    *   **2D Dice:** If `unityDices` is false, it handles dice logic internally (`rollDices` method) and displays images (`widget_dices.dart`).
+    *   **Callbacks:** Uses callbacks (`callbackUpdateDiceValues`, `callbackUnityCreated`, `callbackCheckPlayerToMove`) to interact with the main `Application` logic.
 
-The frontend is a Flutter application providing the user interface for interacting with the Yatzy game server.
+**7. Data Models (`models/`):**
+    *   Client-side representations of `Game`, `Player`, and `BoardCell`, mirroring the backend structures but tailored for frontend use.
 
-1.  **Architecture & Structure:**
-    *   **Modular Design:** Code is organized into feature-based folders (`application`, `chat`, `dices`, `top_score`, `scroll`, `tutorial`, `views`, `widgets`), promoting separation of concerns.
-    *   **Core (`core/`):** Contains the main application widget (`AppWidget`) and dependency injection setup (`injectable_modules.dart`).
-    *   **Application (`application/`):** Seems to be the central hub. The `Application` class holds a significant amount of game state and UI logic. It interacts with other components like `Dices`, `Chat`, `TopScore`. Uses mixins for languages (`LanguagesApplication`). Contains internal functions (`application_functions_internal.dart`, `..._calc_dice_values.dart`) and specific UI building logic (`widget_application.dart`, `widget_application_scaffold.dart`, `widget_application_settings.dart`).
-    *   **State Management (`states/`):** Uses `flutter_bloc`.
-        *   `LanguageBloc`: Manages language selection, persisting the choice to `SharedPreferences`.
-        *   `SetStateCubit`: A simple Cubit used to trigger UI updates across potentially large parts of the application by incrementing a counter state. This suggests that much of the state might be managed directly in classes like `Application`, and this Cubit forces rebuilds when that state changes.
-    *   **Services (`services/`):**
-        *   `SocketService`: Manages the `socket_io_client` connection, event handling (`onConnect`, `onDisconnect`, `onClientMsg`, `onServerMsg`), and provides methods to send events to the server (`sendToServer`, `sendToClients`). It interacts heavily with the `Application` class via callbacks (`app.callbackOnClientMsg`, `app.callbackOnServerMsg`).
-        *   `HttpService`: Handles standard HTTP requests for actions like fetching top scores or potentially authentication (though auth flow isn't fully detailed here).
-        *   `GameService` (Client-side): Likely a wrapper or state manager for game-related data received from the server, although its exact role seems less defined than the backend `GameService`.
-        *   `ServiceProvider`: An `InheritedWidget` used to make services (`SocketService`, `GameService`) available down the widget tree. Initialized in `AppWidget`.
-    *   **Navigation (`router/`):** Uses the `auto_route` package for defining routes (`SettingsView`, `ApplicationView`) and handling navigation declaratively.
-    *   **Models (`models/`):** Defines client-side representations of data structures like `Game`, `Player`, `BoardCell`, mirroring the backend models.
-    *   **Views (`views/`):** Top-level screens/pages managed by the router (`ApplicationView`, `SettingsView`).
-    *   **Widgets (`widgets/`):** Contains potentially reusable or specific UI components, like `SpectatorGameBoard`.
-    *   **Feature Widgets:** Each feature folder (`chat`, `dices`, `top_score`, `scroll`) contains its main widget (e.g., `WidgetChat`, `WidgetDices`) responsible for rendering that part of the UI.
-    *   **Startup (`startup.dart`):** Contains global variables for configuration (like `localhost` URL, `isOnline` flag) and initializes instances of major classes like `Application`, `Chat`, `Dices`, `TopScore`. *The heavy reliance on globals is a potential architectural weakness.*
+**8. Utilities:**
+    *   `yatzy_mapping_client.dart`: Essential utility to map between cell indices (used internally in arrays) and string labels (used for communication with the backend, e.g., in `sendSelection`). This ensures consistency between frontend and backend understanding of the board layout.
+    *   `shared_preferences.dart`: Utility class (`SharedPrefProvider`) for saving/loading user settings (username, game preferences, language) locally.
 
-2.  **State Management Details:**
-    *   The `Application` class appears to be a central state holder, managed via direct variable updates.
-    *   `SetStateCubit` is used broadly (`context.read<SetStateCubit>().setState()`) to trigger UI rebuilds when state within `Application` or other classes changes. This is less granular than typical Bloc/Cubit patterns where specific states trigger specific UI updates.
-    *   `LanguageBloc` manages language state specifically.
+## Backend (Express - `backend/src/` folder)
 
-3.  **Real-time Integration:**
-    *   `SocketService` connects to the backend Socket.IO server.
-    *   It listens for server events (`onServerMsg`, `onClientMsg`) and calls corresponding methods in the `Application` class (`callbackOnServerMsg`, `callbackOnClientMsg`).
-    *   These callbacks in `Application` parse the incoming data (`action` key) and update the local game state (variables within `Application`), then trigger a UI refresh using `SetStateCubit`.
-    *   Client actions (rolling dice, selecting scores, sending chat) are sent back to the server via `SocketService.sendToServer` or `SocketService.sendToClients`.
+The Express backend manages the core game logic, state, and communication.
 
-4.  **Unity Integration (`dices/`):**
-    *   Uses `flutter_unity_widget` to embed a Unity view.
-    *   `Dices` class manages the Unity controller (`UnityWidgetController`).
-    *   `UnityCommunication` extension provides methods to send formatted messages (JSON strings via `postMessage`) to the Unity scene (`GameManager` GameObject) for actions like resetting dice, starting rolls, updating colors, etc.
-    *   Handles messages received *from* Unity via `onUnityMessage`, parsing JSON to update Flutter state (e.g., dice results).
+**1. Core Framework & Structure:**
+    *   Built using Node.js with the Express.js framework.
+    *   Written in TypeScript, compiled to JavaScript for execution.
+    *   `server.ts` is the main entry point, setting up the Express app, HTTP server, Socket.IO server, middleware (CORS, JSON parsing), routes, and initializing services and controllers.
 
-5.  **UI Composition:**
-    *   `AppWidget` sets up the `MaterialApp.router` and the `ServiceProvider`.
-    *   `ApplicationView` displays the main game screen. Its state (`_ApplicationViewState`) builds the UI using `Application.widgetScaffold`.
-    *   `WidgetApplicationScaffold` arranges the main UI components (game board, dice area, chat, top scores, status display) based on screen orientation (portrait/landscape).
-    *   `WidgetSetupGameBoard` renders the Yatzy scoreboard dynamically based on game state (`app.cellValue`, `app.fixedCell`, `app.appColors`).
-    *   `WidgetDices` renders either the 2D dice images or the `UnityWidget` based on the `unityDices` setting.
-    *   Other widgets (`WidgetChat`, `WidgetTopScore`, `WidgetScroll`) render their respective parts.
+**2. API and Routing (`routes/`):**
+    *   Defines RESTful API endpoints handled by Express.
+    *   **Top Scores:** `getTopScores.ts` (GET `/GetTopScores`), `updateTopScore.ts` (POST `/UpdateTopScore`). These interact directly with the database (or potentially `TopScoreService`).
+    *   **Spectating:** `spectateGameRoute.ts` (GET `/api/spectate/:gameId`) provides game state and log data for spectators via HTTP. It uses `GameService` and `GameLogService`.
+    *   **Authentication/Logging:** `logInRoute.ts`, `signUpRoute.ts`, `logRoute.ts`, `getLogRoute.ts` handle user authentication (using bcrypt for passwords, JWT for sessions) and logging activities, seemingly interacting with a separate `react-auth-db`. These might be legacy or for features outside the core Yatzy gameplay loop managed by WebSockets.
+    *   `index.ts`: Aggregates all routes.
 
----
+**3. Real-time Communication (Socket.IO):**
+    *   Socket.IO is initialized in `server.ts` and attached to the HTTP server.
+    *   Handles client connections, disconnections, and real-time event handling.
+    *   Uses specific events like `sendToServer` (client -> server generic actions), `sendToClients` (client -> server -> other clients), `onServerMsg` (server -> client generic messages), `onClientMsg` (server -> client specific actions/data).
+    *   **Namespaces/Rooms:** Implicitly uses rooms based on `gameId` (e.g., sending messages `to(gameId)`) for targeted communication within games, although explicit `socket.join(gameRoom)` isn't shown in the provided `GameController` snippets, it's likely handled within `GameService` or implicitly by Socket.IO's `to()` method targeting individual socket IDs within a game. Spectators are explicitly managed via `GameService.addSpectator`.
 
-**Key Functionalities Flow (Client <-> Server)**
+**4. Controllers (`controllers/`):**
+    *   Act as the interface between raw Socket.IO events and the application's services.
+    *   `ChatController.ts`: Handles `chatMessage` events received via `sendToServer` or `sendToClients`, determines recipients based on `gameId` or `playerIds`, and uses `io.to(playerId).emit` to forward messages. It leverages `GameService` to find players within a game.
+    *   `GameController.ts`: Handles core game actions:
+        *   `requestGame`, `requestJoinGame`: Creates or joins games via `GameService`.
+        *   `removeGame`: Removes a game via `GameService`.
+        *   `sendDices` (received via `sendToClients`): Processes client-reported dice rolls, logs them, and updates game state via `GameService.processDiceRoll`. The server trusts the client's roll values but logs them.
+        *   `sendSelection` (received via `sendToClients`): Processes player selections using the *string label* (`selectionLabel`), validates the move, updates game state and logs via `GameService.processSelection`, and forwards the selection to other clients if needed (`GameService.forwardSelectionToPlayers`).
+        *   `spectateGame`: Handles requests to spectate, fetches game state from `GameService` and historical logs from `GameLogService`, potentially reconstructs the game state using logs, and sends the state to the spectator. It also registers the spectator with `GameService`.
+    *   `PlayerController.ts`: Primarily handles the initial `getId` request from clients. Other player-related game actions are delegated to `GameController`.
 
-1.  **Connect & Get ID:** Client connects (`SocketService.connect`) -> Server sends `welcome` -> Client requests ID (`sendToServer` with `action: 'getId'`) -> Server responds (`onServerMsg` with `action: 'getId'`) -> Client stores `socketId`.
-2.  **Create/Join Game:** Client UI (Settings) -> `onStartGameButton` -> `SocketService.sendToServer` (`action: 'requestGame'` or `'requestJoinGame'`) -> Backend `GameController` -> `GameService.createOrJoinGame` -> Backend updates game state -> Backend `GameService` broadcasts `onGameStart` or `onGameUpdate` via `io.emit('onServerMsg', ...)` -> Client receives `onServerMsg` -> `app.callbackOnServerMsg` -> Parses data, updates `Application` state, navigates to `ApplicationView`.
-3.  **Roll Dice:**
-    *   *2D Dices:* Client UI (`WidgetDices`) -> `rollDices` function -> Calculates random dice -> Updates local state -> Calls `app.callbackUpdateDiceValues`.
-    *   *3D Dices:* Client UI/Unity -> `onUnityMessage` (with results) -> `app.callbackUpdateDiceValues`.
-    *   `app.callbackUpdateDiceValues` -> Calls `app.updateDiceValues` (updates score previews) -> Sends dice data (`sendToClients` with `action: 'sendDices'`) via `SocketService`.
-    *   Backend receives `sendDices` -> `GameController` -> `GameService.processDiceRoll` -> Logs roll -> Broadcasts dice update (`onClientMsg` and `onServerMsg`).
-    *   Other clients receive `onClientMsg` (`action: 'sendDices'`) -> Update their dice display.
-    *   All clients (including sender) receive `onServerMsg` (`action: 'onGameUpdate'`) -> Update full game state (roll count, dice).
-4.  **Select Score:** Client UI (`WidgetSetupGameBoard`) -> `app.cellClick` -> Calculates label -> Sends selection data (`sendToClients` with `action: 'sendSelection'`) via `SocketService` -> *Optimistically updates local UI (`applyLocalSelection`)*.
-    *   Backend receives `sendSelection` -> `GameController` -> `GameService.processSelection` -> Updates game state (fixes cell, calculates score, advances turn) -> Logs selection -> Broadcasts `onGameUpdate` (`onServerMsg`).
-    *   Client receives `onServerMsg` (`action: 'onGameUpdate'`) -> `app.callbackOnServerMsg` -> Updates local state to match server (confirms selection, updates player turn, clears dice).
-5.  **Chat:** Client UI (`WidgetChat`) -> `chat.onSubmitted` -> Calls `app.chatCallbackOnSubmitted` -> `SocketService.sendToClients` (`action: 'chatMessage'`) -> Backend `ChatController` receives -> Broadcasts `onClientMsg` (`action: 'chatMessage'`) to other players -> Other clients receive -> `app.callbackOnClientMsg` -> `app.updateChat` -> Updates chat UI.
-6.  **Spectate:** Client UI (Settings) -> `onSpectateGame` -> Sets `isSpectating` flag -> `SocketService.sendToServer` (`action: 'spectateGame'`) -> Backend `GameController` -> Fetches game state/log -> Sends data back (`onServerMsg` with `action: 'onGameStart'`, `spectator: true`) -> Client receives -> `app.callbackOnServerMsg` -> Updates `gameData` -> UI renders `SpectatorGameBoard`. Subsequent `onGameUpdate` messages are received and update the spectator view.
+**5. Services (`services/`):**
+    *   **`GameService.ts`:** The most critical backend component.
+        *   Manages the lifecycle of `Game` instances in memory (`games` Map).
+        *   Handles player connections (`createOrJoinGame`, `handlePlayerDisconnect`, `handlePlayerAbort`).
+        *   Contains logic for creating/finding games, adding/removing players.
+        *   Processes core game actions initiated by controllers: `processDiceRoll`, `processSelection`.
+        *   Advances player turns (`advanceToNextActivePlayer`).
+        *   Broadcasts game list updates (`broadcastGameList`) and game state updates (`notifyGameUpdate`, `notifyGameFinished`) to players and spectators using `io.emit` and `io.to()`.
+        *   Interacts with `GameLogService` to persist game events (start, moves, end, disconnects).
+        *   Interacts with `TopScoreService` to update scores upon game completion.
+        *   Manages spectators (`addSpectator`, `removeSpectator`).
+    *   **`GameLogService.ts`:**
+        *   Responsible for interacting with the `yatzy-game-log-db` MongoDB database (`game_moves` collection).
+        *   Provides methods to log game start (`logGameStart`), individual moves (`logMove` - including rolls, selections, disconnects, spectating), and game end (`logGameEnd`).
+        *   Provides `getGameLog` to retrieve the full history of a game, essential for spectating.
+    *   **`TopScoreService.ts`:**
+        *   Manages top scores stored in the `top-scores` MongoDB database (separate collections per game type, e.g., `ordinary`, `maxi`).
+        *   Provides methods to get top scores (`getTopScores`, `getAllTopScores`) and update scores (`updateTopScore`).
+        *   Crucially, it uses the injected `io` instance to broadcast score updates (`broadcastTopScores`) to all connected clients when scores change.
 
----
+**6. Database Interaction (`db.ts`):**
+    *   Provides functions (`initializeDbConnection`, `getDbConnection`) to establish and manage the connection to the MongoDB server using the `mongodb` driver.
+    *   Includes basic connection testing and logging.
 
-**Potential Improvements / Observations**
+**7. Data Models (`models/`):**
+    *   Define the server-side data structures:
+        *   `BoardCell.ts`: Represents a single cell on the player's scorecard.
+        *   `Dice.ts`: Simple model for dice logic (rolling), potentially not heavily used if client/Unity handles rolls.
+        *   `Game.ts`: Represents the state of a single game, including players, game type, turn info, dice values, roll count, game status (`gameStarted`, `gameFinished`), etc. Contains methods for adding/removing players, advancing turns (`advanceToNextActivePlayer`), applying selections (`applySelection`), checking finish conditions (`isGameFinished`), and serialization (`toJSON`, `fromJSON`).
+        *   `Player.ts`: Represents a player within a game, holding their ID, username, active status, and their `BoardCell` array (scorecard). Includes score calculation logic (`calculateScores`).
 
-*   **State Management (Flutter):** The reliance on a central `Application` class and a global `SetStateCubit` could become difficult to manage and debug as the application grows. A more structured approach using Bloc/Cubit per feature or a different state management solution (like Riverpod) might be beneficial.
-*   **Global Variables (Flutter):** The `startup.dart` file uses many global variables. This makes state tracking harder and increases the risk of side effects. Encapsulating configuration and state within appropriate classes/providers is recommended.
-*   **Client-Side Validation:** The client calculates potential scores (`app.updateDiceValues`) before the user selects a cell. The server should ideally recalculate/validate the score upon receiving the `sendSelection` event to prevent cheating.
-*   **Error Handling:** Error handling appears basic. More robust handling on both client and server (e.g., specific error messages, UI feedback, logging) would improve usability and debugging.
-*   **Code Duplication:** The Yatzy mapping logic (`yatzyMapping.ts` and `yatzy_mapping_client.dart`) seems duplicated. Consider a shared definition or code generation.
-*   **Backend DI:** Explicit Dependency Injection could improve testability and organization in the backend compared to manual instantiation in `server.ts`.
-*   **Testing:** No test files are visible in the structure. Adding unit, integration, and widget tests is crucial for stability.
-*   **Spectator Data:** The spectator implementation fetches both in-memory state and database logs. Ensuring these are correctly merged and presented consistently requires careful handling. The `SpectatorGameBoard` widget directly uses `gameData` which might need refinement based on the combined state.
+**8. Utilities (`utils/`):**
+    *   `gameConfig.ts`: Defines constants and configurations for different game types (cell labels, bonus thresholds/amounts, dice count), crucial for initializing game boards and calculating scores correctly in `Player.ts`.
+    *   `yatzyMapping.ts`: Server-side utility mirroring the client's mapping, used by `GameController` and `GameService` to convert between string labels received from the client and internal cell indices.
+    *   `index.ts`: General utility functions (randomInt, delay, etc.).
 
----
+## Key Interactions
 
-**Conclusion**
+1.  **Game Setup:** Client (SettingsView) -> Sends `requestGame` or `requestJoinGame` (Socket.IO) -> Backend (`GameController` -> `GameService`) -> `GameService` creates/joins game -> `GameService` broadcasts game list update and sends `onGameStart`/`onGameUpdate` to relevant clients -> Client (`communication_application.dart`) processes message, sets up game state (`application.dart`), navigates to `ApplicationView`.
+2.  **Dice Roll (Unity):** Client (ApplicationView) -> Sends "start" message to Unity (`UnityCommunication`) -> User interacts with Unity -> Unity rolls dice -> Unity sends results (`onUnityMessage`) -> Client (`Dices.onUnityMessage`) -> Updates `Dices` state -> Calls `application.callbackUpdateDiceValues` -> Sends `sendDices` (Socket.IO) to server -> Backend (`GameController` -> `GameService.processDiceRoll`) logs roll, updates game state -> `GameService` broadcasts `sendDices` (onClientMsg) and `onGameUpdate` (onServerMsg) -> Other clients update dice display.
+3.  **Dice Roll (2D):** Client (ApplicationView) -> User clicks roll button -> `Dices.rollDices` calculates roll -> Updates `Dices` state -> Calls `application.callbackUpdateDiceValues` -> Sends `sendDices` (Socket.IO) to server -> Backend (same as Unity roll).
+4.  **Score Selection:** Client (ApplicationView) -> User clicks cell -> `application.cellClick` -> Sends `sendSelection` with *label* and score (Socket.IO) -> Backend (`GameController` -> `GameService.processSelection`) -> Validates move, uses `yatzyMapping` to get index, updates `Game` model via `applySelection`, updates `GameLogService` -> `GameService` advances turn, broadcasts `onGameUpdate` -> Clients receive new state, update UI, potentially clear dice/highlight next player.
+5.  **Chat:** Client (ChatWidget) -> User sends message -> `chat.onSubmitted` -> `application.chatCallbackOnSubmitted` -> Sends `chatMessage` (Socket.IO `sendToClients`) -> Backend (`ChatController`) -> Relays message to other players in the same game via `onClientMsg`.
+6.  **Spectating:** Client (SettingsView) -> User clicks spectate -> Sends `spectateGame` (Socket.IO) -> Backend (`GameController.handleSpectateGame`) -> Fetches current state (`GameService`) and log (`GameLogService`), reconstructs state if needed, registers spectator (`GameService.addSpectator`), sends initial state (`onGameStart` with `spectator: true`) -> Client (`communication_application.dart`) receives data, updates UI to show `SpectatorGameBoard` -> Subsequent `onGameUpdate` messages from `GameService` keep the spectator view synced.
+7.  **Top Scores:** Client (e.g., on game end or manually) -> Sends `requestTopScores` (Socket.IO) -> Backend (`server.ts` handler -> `TopScoreService.getTopScores`) -> Sends `onTopScoresUpdate` (Socket.IO) back to requester. Also, `GameService.handleGameFinished` -> `TopScoreService.updateTopScore` -> `TopScoreService` (potentially) broadcasts `onTopScoresUpdate` to *all* clients.
 
-This project is a comprehensive client-server implementation of a multiplayer Yatzy game. It effectively uses Socket.IO for real-time features, MongoDB for persistence, and JWT for basic authentication. The Flutter frontend provides the UI, integrates potentially with Unity for visuals, and manages client-side state, albeit with some architectural patterns (globals, `SetStateCubit`) that could be refined. The separation into controllers, services, and models on the backend, and a modular feature-based structure on the frontend, provides a reasonable foundation. Key areas for potential focus include enhancing state management on the client, adding robust server-side validation, and implementing comprehensive testing.
+## Summary
 
-Okay, here's a detailed analysis of the `jesseburstrom-client` codebase, focusing on function/class dependencies and relationships in a compact, AI-parseable format.
+The project implements a functional Yatzy game with a clear separation between the Flutter frontend and Express backend. Real-time communication via Socket.IO is central to the gameplay loop, handling game state synchronization, player actions, and chat. The backend maintains the authoritative game state and uses MongoDB for persistence of game logs and top scores. The optional Unity integration provides an enhanced visual experience for dice rolling. The use of TypeScript on the backend and structured services/controllers promotes maintainability. The frontend utilizes Flutter's widget system, state management (Bloc/Cubit), and a dedicated `SocketService` for robust communication. String-based labels are used for score selection communication, requiring careful mapping on both client and server.
+
+```plaintext
+DEPENDENCY_GRAPH_FORMAT_VERSION: 1.0
+DESCRIPTION: Function/Class Dependency Graph including Call Graphs, Class Relations, and File References.
 
 ---
-
-**ANALYSIS START**
-
-**Project:** jesseburstrom-client
-**Root Directory:** `jesseburstrom-client/`
-
-**Overall Structure:**
-*   **Backend:** Node.js/TypeScript application using Express, MongoDB, and Socket.IO. Handles game logic, user authentication, data persistence.
-*   **Frontend:** Flutter application (`lib/`) using Bloc/Cubit for state management, GetIt/Injectable for dependency injection, AutoRoute for navigation, and potentially `flutter_unity_widget` for dice rendering.
-
----
-
-**I. Backend Analysis (`backend/`)**
-
-**Entry Point:** `backend/src/server.ts`
-
-1.  **`backend/src/server.ts`**
-    *   **Imports:** `express`, `cors`, `http`, `socket.io`, `path`, `db.ts`, `routes/index.ts`, `services/*`, `controllers/*`, `routes/spectateGameRoute.ts`.
-    *   **Initialization:**
-        *   Creates Express app (`app`).
-        *   Sets up CORS.
-        *   Creates HTTP server (`httpServer`) wrapping Express app.
-        *   Initializes Socket.IO Server (`io`) attached to `httpServer` with CORS and transport settings.
-        *   Configures static file serving (`express.static`) based on `isOnline` flag.
-        *   Uses `express.json()` middleware.
-    *   **Routing:**
-        *   Calls `routes()` from `routes/index.ts` to get route definitions.
-        *   Dynamically registers routes (GET, POST, etc.) onto the Express `app`.
-        *   Explicitly registers `/api/spectate/:gameId` GET route.
-    *   **Services & Controllers Instantiation:**
-        *   Creates `GameLogService`, `TopScoreService` (passes `io`), `GameService` (passes `io`, `gameLogService`, `topScoreService`).
-        *   Creates `GameController`, `PlayerController`, `ChatController` (passes `io` and/or `gameService`, `gameLogService`).
-        *   Calls `initializeSpectateRoute()` passing services.
-    *   **Socket.IO Handling:**
-        *   Sets up `io.on("connect", ...)` handler.
-        *   Inside `connect` handler:
-            *   Logs connection (`socket.id`).
-            *   Emits `welcome`.
-            *   Registers handlers from `gameController`, `playerController`, `chatController`.
-            *   Listens for `sendToServer`: Routes specific actions (`requestTopScores`) or logs others.
-            *   Listens for `sendToClients`: Logs.
-            *   Listens for `disconnect`: Calls `gameService.handlePlayerDisconnect()`.
-    *   **Startup:**
-        *   Calls `initializeDbConnection()` from `db.ts`.
-        *   Starts `httpServer.listen()`.
-
-2.  **`backend/src/db.ts`**
-    *   **Imports:** `mongodb`.
-    *   **Exports:** `initializeDbConnection`, `getDbConnection`.
-    *   **`initializeDbConnection`:** Connects `MongoClient` to MongoDB (`mongodb://127.0.0.1:27017`). Performs a test write.
-    *   **`getDbConnection`:** Returns a `Db` instance for a given database name using the established client.
-
-3.  **`backend/src/routes/index.ts`**
-    *   **Imports:** All route definition files (`logInRoute.ts`, `signUpRoute.ts`, etc.).
-    *   **Exports:** `routes()` function which returns an array of route objects `{ path, method, handler }`. (Does *not* include `spectateGameRoute` which is registered separately in `server.ts`).
-
-4.  **`backend/src/routes/*.ts` (Individual Route Files)**
-    *   **General Pattern:** Define an object `{ path, method, handler }`.
-    *   **Imports:** `express` (implicitly via handler signature), `jsonwebtoken`, `bcrypt`, `db.ts`.
-    *   **Handlers:** Asynchronous functions (`async (req, res) => ...`).
-        *   `getLogRoute.ts`: Handles GET `/api/getLog/:userId`. Verifies JWT, finds logs in `react-auth-db.logs`.
-        *   `getTopScores.ts`: Handles GET `/GetTopScores`. Connects to `top-scores` DB, queries specific collection (`ordinary`, `mini`, `maxi`) based on `req.query.type`, sorts by score.
-        *   `logInRoute.ts`: Handles POST `/api/login`. Finds user in `react-auth-db.users`, compares password with `bcrypt`, generates JWT.
-        *   `logRoute.ts`: Handles POST `/api/log/:userId`. Verifies JWT, pushes activity log to `react-auth-db.logs`.
-        *   `signUpRoute.ts`: Handles POST `/api/signup`. Checks for existing user, hashes password with `bcrypt`, inserts user into `react-auth-db.users`, creates log entry, generates JWT.
-        *   `spectateGameRoute.ts`: Handles GET `/api/spectate/:gameId`. **Uses services directly** (`gameServiceInstance`, `gameLogServiceInstance`). Gets game state from memory (`gameService`) and logs (`gameLogService`), returns combined JSON. Exports `initializeSpectateRoute` for service injection.
-        *   `updateTopScore.ts`: Handles POST `/UpdateTopScore`. Connects to `top-scores` DB, inserts score into specific collection based on `req.body.type`. Does *not* explicitly call `TopScoreService.broadcastTopScores`.
-
-5.  **`backend/src/services/GameService.ts`**
-    *   **Imports:** `models/Game.ts`, `models/Player.ts`, `socket.io`, `GameLogService.ts`, `TopScoreService.ts`, `utils/yatzyMapping.ts`.
-    *   **Class:** `GameService`
-        *   **State:** `games: Map<number, Game>`, `spectators: Map<number, Set<string>>`, `gameIdCounter`.
-        *   **Dependencies:** `io: Server`, `gameLogService: GameLogService`, `topScoreService: TopScoreService`.
-        *   **Methods:**
-            *   `addSpectator`: Adds spectator ID to set, emits game state.
-            *   `removeSpectator`: Removes spectator ID.
-            *   `createGame`: Creates `Game` instance, stores in `games`, calls `gameLogService.logGameStart`.
-            *   `findAvailableGame`: Iterates `games` to find joinable game.
-            *   `getGame`, `getAllGames`, `removeGame`: Standard map operations. `removeGame` calls `gameLogService.logGameEnd` if finished.
-            *   `joinGame`: Adds `Player` to `Game`. If full, updates `gameStarted` and calls `gameLogService.logGameStart` again (to update player list/status).
-            *   `handlePlayerDisconnect`: Finds player across games, calls `game.markPlayerAborted`, logs disconnect move via `gameLogService.logMove`, calls `handleGameFinished` if needed, calls `broadcastGameList`, calls `removeSpectator`.
-            *   `broadcastGameList`, `broadcastGameListToPlayer`: Emit `onRequestGames` via `io`.
-            *   `notifyGameUpdate`: Emits `onGameUpdate` via `io` to players and spectators.
-            *   `handlePlayerStartingNewGame`, `handlePlayerAbort`: Calls `handlePlayerDisconnect`.
-            *   `handleGameFinished`: Calls `gameLogService.logGameEnd`, calls `topScoreService.updateTopScore` for each player, calls `notifyGameFinished`, removes game from map, cleans spectators, calls `broadcastGameList`.
-            *   `notifyGameFinished`: Emits `onGameFinished` via `io` to players and spectators.
-            *   `processDiceRoll`: Validates turn, calls `gameLogService.logMove`, updates `game` state, emits `sendDices` (`onClientMsg`) to others, calls `notifyGameUpdate`.
-            *   `processSelection`: Validates turn, calls `gameLogService.logMove`, calls `game.applySelection`, calls `handleGameFinished` or advances turn (`game.advanceToNextActivePlayer`), calls `notifyGameUpdate`.
-            *   `forwardSelectionToPlayers`: Emits `sendSelection` (`onClientMsg`) to other players.
-            *   `createOrJoinGame`: Orchestrates finding/creating game, adding player, logging, notifying, broadcasting.
-
-6.  **`backend/src/services/GameLogService.ts`**
-    *   **Imports:** `mongodb`, `db.ts`, `models/Game.ts`.
-    *   **Interfaces:** `GameMove`, `GameLog`.
-    *   **Class:** `GameLogService`
-        *   **Methods:**
-            *   `getCollection`: Gets MongoDB collection `yatzy-game-log-db.game_moves`.
-            *   `logGameStart`: Upserts initial `GameLog` document.
-            *   `logMove`: Pushes a `GameMove` object onto the `moves` array of a `GameLog`. Creates placeholder log if game doesn't exist.
-            *   `logGameEnd`: Updates `GameLog` with `endTime` and `finalScores`.
-            *   `getGameLog`: Finds and returns a `GameLog` document by `gameId`.
-            *   `logSpectate`: Logs a 'spectate' action as a `GameMove`.
-
-7.  **`backend/src/services/TopScoreService.ts`**
-    *   **Imports:** `mongodb`, `db.ts`, `socket.io`.
-    *   **Class:** `TopScoreService`
-        *   **Dependencies:** `io: Server`.
-        *   **Methods:**
-            *   `getCollection`: Gets MongoDB collection `top-scores.<gameType>`. Validates `gameType`.
-            *   `getTopScores`: Finds scores for a specific type, sorts, optionally limits.
-            *   `getAllTopScores`: Calls `getTopScores` for all supported types.
-            *   `broadcastTopScores`: Emits `onTopScoresUpdate` via `io` with all scores.
-            *   `updateTopScore`: Inserts a new score entry. Does *not* currently check if it's a "top" score, just inserts. Implicitly relies on `GameService.handleGameFinished` to call this.
-
-8.  **`backend/src/controllers/GameController.ts`**
-    *   **Imports:** `socket.io`, `services/GameService.ts`, `models/Player.ts`, `services/GameLogService.ts`, `utils/yatzyMapping.ts`, `models/Game.ts`.
-    *   **Class:** `GameController`
-        *   **Dependencies:** `gameService: GameService`, `gameLogService: GameLogService`.
-        *   **Methods:**
-            *   `registerSocketHandlers`: Listens for `sendToServer` (`requestGame`, `requestJoinGame`, `removeGame`, `spectateGame`) and `sendToClients` (`sendDices`, `sendSelection`).
-            *   `handleRequestGame`: Calls `gameService.createOrJoinGame`.
-            *   `handleRequestJoinGame`: Calls `gameService.joinGame`, `gameService.notifyGameUpdate`.
-            *   `handleRemoveGame`: Calls `gameService.removeGame`.
-            *   `handleSendDices`: Calls `gameService.processDiceRoll`.
-            *   `handleSendSelection`: Calls `gameService.processSelection`, `gameService.forwardSelectionToPlayers`.
-            *   `handleSpectateGame`: Calls `gameService.getGame`, `gameLogService.getGameLog`, `game.applySelection` (to rebuild state from log), emits `onGameStart` / `onGameUpdate`, calls `gameLogService.logSpectate`, calls `gameService.addSpectator`.
-
-9.  **`backend/src/controllers/PlayerController.ts`**
-    *   **Imports:** `socket.io`, `services/GameService.ts`, `models/Player.ts`, `services/GameLogService.ts`.
-    *   **Class:** `PlayerController`
-        *   **Dependencies:** `gameService: GameService`, `gameLogService: GameLogService`.
-        *   **Methods:**
-            *   `registerSocketHandlers`: Listens for `sendToServer` (`getId`). Logs unknown actions.
-            *   `handleGetId`: Emits `getId` (`onServerMsg`), `userId`. (Note: `broadcastGameList` is now handled within `GameService` actions).
-
-10. **`backend/src/controllers/ChatController.ts`**
-    *   **Imports:** `socket.io`, `services/GameService.ts`.
-    *   **Class:** `ChatController`
-        *   **Dependencies:** `io: Server`, `gameService: GameService`.
-        *   **Methods:**
-            *   `registerSocketHandlers`: Listens for `sendToClients` (`chatMessage`) and `sendToServer` (`chatMessage`).
-            *   `handleChatMessage`, `handleServerChatMessage`: Extracts message data, finds players in the game via `gameService`, emits `chatMessage` (`onClientMsg`) to recipients (excluding sender).
-
-11. **`backend/src/models/*.ts`**
-    *   **`BoardCell.ts`:** Class `BoardCell` (index, label, value, fixed, isNonScoreCell). Includes `toJSON`, `fromJson`.
-    *   **`Dice.ts`:** Class `Dice` (logic for rolling, keeping dice - likely *not used* by server logic currently, as server trusts client rolls).
-    *   **`Game.ts`:** Class `Game` (core game state: id, type, players, status flags, turn info, dice, rolls). Methods: `addPlayer`, `removePlayer`, `markPlayerAborted`, `findPlayerIndex`, `isGameFull`, `getCurrentTurnNumber`, `incrementRollCount`, `advanceToNextActivePlayer`, `applySelection` (uses `yatzyMapping.getSelectionIndex`), `isGameFinished`, `setDiceValues`, `toJSON`, `fromJSON`.
-    *   **`Player.ts`:** Class `Player` (id, username, isActive, cells, score state). Methods: `calculateScores` (uses `gameConfig`), `hasCompletedGame`, `getScore`, `toJSON`, `fromJSON`. Factory `PlayerFactory`.
-
-12. **`backend/src/utils/*.ts`**
-    *   **`gameConfig.ts`:** Exports `GameConfig` object mapping game types ('Ordinary', 'Mini', 'Maxi') to `GameTypeConfig` (cellLabels, bonus info, dice/rolls). Exports `getBaseGameType`.
-    *   **`index.ts`:** Basic utility functions (`randomInt`, `delay`, etc.).
-    *   **`yatzyMapping.ts`:** Exports `getSelectionLabel`, `getSelectionIndex`. Maps between cell index and string label based on game type (using hardcoded arrays and `getBaseGameType`). Crucial for interpreting client selections.
+FILE: backend/src/controllers/ChatController.ts
+CLASS: ChatController
+  DEPENDS_ON:
+    - socket.io.Server
+    - backend/src/services/GameService.GameService
+  CONSTRUCTOR:
+    PARAMS: io: Server, gameService?: GameService
+    STORES: io, gameService
+  METHODS:
+    - registerSocketHandlers(socket: Socket): void
+      HANDLES_SOCKET: sendToClients [SOURCE: CLIENT, ACTION: chatMessage] -> CALLS: this.handleChatMessage
+      HANDLES_SOCKET: sendToServer [SOURCE: CLIENT, ACTION: chatMessage] -> CALLS: this.handleServerChatMessage
+      CALLS: console.log [EXTERNAL: Node.js]
+    - handleChatMessage(socket: Socket, data: any): void
+      CALLS: this.gameService.getGame(data.gameId) [FILE: backend/src/services/GameService.ts]
+      USES_CLASS: Game.players [FILE: backend/src/models/Game.ts]
+      USES_CLASS: Player.id, Player.isActive [FILE: backend/src/models/Player.ts]
+      EMITS_SOCKET: onClientMsg [TARGET: PLAYER: player.id] [DATA: action, chatMessage]
+      CALLS: console.log [EXTERNAL: Node.js]
+    - handleServerChatMessage(socket: Socket, data: any): void
+      CALLS: this.gameService.getGame(data.gameId) [FILE: backend/src/services/GameService.ts]
+      USES_CLASS: Game.players [FILE: backend/src/models/Game.ts]
+      USES_CLASS: Player.id, Player.isActive [FILE: backend/src/models/Player.ts]
+      EMITS_SOCKET: onClientMsg [TARGET: PLAYER: player.id] [DATA: action, chatMessage]
+      EMITS_SOCKET: onClientMsg [TARGET: ROOM: game_${data.gameId}] [DATA: action, chatMessage] (Fallback)
+      CALLS: console.log [EXTERNAL: Node.js]
+    - broadcastToPlayersInSameGame(socket: Socket, data: any): void (private)
+      CALLS: this.gameService.getAllGames() [FILE: backend/src/services/GameService.ts]
+      USES_CLASS: Game.players [FILE: backend/src/models/Game.ts]
+      USES_CLASS: Player.id, Player.isActive [FILE: backend/src/models/Player.ts]
+      EMITS_SOCKET: onClientMsg [TARGET: PLAYER: player.id] [DATA: action, chatMessage]
+      CALLS: console.log [EXTERNAL: Node.js]
+  IMPORTS:
+    - Socket, Server FROM socket.io
+    - GameService FROM ../services/GameService
+  EXPORTS:
+    - ChatController
 
 ---
-
-**II. Frontend Analysis (`lib/`)**
-
-**Entry Point:** `lib/main.dart`
-
-1.  **`lib/main.dart`**
-    *   **Imports:** `flutter`, `flutter_bloc`, `states/*`, `injectable`, `core/app_widget.dart`, `injection.dart`, `shared_preferences.dart`.
-    *   **Initialization:** `WidgetsFlutterBinding.ensureInitialized()`, `SharedPrefProvider.loadPrefs()`, `configureInjection()`, sets up `MultiBlocProvider` (`LanguageBloc`, `SetStateCubit`), runs `AppWidget`.
-
-2.  **`lib/core/app_widget.dart`**
-    *   **Imports:** `flutter`, `flutter_bloc`, `application/*`, `dices/dices.dart`, `services/service_provider.dart`, `chat/chat.dart`, `injection.dart`, `router/router.dart`, `scroll/animations_scroll.dart`, `startup.dart`, `states/*`, `top_score/top_score.dart`, `tutorial/tutorial.dart`.
-    *   **Class:** `AppWidget`
-        *   **Initialization:** Creates instances of `TopScore`, `AnimationsScroll`, `Tutorial`, `Dices`, `Application`, `Chat`. **Crucially, these seem to be global/singleton-like instances accessed via `startup.dart` variables.**
-        *   **Build:** Returns `ServiceProvider.initialize` wrapping `MaterialApp.router`. Uses `_appRouter` from `GetIt`.
-        *   **`ServiceProvider.initialize`:** Creates `SocketService`, `GameService`.
-        *   **`MaterialApp.builder`:** After frame callback, gets `SocketService` from `ServiceProvider`, calls `socketService.connect()`, and `app.setSocketService()`.
-
-3.  **`lib/services/service_provider.dart`**
-    *   **Imports:** `flutter`, `services/socket_service.dart`, `services/game_service.dart`.
-    *   **Class:** `ServiceProvider` (InheritedWidget)
-        *   Holds `SocketService` and `GameService`.
-        *   `initialize` static method creates the services.
-        *   `of` static method retrieves the provider from context.
-
-4.  **`lib/services/socket_service.dart`**
-    *   **Imports:** `flutter`, `socket_io_client`, `flutter_bloc`, `application/communication_application.dart`, `models/game.dart`, `states/*`, `startup.dart`.
-    *   **Class:** `SocketService`
-        *   **State:** `socket: io.Socket`, `socketId`, `isConnected`, `game: Game?`, connection/handler flags.
-        *   **Dependencies:** `context: BuildContext` (used for Bloc lookup).
-        *   **Methods:**
-            *   `connect`: Initializes `io.Socket`, sets up event handlers (`_setupEventHandlers`), calls `socket.connect()`. Includes logic to prevent multiple concurrent connection attempts.
-            *   `_clearEventHandlers`, `_setupEventHandlers`: Manages socket event listeners (`connect`, `disconnect`, `connect_error`, `welcome`, `echo_response`, `onClientMsg`, `onServerMsg`, `userId`, `gameUpdate`, `chatMessage`).
-            *   `_sendEcho`, `_requestId`: Emit initial events on connect.
-            *   `_handle*` methods: Process incoming socket events. **Crucially, `_handleClientMessage` and `_handleServerMessage` call `app.callbackOnClientMsg` and `app.callbackOnServerMsg` respectively.** `_handleGameUpdate` calls `_processGameUpdate` which creates `Game.fromJson` and calls `onGameUpdate` callback (passed by `GameService`).
-            *   `createGame`, `joinGame`, `rollDice`, `selectCell`, `sendChatMessage`: Emit specific actions (`sendToServer`).
-            *   `sendToClients`, `sendToServer`: Generic emit methods.
-            *   `disconnect`: Disconnects socket.
-            *   `_updateState`: Calls `context.read<SetStateCubit>().setState()` to trigger UI rebuilds.
-
-5.  **`lib/services/game_service.dart`**
-    *   **Imports:** `models/game.dart`, `models/board_cell.dart`, `services/socket_service.dart`.
-    *   **Class:** `GameService`
-        *   **State:** `_game: Game?`.
-        *   **Dependencies:** `socketService: SocketService`, `onGameUpdated`, `onError` callbacks.
-        *   **Initialization:** Registers `_handleGameUpdate` with `socketService.onGameUpdate`.
-        *   **Methods:**
-            *   `createGame`, `joinGame`: Call corresponding `socketService` methods.
-            *   `rollDice`: Checks `_game` state (`isMyTurn`, `canRoll`), calls `socketService.rollDice`.
-            *   `calculateScoreForCell`: Contains Yatzy scoring logic based on dice and cell label. Uses private `_calculate*Score` helpers.
-            *   `selectCell`: Checks `_game` state (`isMyTurn`), calculates score using `calculateScoreForCell`, calls `socketService.selectCell`.
-
-6.  **`lib/services/http_service.dart`**
-    *   **Imports:** `dart:convert`, `http`.
-    *   **Class:** `HttpService`
-        *   **Methods:** Wrappers around `http.get`, `http.post`, `http.delete` for interacting with the backend REST API (primarily auth and initial top score loading).
-
-7.  **`lib/application/application.dart`** (and Extensions)
-    *   **Imports:** `flutter`, `flutter_bloc`, `dices/*`, `services/*`, `models/*`, `states/*`, `utils/*`, `startup.dart`, etc.
-    *   **Class:** `Application` (Central UI logic/state holder, accessed via `startup.app`)
-        *   **Dependencies:** `context`, `gameDices: Dices`, `inputItems: InputItems`. **Holds a `socketService: SocketService?` reference set via `setSocketService`.**
-        *   **State:** `gameType`, `nrPlayers`, `gameData`, `gameId`, `playerIds`, `myPlayerId`, `playerToMove`, `gameStarted`, `gameFinished`, board state arrays (`cellValue`, `fixedCell`, `appText`, `appColors`, etc.), `isSpectating`.
-        *   **Initialization:** Sets callbacks on `gameDices`. Calls `languagesSetup`.
-        *   **`lib/application/communication_application.dart` (Extension):**
-            *   `callbackOnServerMsg`: **Core message handler.** Switches on `data['action']`. Handles `onGetId`, `onGameStart` (sets up game state, navigates via router), `onRequestGames` (updates `games` list), `onGameUpdate` (calls `_processGameUpdate`), `onGameAborted` (resets state, navigates), `onGameFinished` (sets flag, requests top scores), `onTopScoresUpdate` (calls `topScore.updateScoresFromData`).
-            *   `_processGameUpdate`: Updates `gameData` and local state (`playerToMove`, `playerActive`), triggers UI rebuild. Handles spectator updates.
-            *   `_checkIfPlayerAborted`: Compares `gameData` player list with `games` list to detect disconnects, calls `handlePlayerAbort`.
-            *   `handlePlayerAbort`, `advanceToNextActivePlayer`: Manages UI state for inactive/aborted players and turn advancement.
-            *   `chatCallbackOnSubmitted`: Formats chat message, calls `socketService.sendToClients`.
-            *   `updateChat`: Adds received message to `chat.messages`.
-            *   `callbackOnClientMsg`: Handles `sendSelection`, `sendDices`, `chatMessage` coming from *other* clients (forwarded by server). Updates local UI state (`appColors`, `fixedCell`, `cellValue`, dice state).
-        *   **`lib/application/application_functions_internal.dart` (Extension):**
-            *   `cellClick`: Handles user tapping a cell. Validates turn/cell state. Creates `sendSelection` message (using `utils/yatzy_mapping_client.getSelectionLabel`). Calls `socketService.sendToClients`. Calls `applyLocalSelection` (Optimistic UI).
-            *   `applyLocalSelection`: Updates local UI state (`fixedCell`, `cellValue`, `appText`, scores) immediately after selection. Calls `colorBoard`, `gameDices.clearDices`. **Does NOT advance turn (waits for server).**
-            *   `colorBoard`: Updates `appColors` array based on `playerToMove`, `playerActive`, `fixedCell`.
-        *   **`lib/application/application_functions_internal_calc_dice_values.dart` (Extension):**
-            *   Contains pure functions (`calcOnes`, `calcPair`, `calcYatzy`, etc.) for calculating potential cell scores based on `gameDices.diceValue`. Used by `updateDiceValues`.
-        *   **`lib/application/widget_application.dart` (Contains Widgets):**
-            *   `WidgetSetupGameBoard`: Builds the main game board UI using `Positioned` widgets based on `app` state arrays (`boardXPos`, `cellValue`, `appText`, etc.). Uses `AnimatedBuilder` with `app.animation`. Includes `GestureDetector` for cell taps (`cellClick`) and drag focus.
-            *   `WidgetDisplayGameStatus`: Shows current player turn or game finished message.
-        *   **`lib/application/widget_application_scaffold.dart` (Extension):**
-            *   `widgetScaffold`: Builds the main `Scaffold` for the `ApplicationView`. Arranges core widgets (`WidgetDices`, `WidgetTopScore`, `WidgetSetupGameBoard`, `WidgetChat`, etc.) using `Positioned`. Handles layout logic (portrait/landscape). Includes floating action button for settings. Manages tutorial overlays.
-        *   **`lib/application/widget_application_settings.dart` (Extension):**
-            *   `widgetScaffoldSettings`: Builds the `Scaffold` for the `SettingsView`. Uses `TabBar` and `TabBarView`.
-            *   Includes UI elements for game type, player count, username, language, Unity settings.
-            *   `widgetWaitingGame`: Builds the list of available games and spectate buttons. Calls `onAttemptJoinGame` or `onSpectateGame`.
-            *   `_buildGameTypeSelection`, `onStartGameButton`, `onChangeUserName`. `onStartGameButton` sends `requestGame` via `socketService` or starts offline game.
-            *   `_buildTopScoresWidget`: Renders top scores using data from `topScore` instance.
-            *   `onSpectateGame`: Sends `spectateGame` message via `socketService`, sets `isSpectating` flag. Renders `SpectatorGameBoard`.
-
-8.  **`lib/dices/dices.dart`** (and Extensions)
-    *   **Imports:** `flutter`, `input_items`, `flutter_unity_widget`.
-    *   **Class:** `Dices` (extends `LanguagesDices`)
-        *   **State:** Dice values (`diceValue`), hold status (`holdDices`), roll count (`nrRolls`), Unity controller (`unityWidgetController`), Unity state flags (`unityDices`, `unityCreated`, etc.).
-        *   **Dependencies:** `setState` callback, `inputItems`. Callbacks `callbackUpdateDiceValues`, `callbackUnityCreated`, `callbackCheckPlayerToMove` (set externally by `Application`).
-        *   **Methods:** `clearDices`, `initDices`, `holdDice`, `updateDiceImages`, `rollDices` (updates state, calls `callbackUpdateDiceValues`).
-        *   **`lib/dices/unity_communication.dart` (Extension):**
-            *   `send*ToUnity`: Methods to post JSON messages (`UnityMessage`) to the Unity widget (`unityWidgetController.postMessage`).
-            *   `onUnityMessage`: Handles messages *from* Unity (e.g., dice roll results, Unity identifier). Parses JSON, updates dice state, calls `callbackUpdateDiceValues`.
-            *   `onUnityCreated`: Callback when Unity widget is ready. Stores controller, sets `unityCreated` flag, sends initial messages, calls `callbackUnityCreated`.
-        *   **`lib/dices/widget_dices.dart` (Widget):**
-            *   Builds either the `UnityWidget` or the 2D dice UI based on `app.gameDices.unityDices`.
-            *   2D UI uses `Positioned` images and `GestureDetector` for holding dice (`holdDice`), `Listener` for rolling (`rollDices`). Uses `AnimatedBuilder` for roll animation.
-
-9.  **`lib/views/*.dart`**
-    *   **`application_view.dart`:** `@RoutePage`. Builds the main game screen. Uses `BlocBuilder<SetStateCubit, int>` to rebuild. Calls `app.widgetScaffold`. Includes logic to show "Game Finished" dialog based on `app.gameFinished`. Sets `mainPageLoaded`. Initializes `Tutorial`, `AnimationsApplication`.
-    *   **`settings_view.dart`:** `@RoutePage`. Builds the settings screen. Uses `BlocBuilder<SetStateCubit, int>`. Calls `app.widgetScaffoldSettings`. Initializes `TabController`.
-
-10. **Other Modules:**
-    *   **`lib/chat/*`:** UI (`WidgetChat`) and logic (`Chat`, `LanguagesChat`) for the chat component. `WidgetChat` uses `ListView.builder`. `Chat` handles messages and calls `app.chatCallbackOnSubmitted`.
-    *   **`lib/top_score/*`:** UI (`WidgetTopScore`) and logic (`TopScore`, `LanguagesTopScore`). `WidgetTopScore` displays scores from `topScore.topScores` using `ListView.builder`. `TopScore` fetches/updates scores via `HttpService` and potentially updates via WebSocket callback (`updateScoresFromData`).
-    *   **`lib/scroll/*`:** UI (`WidgetAnimationsScroll`) and logic for the scrolling text animation.
-    *   **`lib/tutorial/*`:** Logic (`Tutorial`) and potentially widgets for the tutorial arrows/hints overlay.
-    *   **`lib/states/*`:** Bloc/Cubit definitions (`LanguageBloc`, `SetStateCubit`) for managing language and triggering general UI updates.
-    *   **`lib/router/*`:** AutoRoute setup (`AppRouter`, `router.gr.dart`).
-    *   **`lib/models/*`:** Client-side data models (`BoardCell`, `Game`, `Player`). `Game.fromJson` is important for parsing server updates.
-    *   **`lib/widgets/spectator_game_board.dart`:** Renders a table-based view of the game state, designed for spectators. Reads data directly from the `gameData` map passed to it.
-    *   **`lib/utils/yatzy_mapping_client.dart`:** Client-side version of index-to-label mapping, crucial for `cellClick`. **Must match server version.**
-    *   **`lib/shared_preferences.dart`:** Wrapper for `shared_preferences` plugin.
-    *   **`lib/input_items/input_items.dart`:** Contains helper functions to create common UI widgets (buttons, text fields, checkboxes, etc.).
-    *   **`lib/startup.dart`:** Defines global variables/flags (`isOnline`, `localhost`, `app`, `dices`, `chat`, etc.) used across the application. **This acts like a global state container/service locator, tightly coupling components.**
+FILE: backend/src/controllers/GameController.ts
+CLASS: GameController
+  DEPENDS_ON:
+    - socket.io.Socket
+    - backend/src/services/GameService.GameService
+    - backend/src/services/GameLogService.GameLogService
+    - backend/src/models/Player.PlayerFactory
+    - backend/src/models/Player.Player
+    - backend/src/models/Game.Game
+    - backend/src/utils/yatzyMapping.getSelectionLabel
+    - backend/src/services/GameLogService.GameMove
+  CONSTRUCTOR:
+    PARAMS: gameService: GameService, gameLogService: GameLogService
+    STORES: gameService, gameLogService
+  METHODS:
+    - registerSocketHandlers(socket: Socket): void
+      HANDLES_SOCKET: sendToServer [SOURCE: CLIENT, ACTION: requestGame] -> CALLS: this.handleRequestGame
+      HANDLES_SOCKET: sendToServer [SOURCE: CLIENT, ACTION: requestJoinGame] -> CALLS: this.handleRequestJoinGame
+      HANDLES_SOCKET: sendToServer [SOURCE: CLIENT, ACTION: removeGame] -> CALLS: this.handleRemoveGame
+      HANDLES_SOCKET: sendToServer [SOURCE: CLIENT, ACTION: spectateGame] -> CALLS: this.handleSpectateGame
+      HANDLES_SOCKET: sendToClients [SOURCE: CLIENT, ACTION: sendDices] -> CALLS: this.handleSendDices
+      HANDLES_SOCKET: sendToClients [SOURCE: CLIENT, ACTION: sendSelection] -> CALLS: this.handleSendSelection
+    - handleRequestGame(socket: Socket, data: any): void
+      INSTANTIATES: Player [FILE: backend/src/models/Player.ts] (via PlayerFactory.createPlayer)
+      CALLS: gameService.createOrJoinGame(data.gameType, data.nrPlayers, player) [FILE: backend/src/services/GameService.ts]
+      EMITS_SOCKET: onServerMsg [TARGET: CLIENT] [DATA: action, message] (Error case)
+      CALLS: console.warn, console.log [EXTERNAL: Node.js]
+    - handleRequestJoinGame(socket: Socket, data: any): void
+      CALLS: gameService.getGame(data.gameId) [FILE: backend/src/services/GameService.ts]
+      USES_CLASS: Game.gameStarted, Game.isGameFull [FILE: backend/src/models/Game.ts]
+      INSTANTIATES: Player [FILE: backend/src/models/Player.ts] (via PlayerFactory.createPlayer)
+      CALLS: gameService.joinGame(data.gameId, player) [FILE: backend/src/services/GameService.ts]
+      CALLS: gameService.notifyGameUpdate(joinedGame) [FILE: backend/src/services/GameService.ts]
+      USES_CLASS: Game.toJSON [FILE: backend/src/models/Game.ts]
+      EMITS_SOCKET: onServerMsg [TARGET: CLIENT] [DATA: action, message] (Error cases)
+      EMITS_SOCKET: onServerMsg [TARGET: PLAYERS in game] [DATA: action, gameData] (Game start)
+      CALLS: gameService.broadcastGameList() [FILE: backend/src/services/GameService.ts]
+      CALLS: console.log [EXTERNAL: Node.js]
+    - handleRemoveGame(socket: Socket, data: any): void
+      CALLS: gameService.getGame(data.gameId) [FILE: backend/src/services/GameService.ts]
+      USES_CLASS: Game.gameFinished [FILE: backend/src/models/Game.ts]
+      CALLS: gameService.removeGame(data.gameId) [FILE: backend/src/services/GameService.ts]
+      CALLS: console.log [EXTERNAL: Node.js]
+    - handleSendDices(socket: Socket, data: any): void
+      CALLS: gameService.getGame(data.gameId) [FILE: backend/src/services/GameService.ts]
+      USES_CLASS: Game.findPlayerIndex, Game.playerToMove [FILE: backend/src/models/Game.ts]
+      CALLS: gameService.processDiceRoll(data.gameId, socket.id, data.diceValue, data.keptDice) [FILE: backend/src/services/GameService.ts]
+      CALLS: console.error, console.log [EXTERNAL: Node.js]
+    - handleSendSelection(socket: Socket, data: any): void
+      CALLS: gameService.getGame(data.gameId) [FILE: backend/src/services/GameService.ts]
+      USES_CLASS: Game.findPlayerIndex, Game.playerToMove [FILE: backend/src/models/Game.ts]
+      CALLS: gameService.processSelection(data.gameId, socket.id, data.selectionLabel, data.score) [FILE: backend/src/services/GameService.ts]
+      CALLS: gameService.forwardSelectionToPlayers(data.gameId, socket.id, data) [FILE: backend/src/services/GameService.ts]
+      CALLS: console.error, console.warn, console.log [EXTERNAL: Node.js]
+    - handleSpectateGame(socket: Socket, data: any): Promise<void>
+      EMITS_SOCKET: onServerMsg [TARGET: CLIENT] [DATA: action, message] (Error cases)
+      CALLS: gameService.getGame(data.gameId) [FILE: backend/src/services/GameService.ts]
+      CALLS: gameLogService.getGameLog(data.gameId) [FILE: backend/src/services/GameLogService.ts]
+      USES_CLASS: Game.applySelection, Game.toJSON [FILE: backend/src/models/Game.ts]
+      USES_CLASS: Player.calculateScores, Player.cells [FILE: backend/src/models/Player.ts]
+      EMITS_SOCKET: onServerMsg [TARGET: CLIENT] [DATA: action, gameData, spectator] (Game state)
+      CALLS: gameLogService.logSpectate(data.gameId, socket.id, data.userName) [FILE: backend/src/services/GameLogService.ts]
+      CALLS: gameService.addSpectator(data.gameId, socket.id) [FILE: backend/src/services/GameService.ts]
+      CALLS: console.error, console.log [EXTERNAL: Node.js]
+  IMPORTS:
+    - Socket FROM socket.io
+    - GameService FROM ../services/GameService
+    - PlayerFactory, Player FROM ../models/Player
+    - GameLogService, GameMove FROM ../services/GameLogService
+    - getSelectionLabel FROM ../utils/yatzyMapping
+    - Game FROM ../models/Game
+  EXPORTS:
+    - GameController
 
 ---
-
-**Key Observations & Potential Areas for Tasks:**
-
-1.  **Global State (`startup.dart`):** The heavy reliance on global variables in `startup.dart` (like `app`, `dices`, `chat`) makes dependencies less explicit and testing harder. Refactoring might involve using `ServiceProvider` or `GetIt` more extensively.
-2.  **Backend/Frontend Sync:** The `yatzyMapping` utils must be kept identical. Game state synchronization relies heavily on the `onGameUpdate`, `onServerMsg`, and `onClientMsg` Socket.IO events.
-3.  **State Management:** Frontend uses `SetStateCubit` for general UI refreshes, often triggered after processing socket messages or user interactions in the `Application` class extensions. `LanguageBloc` handles language state. The core game state seems managed within the `Application` instance (`app`).
-4.  **Socket Communication:** `SocketService` is the central hub for client-server communication. It receives raw messages and delegates processing primarily to `app` (via `callbackOnServerMsg` / `callbackOnClientMsg`).
-5.  **Unity Integration:** `Dices` class and its extensions (`UnityCommunication`, `WidgetDices`) manage the `flutter_unity_widget`, sending/receiving messages for 3D dice rendering and interactions.
-6.  **Spectator Mode:** Implemented in both backend (`GameService`, `GameController`, `spectateGameRoute`) and frontend (`widget_application_settings`, `SpectatorGameBoard`). Relies on sending full game state and log data.
-7.  **Optimistic UI:** `applyLocalSelection` in the frontend updates the UI immediately after a cell click, before server confirmation, for responsiveness. Server state (`onGameUpdate`) eventually overwrites/confirms this.
-8.  **Top Scores:** Fetched via HTTP initially (`TopScore.loadTopScoreFromServer`) and potentially updated via WebSocket (`onTopScoresUpdate` -> `TopScore.updateScoresFromData`). Backend update via HTTP (`updateTopScore` route) doesn't directly trigger WebSocket broadcast (relies on `GameService.handleGameFinished` -> `TopScoreService.updateTopScore` which *does* broadcast internally).
+FILE: backend/src/controllers/PlayerController.ts
+CLASS: PlayerController
+  DEPENDS_ON:
+    - socket.io.Socket
+    - backend/src/services/GameService.GameService
+    - backend/src/services/GameLogService.GameLogService
+    - backend/src/models/Player.PlayerFactory
+  CONSTRUCTOR:
+    PARAMS: gameService: GameService, gameLogService: GameLogService
+    STORES: gameService, gameLogService, playerRegistry (Map)
+  METHODS:
+    - registerSocketHandlers(socket: Socket): void
+      HANDLES_SOCKET: sendToServer [SOURCE: CLIENT] -> SWITCH: data.action
+      HANDLES_SOCKET_ACTION: getId -> CALLS: this.handleGetId
+      CALLS: console.log, console.error [EXTERNAL: Node.js]
+    - handleGetId(socket: Socket): void
+      USES: this.playerRegistry
+      EMITS_SOCKET: onServerMsg [TARGET: CLIENT] [DATA: action, id]
+      EMITS_SOCKET: userId [TARGET: CLIENT] [DATA: id]
+      CALLS: console.log [EXTERNAL: Node.js]
+  IMPORTS:
+    - Socket FROM socket.io
+    - GameService FROM ../services/GameService
+    - PlayerFactory FROM ../models/Player
+    - GameLogService FROM ../services/GameLogService
+  EXPORTS:
+    - PlayerController
 
 ---
-
-**ANALYSIS END**
-
-Code Base
-
-Directory structure:
-└── jesseburstrom-client/
-    ├── backend/
-    │   ├── README.md
-    │   ├── package-lock.json
-    │   ├── package.json
-    │   ├── tsconfig.json
-    │   ├── .gitignore
-    │   └── src/
-    │       ├── db.ts
-    │       ├── license.txt
-    │       ├── server.ts
-    │       ├── controllers/
-    │       │   ├── ChatController.ts
-    │       │   ├── GameController.ts
-    │       │   └── PlayerController.ts
-    │       ├── models/
-    │       │   ├── BoardCell.ts
-    │       │   ├── Dice.ts
-    │       │   ├── Game.ts
-    │       │   └── Player.ts
-    │       ├── routes/
-    │       │   ├── getLogRoute.ts
-    │       │   ├── getTopScores.ts
-    │       │   ├── index.ts
-    │       │   ├── logInRoute.ts
-    │       │   ├── logRoute.ts
-    │       │   ├── signUpRoute.ts
-    │       │   ├── spectateGameRoute.ts
-    │       │   └── updateTopScore.ts
-    │       ├── services/
-    │       │   ├── GameLogService.ts
-    │       │   ├── GameService.ts
-    │       │   └── TopScoreService.ts
-    │       └── utils/
-    │           ├── gameConfig.ts
-    │           ├── index.ts
-    │           └── yatzyMapping.ts
-    └── lib/
-        ├── injection.config.dart
-        ├── injection.dart
-        ├── main.dart
-        ├── shared_preferences.dart
-        ├── startup.dart
-        ├── application/
-        │   ├── animations_application.dart
-        │   ├── application.dart
-        │   ├── application_functions_internal.dart
-        │   ├── application_functions_internal_calc_dice_values.dart
-        │   ├── communication_application.dart
-        │   ├── languages_application.dart
-        │   ├── widget_application.dart
-        │   ├── widget_application_scaffold.dart
-        │   └── widget_application_settings.dart
-        ├── chat/
-        │   ├── chat.dart
-        │   ├── languages_chat.dart
-        │   └── widget_chat.dart
-        ├── core/
-        │   ├── app_widget.dart
-        │   └── injectable_modules.dart
-        ├── dices/
-        │   ├── dices.dart
-        │   ├── languages_dices.dart
-        │   ├── unity_communication.dart
-        │   ├── unity_message.dart
-        │   └── widget_dices.dart
-        ├── input_items/
-        │   └── input_items.dart
-        ├── models/
-        │   ├── board_cell.dart
-        │   ├── game.dart
-        │   └── player.dart
-        ├── router/
-        │   ├── router.dart
-        │   └── router.gr.dart
-        ├── scroll/
-        │   ├── animations_scroll.dart
-        │   ├── languages_animations_scroll.dart
-        │   └── widget_scroll.dart
-        ├── services/
-        │   ├── game_service.dart
-        │   ├── http_service.dart
-        │   ├── service_provider.dart
-        │   └── socket_service.dart
-        ├── states/
-        │   ├── bloc/
-        │   │   └── language/
-        │   │       ├── language_bloc.dart
-        │   │       └── language_event.dart
-        │   └── cubit/
-        │       └── state/
-        │           └── state_cubit.dart
-        ├── top_score/
-        │   ├── languages_top_score.dart
-        │   ├── top_score.dart
-        │   └── widget_top_scores.dart
-        ├── tutorial/
-        │   └── tutorial.dart
-        ├── utils/
-        │   └── yatzy_mapping_client.dart
-        ├── views/
-        │   ├── application_view.dart
-        │   └── settings_view.dart
-        └── widgets/
-            └── spectator_game_board.dart
-
-================================================
-File: backend/README.md
-================================================
-# react-demo
-
-Server implementation of client system and my online portfolio 
-
-[Link To Client](https://github.com/jesseburstrom/proj/)
-
-[Link To Flutter Client](https://github.com/jesseburstrom/client_system/)
-
-
-
-================================================
-File: backend/package-lock.json
-================================================
-{
-	"name": "back-end",
-	"version": "1.0.0",
-	"lockfileVersion": 2,
-	"requires": true,
-	"packages": {
-		"": {
-			"name": "back-end",
-			"version": "1.0.0",
-			"dependencies": {
-				"bcrypt": "^5.0.1",
-				"cors": "^2.8.5",
-				"dotenv": "^16.0.1",
-				"express": "^4.18.1",
-				"jsonwebtoken": "^9.0.2",
-				"mongodb": "^4.6.0",
-				"socket.io": "^4.5.1",
-				"uuid": "^8.3.2"
-			},
-			"devDependencies": {
-				"@types/bcrypt": "^5.0.0",
-				"@types/body-parser": "^1.19.2",
-				"@types/cors": "^2.8.12",
-				"@types/express": "^4.17.13",
-				"@types/jsonwebtoken": "^8.5.8",
-				"@types/node": "^17.0.38",
-				"@types/nodemon": "^1.19.1",
-				"@types/uuid": "^8.3.4",
-				"nodemon": "^3.1.9"
-			}
-		},
-		"node_modules/@aws-crypto/sha256-browser": {
-			"version": "5.2.0",
-			"resolved": "https://registry.npmjs.org/@aws-crypto/sha256-browser/-/sha256-browser-5.2.0.tgz",
-			"integrity": "sha512-AXfN/lGotSQwu6HNcEsIASo7kWXZ5HYWvfOmSNKDsEqC4OashTp8alTmaz+F7TC2L083SFv5RdB+qU3Vs1kZqw==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-crypto/sha256-js": "^5.2.0",
-				"@aws-crypto/supports-web-crypto": "^5.2.0",
-				"@aws-crypto/util": "^5.2.0",
-				"@aws-sdk/types": "^3.222.0",
-				"@aws-sdk/util-locate-window": "^3.0.0",
-				"@smithy/util-utf8": "^2.0.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"node_modules/@aws-crypto/sha256-browser/node_modules/@smithy/is-array-buffer": {
-			"version": "2.2.0",
-			"resolved": "https://registry.npmjs.org/@smithy/is-array-buffer/-/is-array-buffer-2.2.0.tgz",
-			"integrity": "sha512-GGP3O9QFD24uGeAXYUjwSTXARoqpZykHadOmA8G5vfJPK0/DC67qa//0qvqrJzL1xc8WQWX7/yc7fwudjPHPhA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=14.0.0"
-			}
-		},
-		"node_modules/@aws-crypto/sha256-browser/node_modules/@smithy/util-buffer-from": {
-			"version": "2.2.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-buffer-from/-/util-buffer-from-2.2.0.tgz",
-			"integrity": "sha512-IJdWBbTcMQ6DA0gdNhh/BwrLkDR+ADW5Kr1aZmd4k3DIF6ezMV4R2NIAmT08wQJ3yUK82thHWmC/TnK/wpMMIA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/is-array-buffer": "^2.2.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=14.0.0"
-			}
-		},
-		"node_modules/@aws-crypto/sha256-browser/node_modules/@smithy/util-utf8": {
-			"version": "2.3.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-utf8/-/util-utf8-2.3.0.tgz",
-			"integrity": "sha512-R8Rdn8Hy72KKcebgLiv8jQcQkXoLMOGGv5uI1/k0l+snqkOzQ1R0ChUBCxWMlBsFMekWjq0wRudIweFs7sKT5A==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/util-buffer-from": "^2.2.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=14.0.0"
-			}
-		},
-		"node_modules/@aws-crypto/sha256-js": {
-			"version": "5.2.0",
-			"resolved": "https://registry.npmjs.org/@aws-crypto/sha256-js/-/sha256-js-5.2.0.tgz",
-			"integrity": "sha512-FFQQyu7edu4ufvIZ+OadFpHHOt+eSTBaYaki44c+akjg7qZg9oOQeLlk77F6tSYqjDAFClrHJk9tMf0HdVyOvA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-crypto/util": "^5.2.0",
-				"@aws-sdk/types": "^3.222.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=16.0.0"
-			}
-		},
-		"node_modules/@aws-crypto/supports-web-crypto": {
-			"version": "5.2.0",
-			"resolved": "https://registry.npmjs.org/@aws-crypto/supports-web-crypto/-/supports-web-crypto-5.2.0.tgz",
-			"integrity": "sha512-iAvUotm021kM33eCdNfwIN//F77/IADDSs58i+MDaOqFrVjZo9bAal0NK7HurRuWLLpF1iLX7gbWrjHjeo+YFg==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"tslib": "^2.6.2"
-			}
-		},
-		"node_modules/@aws-crypto/util": {
-			"version": "5.2.0",
-			"resolved": "https://registry.npmjs.org/@aws-crypto/util/-/util-5.2.0.tgz",
-			"integrity": "sha512-4RkU9EsI6ZpBve5fseQlGNUWKMa1RLPQ1dnjnQoe07ldfIzcsGb5hC5W0Dm7u423KWzawlrpbjXBrXCEv9zazQ==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/types": "^3.222.0",
-				"@smithy/util-utf8": "^2.0.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"node_modules/@aws-crypto/util/node_modules/@smithy/is-array-buffer": {
-			"version": "2.2.0",
-			"resolved": "https://registry.npmjs.org/@smithy/is-array-buffer/-/is-array-buffer-2.2.0.tgz",
-			"integrity": "sha512-GGP3O9QFD24uGeAXYUjwSTXARoqpZykHadOmA8G5vfJPK0/DC67qa//0qvqrJzL1xc8WQWX7/yc7fwudjPHPhA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=14.0.0"
-			}
-		},
-		"node_modules/@aws-crypto/util/node_modules/@smithy/util-buffer-from": {
-			"version": "2.2.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-buffer-from/-/util-buffer-from-2.2.0.tgz",
-			"integrity": "sha512-IJdWBbTcMQ6DA0gdNhh/BwrLkDR+ADW5Kr1aZmd4k3DIF6ezMV4R2NIAmT08wQJ3yUK82thHWmC/TnK/wpMMIA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/is-array-buffer": "^2.2.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=14.0.0"
-			}
-		},
-		"node_modules/@aws-crypto/util/node_modules/@smithy/util-utf8": {
-			"version": "2.3.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-utf8/-/util-utf8-2.3.0.tgz",
-			"integrity": "sha512-R8Rdn8Hy72KKcebgLiv8jQcQkXoLMOGGv5uI1/k0l+snqkOzQ1R0ChUBCxWMlBsFMekWjq0wRudIweFs7sKT5A==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/util-buffer-from": "^2.2.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=14.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/client-cognito-identity": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/client-cognito-identity/-/client-cognito-identity-3.758.0.tgz",
-			"integrity": "sha512-8bOXVYtf/0OUN0jXTIHLv3V0TAS6kvvCRAy7nmiL/fDde0O+ChW1WZU7CVPAOtFEpFCdKskDcxFspM7m1k6qyg==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-crypto/sha256-browser": "5.2.0",
-				"@aws-crypto/sha256-js": "5.2.0",
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/credential-provider-node": "3.758.0",
-				"@aws-sdk/middleware-host-header": "3.734.0",
-				"@aws-sdk/middleware-logger": "3.734.0",
-				"@aws-sdk/middleware-recursion-detection": "3.734.0",
-				"@aws-sdk/middleware-user-agent": "3.758.0",
-				"@aws-sdk/region-config-resolver": "3.734.0",
-				"@aws-sdk/types": "3.734.0",
-				"@aws-sdk/util-endpoints": "3.743.0",
-				"@aws-sdk/util-user-agent-browser": "3.734.0",
-				"@aws-sdk/util-user-agent-node": "3.758.0",
-				"@smithy/config-resolver": "^4.0.1",
-				"@smithy/core": "^3.1.5",
-				"@smithy/fetch-http-handler": "^5.0.1",
-				"@smithy/hash-node": "^4.0.1",
-				"@smithy/invalid-dependency": "^4.0.1",
-				"@smithy/middleware-content-length": "^4.0.1",
-				"@smithy/middleware-endpoint": "^4.0.6",
-				"@smithy/middleware-retry": "^4.0.7",
-				"@smithy/middleware-serde": "^4.0.2",
-				"@smithy/middleware-stack": "^4.0.1",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/node-http-handler": "^4.0.3",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"@smithy/url-parser": "^4.0.1",
-				"@smithy/util-base64": "^4.0.0",
-				"@smithy/util-body-length-browser": "^4.0.0",
-				"@smithy/util-body-length-node": "^4.0.0",
-				"@smithy/util-defaults-mode-browser": "^4.0.7",
-				"@smithy/util-defaults-mode-node": "^4.0.7",
-				"@smithy/util-endpoints": "^3.0.1",
-				"@smithy/util-middleware": "^4.0.1",
-				"@smithy/util-retry": "^4.0.1",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/client-sso": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/client-sso/-/client-sso-3.758.0.tgz",
-			"integrity": "sha512-BoGO6IIWrLyLxQG6txJw6RT2urmbtlwfggapNCrNPyYjlXpzTSJhBYjndg7TpDATFd0SXL0zm8y/tXsUXNkdYQ==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-crypto/sha256-browser": "5.2.0",
-				"@aws-crypto/sha256-js": "5.2.0",
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/middleware-host-header": "3.734.0",
-				"@aws-sdk/middleware-logger": "3.734.0",
-				"@aws-sdk/middleware-recursion-detection": "3.734.0",
-				"@aws-sdk/middleware-user-agent": "3.758.0",
-				"@aws-sdk/region-config-resolver": "3.734.0",
-				"@aws-sdk/types": "3.734.0",
-				"@aws-sdk/util-endpoints": "3.743.0",
-				"@aws-sdk/util-user-agent-browser": "3.734.0",
-				"@aws-sdk/util-user-agent-node": "3.758.0",
-				"@smithy/config-resolver": "^4.0.1",
-				"@smithy/core": "^3.1.5",
-				"@smithy/fetch-http-handler": "^5.0.1",
-				"@smithy/hash-node": "^4.0.1",
-				"@smithy/invalid-dependency": "^4.0.1",
-				"@smithy/middleware-content-length": "^4.0.1",
-				"@smithy/middleware-endpoint": "^4.0.6",
-				"@smithy/middleware-retry": "^4.0.7",
-				"@smithy/middleware-serde": "^4.0.2",
-				"@smithy/middleware-stack": "^4.0.1",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/node-http-handler": "^4.0.3",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"@smithy/url-parser": "^4.0.1",
-				"@smithy/util-base64": "^4.0.0",
-				"@smithy/util-body-length-browser": "^4.0.0",
-				"@smithy/util-body-length-node": "^4.0.0",
-				"@smithy/util-defaults-mode-browser": "^4.0.7",
-				"@smithy/util-defaults-mode-node": "^4.0.7",
-				"@smithy/util-endpoints": "^3.0.1",
-				"@smithy/util-middleware": "^4.0.1",
-				"@smithy/util-retry": "^4.0.1",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/core": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/core/-/core-3.758.0.tgz",
-			"integrity": "sha512-0RswbdR9jt/XKemaLNuxi2gGr4xGlHyGxkTdhSQzCyUe9A9OPCoLl3rIESRguQEech+oJnbHk/wuiwHqTuP9sg==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/core": "^3.1.5",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/signature-v4": "^5.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-middleware": "^4.0.1",
-				"fast-xml-parser": "4.4.1",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/credential-provider-cognito-identity": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-cognito-identity/-/credential-provider-cognito-identity-3.758.0.tgz",
-			"integrity": "sha512-y/rHZqyChlEkNRr59gn4hv0gjhJwGmdCdW0JI1K9p3P9p7EurWGjr2M6+goTn3ilOlcAwrl5oFKR5jLt27TkOA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/client-cognito-identity": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/credential-provider-env": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-env/-/credential-provider-env-3.758.0.tgz",
-			"integrity": "sha512-N27eFoRrO6MeUNumtNHDW9WOiwfd59LPXPqDrIa3kWL/s+fOKFHb9xIcF++bAwtcZnAxKkgpDCUP+INNZskE+w==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/credential-provider-http": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-http/-/credential-provider-http-3.758.0.tgz",
-			"integrity": "sha512-Xt9/U8qUCiw1hihztWkNeIR+arg6P+yda10OuCHX6kFVx3auTlU7+hCqs3UxqniGU4dguHuftf3mRpi5/GJ33Q==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/fetch-http-handler": "^5.0.1",
-				"@smithy/node-http-handler": "^4.0.3",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-stream": "^4.1.2",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/credential-provider-ini": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-ini/-/credential-provider-ini-3.758.0.tgz",
-			"integrity": "sha512-cymSKMcP5d+OsgetoIZ5QCe1wnp2Q/tq+uIxVdh9MbfdBBEnl9Ecq6dH6VlYS89sp4QKuxHxkWXVnbXU3Q19Aw==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/credential-provider-env": "3.758.0",
-				"@aws-sdk/credential-provider-http": "3.758.0",
-				"@aws-sdk/credential-provider-process": "3.758.0",
-				"@aws-sdk/credential-provider-sso": "3.758.0",
-				"@aws-sdk/credential-provider-web-identity": "3.758.0",
-				"@aws-sdk/nested-clients": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/credential-provider-imds": "^4.0.1",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/shared-ini-file-loader": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/credential-provider-node": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-node/-/credential-provider-node-3.758.0.tgz",
-			"integrity": "sha512-+DaMv63wiq7pJrhIQzZYMn4hSarKiizDoJRvyR7WGhnn0oQ/getX9Z0VNCV3i7lIFoLNTb7WMmQ9k7+z/uD5EQ==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/credential-provider-env": "3.758.0",
-				"@aws-sdk/credential-provider-http": "3.758.0",
-				"@aws-sdk/credential-provider-ini": "3.758.0",
-				"@aws-sdk/credential-provider-process": "3.758.0",
-				"@aws-sdk/credential-provider-sso": "3.758.0",
-				"@aws-sdk/credential-provider-web-identity": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/credential-provider-imds": "^4.0.1",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/shared-ini-file-loader": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/credential-provider-process": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-process/-/credential-provider-process-3.758.0.tgz",
-			"integrity": "sha512-AzcY74QTPqcbXWVgjpPZ3HOmxQZYPROIBz2YINF0OQk0MhezDWV/O7Xec+K1+MPGQO3qS6EDrUUlnPLjsqieHA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/shared-ini-file-loader": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/credential-provider-sso": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-sso/-/credential-provider-sso-3.758.0.tgz",
-			"integrity": "sha512-x0FYJqcOLUCv8GLLFDYMXRAQKGjoM+L0BG4BiHYZRDf24yQWFCAZsCQAYKo6XZYh2qznbsW6f//qpyJ5b0QVKQ==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/client-sso": "3.758.0",
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/token-providers": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/shared-ini-file-loader": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/credential-provider-web-identity": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-web-identity/-/credential-provider-web-identity-3.758.0.tgz",
-			"integrity": "sha512-XGguXhBqiCXMXRxcfCAVPlMbm3VyJTou79r/3mxWddHWF0XbhaQiBIbUz6vobVTD25YQRbWSmSch7VA8kI5Lrw==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/nested-clients": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/credential-providers": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-providers/-/credential-providers-3.758.0.tgz",
-			"integrity": "sha512-BaGVBdm9ynsErIc/mLuUwJ1OQcL/pkhCuAm24jpsif3evZ5wgyZnEAZB2yRin+mQnQaQT3L+KvTbdKGfjL8+fQ==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/client-cognito-identity": "3.758.0",
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/credential-provider-cognito-identity": "3.758.0",
-				"@aws-sdk/credential-provider-env": "3.758.0",
-				"@aws-sdk/credential-provider-http": "3.758.0",
-				"@aws-sdk/credential-provider-ini": "3.758.0",
-				"@aws-sdk/credential-provider-node": "3.758.0",
-				"@aws-sdk/credential-provider-process": "3.758.0",
-				"@aws-sdk/credential-provider-sso": "3.758.0",
-				"@aws-sdk/credential-provider-web-identity": "3.758.0",
-				"@aws-sdk/nested-clients": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/core": "^3.1.5",
-				"@smithy/credential-provider-imds": "^4.0.1",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/middleware-host-header": {
-			"version": "3.734.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/middleware-host-header/-/middleware-host-header-3.734.0.tgz",
-			"integrity": "sha512-LW7RRgSOHHBzWZnigNsDIzu3AiwtjeI2X66v+Wn1P1u+eXssy1+up4ZY/h+t2sU4LU36UvEf+jrZti9c6vRnFw==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/middleware-logger": {
-			"version": "3.734.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/middleware-logger/-/middleware-logger-3.734.0.tgz",
-			"integrity": "sha512-mUMFITpJUW3LcKvFok176eI5zXAUomVtahb9IQBwLzkqFYOrMJvWAvoV4yuxrJ8TlQBG8gyEnkb9SnhZvjg67w==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/middleware-recursion-detection": {
-			"version": "3.734.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/middleware-recursion-detection/-/middleware-recursion-detection-3.734.0.tgz",
-			"integrity": "sha512-CUat2d9ITsFc2XsmeiRQO96iWpxSKYFjxvj27Hc7vo87YUHRnfMfnc8jw1EpxEwMcvBD7LsRa6vDNky6AjcrFA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/middleware-user-agent": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/middleware-user-agent/-/middleware-user-agent-3.758.0.tgz",
-			"integrity": "sha512-iNyehQXtQlj69JCgfaOssgZD4HeYGOwxcaKeG6F+40cwBjTAi0+Ph1yfDwqk2qiBPIRWJ/9l2LodZbxiBqgrwg==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@aws-sdk/util-endpoints": "3.743.0",
-				"@smithy/core": "^3.1.5",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/nested-clients": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/nested-clients/-/nested-clients-3.758.0.tgz",
-			"integrity": "sha512-YZ5s7PSvyF3Mt2h1EQulCG93uybprNGbBkPmVuy/HMMfbFTt4iL3SbKjxqvOZelm86epFfj7pvK7FliI2WOEcg==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-crypto/sha256-browser": "5.2.0",
-				"@aws-crypto/sha256-js": "5.2.0",
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/middleware-host-header": "3.734.0",
-				"@aws-sdk/middleware-logger": "3.734.0",
-				"@aws-sdk/middleware-recursion-detection": "3.734.0",
-				"@aws-sdk/middleware-user-agent": "3.758.0",
-				"@aws-sdk/region-config-resolver": "3.734.0",
-				"@aws-sdk/types": "3.734.0",
-				"@aws-sdk/util-endpoints": "3.743.0",
-				"@aws-sdk/util-user-agent-browser": "3.734.0",
-				"@aws-sdk/util-user-agent-node": "3.758.0",
-				"@smithy/config-resolver": "^4.0.1",
-				"@smithy/core": "^3.1.5",
-				"@smithy/fetch-http-handler": "^5.0.1",
-				"@smithy/hash-node": "^4.0.1",
-				"@smithy/invalid-dependency": "^4.0.1",
-				"@smithy/middleware-content-length": "^4.0.1",
-				"@smithy/middleware-endpoint": "^4.0.6",
-				"@smithy/middleware-retry": "^4.0.7",
-				"@smithy/middleware-serde": "^4.0.2",
-				"@smithy/middleware-stack": "^4.0.1",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/node-http-handler": "^4.0.3",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"@smithy/url-parser": "^4.0.1",
-				"@smithy/util-base64": "^4.0.0",
-				"@smithy/util-body-length-browser": "^4.0.0",
-				"@smithy/util-body-length-node": "^4.0.0",
-				"@smithy/util-defaults-mode-browser": "^4.0.7",
-				"@smithy/util-defaults-mode-node": "^4.0.7",
-				"@smithy/util-endpoints": "^3.0.1",
-				"@smithy/util-middleware": "^4.0.1",
-				"@smithy/util-retry": "^4.0.1",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/region-config-resolver": {
-			"version": "3.734.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/region-config-resolver/-/region-config-resolver-3.734.0.tgz",
-			"integrity": "sha512-Lvj1kPRC5IuJBr9DyJ9T9/plkh+EfKLy+12s/mykOy1JaKHDpvj+XGy2YO6YgYVOb8JFtaqloid+5COtje4JTQ==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-config-provider": "^4.0.0",
-				"@smithy/util-middleware": "^4.0.1",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/token-providers": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/token-providers/-/token-providers-3.758.0.tgz",
-			"integrity": "sha512-ckptN1tNrIfQUaGWm/ayW1ddG+imbKN7HHhjFdS4VfItsP0QQOB0+Ov+tpgb4MoNR4JaUghMIVStjIeHN2ks1w==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/nested-clients": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/shared-ini-file-loader": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/types": {
-			"version": "3.734.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/types/-/types-3.734.0.tgz",
-			"integrity": "sha512-o11tSPTT70nAkGV1fN9wm/hAIiLPyWX6SuGf+9JyTp7S/rC2cFWhR26MvA69nplcjNaXVzB0f+QFrLXXjOqCrg==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/util-endpoints": {
-			"version": "3.743.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/util-endpoints/-/util-endpoints-3.743.0.tgz",
-			"integrity": "sha512-sN1l559zrixeh5x+pttrnd0A3+r34r0tmPkJ/eaaMaAzXqsmKU/xYre9K3FNnsSS1J1k4PEfk/nHDTVUgFYjnw==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-endpoints": "^3.0.1",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/util-locate-window": {
-			"version": "3.723.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/util-locate-window/-/util-locate-window-3.723.0.tgz",
-			"integrity": "sha512-Yf2CS10BqK688DRsrKI/EO6B8ff5J86NXe4C+VCysK7UOgN0l1zOTeTukZ3H8Q9tYYX3oaF1961o8vRkFm7Nmw==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@aws-sdk/util-user-agent-browser": {
-			"version": "3.734.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/util-user-agent-browser/-/util-user-agent-browser-3.734.0.tgz",
-			"integrity": "sha512-xQTCus6Q9LwUuALW+S76OL0jcWtMOVu14q+GoLnWPUM7QeUw963oQcLhF7oq0CtaLLKyl4GOUfcwc773Zmwwng==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/types": "^4.1.0",
-				"bowser": "^2.11.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"node_modules/@aws-sdk/util-user-agent-node": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/util-user-agent-node/-/util-user-agent-node-3.758.0.tgz",
-			"integrity": "sha512-A5EZw85V6WhoKMV2hbuFRvb9NPlxEErb4HPO6/SPXYY4QrjprIzScHxikqcWv1w4J3apB1wto9LPU3IMsYtfrw==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@aws-sdk/middleware-user-agent": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			},
-			"peerDependencies": {
-				"aws-crt": ">=1.0.0"
-			},
-			"peerDependenciesMeta": {
-				"aws-crt": {
-					"optional": true
-				}
-			}
-		},
-		"node_modules/@mapbox/node-pre-gyp": {
-			"version": "1.0.9",
-			"resolved": "https://registry.npmjs.org/@mapbox/node-pre-gyp/-/node-pre-gyp-1.0.9.tgz",
-			"integrity": "sha512-aDF3S3rK9Q2gey/WAttUlISduDItz5BU3306M9Eyv6/oS40aMprnopshtlKTykxRNIBEZuRMaZAnbrQ4QtKGyw==",
-			"dependencies": {
-				"detect-libc": "^2.0.0",
-				"https-proxy-agent": "^5.0.0",
-				"make-dir": "^3.1.0",
-				"node-fetch": "^2.6.7",
-				"nopt": "^5.0.0",
-				"npmlog": "^5.0.1",
-				"rimraf": "^3.0.2",
-				"semver": "^7.3.5",
-				"tar": "^6.1.11"
-			},
-			"bin": {
-				"node-pre-gyp": "bin/node-pre-gyp"
-			}
-		},
-		"node_modules/@mongodb-js/saslprep": {
-			"version": "1.2.0",
-			"resolved": "https://registry.npmjs.org/@mongodb-js/saslprep/-/saslprep-1.2.0.tgz",
-			"integrity": "sha512-+ywrb0AqkfaYuhHs6LxKWgqbh3I72EpEgESCw37o+9qPx9WTCkgDm2B+eMrwehGtHBWHFU4GXvnSCNiFhhausg==",
-			"license": "MIT",
-			"optional": true,
-			"dependencies": {
-				"sparse-bitfield": "^3.0.3"
-			}
-		},
-		"node_modules/@smithy/abort-controller": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/abort-controller/-/abort-controller-4.0.1.tgz",
-			"integrity": "sha512-fiUIYgIgRjMWznk6iLJz35K2YxSLHzLBA/RC6lBrKfQ8fHbPfvk7Pk9UvpKoHgJjI18MnbPuEju53zcVy6KF1g==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/config-resolver": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/config-resolver/-/config-resolver-4.0.1.tgz",
-			"integrity": "sha512-Igfg8lKu3dRVkTSEm98QpZUvKEOa71jDX4vKRcvJVyRc3UgN3j7vFMf0s7xLQhYmKa8kyJGQgUJDOV5V3neVlQ==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-config-provider": "^4.0.0",
-				"@smithy/util-middleware": "^4.0.1",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/core": {
-			"version": "3.1.5",
-			"resolved": "https://registry.npmjs.org/@smithy/core/-/core-3.1.5.tgz",
-			"integrity": "sha512-HLclGWPkCsekQgsyzxLhCQLa8THWXtB5PxyYN+2O6nkyLt550KQKTlbV2D1/j5dNIQapAZM1+qFnpBFxZQkgCA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/middleware-serde": "^4.0.2",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-body-length-browser": "^4.0.0",
-				"@smithy/util-middleware": "^4.0.1",
-				"@smithy/util-stream": "^4.1.2",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/credential-provider-imds": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/credential-provider-imds/-/credential-provider-imds-4.0.1.tgz",
-			"integrity": "sha512-l/qdInaDq1Zpznpmev/+52QomsJNZ3JkTl5yrTl02V6NBgJOQ4LY0SFw/8zsMwj3tLe8vqiIuwF6nxaEwgf6mg==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/url-parser": "^4.0.1",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/fetch-http-handler": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/fetch-http-handler/-/fetch-http-handler-5.0.1.tgz",
-			"integrity": "sha512-3aS+fP28urrMW2KTjb6z9iFow6jO8n3MFfineGbndvzGZit3taZhKWtTorf+Gp5RpFDDafeHlhfsGlDCXvUnJA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/querystring-builder": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-base64": "^4.0.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/hash-node": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/hash-node/-/hash-node-4.0.1.tgz",
-			"integrity": "sha512-TJ6oZS+3r2Xu4emVse1YPB3Dq3d8RkZDKcPr71Nj/lJsdAP1c7oFzYqEn1IBc915TsgLl2xIJNuxCz+gLbLE0w==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-buffer-from": "^4.0.0",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/invalid-dependency": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/invalid-dependency/-/invalid-dependency-4.0.1.tgz",
-			"integrity": "sha512-gdudFPf4QRQ5pzj7HEnu6FhKRi61BfH/Gk5Yf6O0KiSbr1LlVhgjThcvjdu658VE6Nve8vaIWB8/fodmS1rBPQ==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/is-array-buffer": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/is-array-buffer/-/is-array-buffer-4.0.0.tgz",
-			"integrity": "sha512-saYhF8ZZNoJDTvJBEWgeBccCg+yvp1CX+ed12yORU3NilJScfc6gfch2oVb4QgxZrGUx3/ZJlb+c/dJbyupxlw==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/middleware-content-length": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/middleware-content-length/-/middleware-content-length-4.0.1.tgz",
-			"integrity": "sha512-OGXo7w5EkB5pPiac7KNzVtfCW2vKBTZNuCctn++TTSOMpe6RZO/n6WEC1AxJINn3+vWLKW49uad3lo/u0WJ9oQ==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/middleware-endpoint": {
-			"version": "4.0.6",
-			"resolved": "https://registry.npmjs.org/@smithy/middleware-endpoint/-/middleware-endpoint-4.0.6.tgz",
-			"integrity": "sha512-ftpmkTHIFqgaFugcjzLZv3kzPEFsBFSnq1JsIkr2mwFzCraZVhQk2gqN51OOeRxqhbPTkRFj39Qd2V91E/mQxg==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/core": "^3.1.5",
-				"@smithy/middleware-serde": "^4.0.2",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/shared-ini-file-loader": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/url-parser": "^4.0.1",
-				"@smithy/util-middleware": "^4.0.1",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/middleware-retry": {
-			"version": "4.0.7",
-			"resolved": "https://registry.npmjs.org/@smithy/middleware-retry/-/middleware-retry-4.0.7.tgz",
-			"integrity": "sha512-58j9XbUPLkqAcV1kHzVX/kAR16GT+j7DUZJqwzsxh1jtz7G82caZiGyyFgUvogVfNTg3TeAOIJepGc8TXF4AVQ==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/service-error-classification": "^4.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-middleware": "^4.0.1",
-				"@smithy/util-retry": "^4.0.1",
-				"tslib": "^2.6.2",
-				"uuid": "^9.0.1"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/middleware-retry/node_modules/uuid": {
-			"version": "9.0.1",
-			"resolved": "https://registry.npmjs.org/uuid/-/uuid-9.0.1.tgz",
-			"integrity": "sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==",
-			"funding": [
-				"https://github.com/sponsors/broofa",
-				"https://github.com/sponsors/ctavan"
-			],
-			"license": "MIT",
-			"optional": true,
-			"bin": {
-				"uuid": "dist/bin/uuid"
-			}
-		},
-		"node_modules/@smithy/middleware-serde": {
-			"version": "4.0.2",
-			"resolved": "https://registry.npmjs.org/@smithy/middleware-serde/-/middleware-serde-4.0.2.tgz",
-			"integrity": "sha512-Sdr5lOagCn5tt+zKsaW+U2/iwr6bI9p08wOkCp6/eL6iMbgdtc2R5Ety66rf87PeohR0ExI84Txz9GYv5ou3iQ==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/middleware-stack": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/middleware-stack/-/middleware-stack-4.0.1.tgz",
-			"integrity": "sha512-dHwDmrtR/ln8UTHpaIavRSzeIk5+YZTBtLnKwDW3G2t6nAupCiQUvNzNoHBpik63fwUaJPtlnMzXbQrNFWssIA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/node-config-provider": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/node-config-provider/-/node-config-provider-4.0.1.tgz",
-			"integrity": "sha512-8mRTjvCtVET8+rxvmzRNRR0hH2JjV0DFOmwXPrISmTIJEfnCBugpYYGAsCj8t41qd+RB5gbheSQ/6aKZCQvFLQ==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/shared-ini-file-loader": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/node-http-handler": {
-			"version": "4.0.3",
-			"resolved": "https://registry.npmjs.org/@smithy/node-http-handler/-/node-http-handler-4.0.3.tgz",
-			"integrity": "sha512-dYCLeINNbYdvmMLtW0VdhW1biXt+PPCGazzT5ZjKw46mOtdgToQEwjqZSS9/EN8+tNs/RO0cEWG044+YZs97aA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/abort-controller": "^4.0.1",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/querystring-builder": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/property-provider": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/property-provider/-/property-provider-4.0.1.tgz",
-			"integrity": "sha512-o+VRiwC2cgmk/WFV0jaETGOtX16VNPp2bSQEzu0whbReqE1BMqsP2ami2Vi3cbGVdKu1kq9gQkDAGKbt0WOHAQ==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/protocol-http": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/protocol-http/-/protocol-http-5.0.1.tgz",
-			"integrity": "sha512-TE4cpj49jJNB/oHyh/cRVEgNZaoPaxd4vteJNB0yGidOCVR0jCw/hjPVsT8Q8FRmj8Bd3bFZt8Dh7xGCT+xMBQ==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/querystring-builder": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/querystring-builder/-/querystring-builder-4.0.1.tgz",
-			"integrity": "sha512-wU87iWZoCbcqrwszsOewEIuq+SU2mSoBE2CcsLwE0I19m0B2gOJr1MVjxWcDQYOzHbR1xCk7AcOBbGFUYOKvdg==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-uri-escape": "^4.0.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/querystring-parser": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/querystring-parser/-/querystring-parser-4.0.1.tgz",
-			"integrity": "sha512-Ma2XC7VS9aV77+clSFylVUnPZRindhB7BbmYiNOdr+CHt/kZNJoPP0cd3QxCnCFyPXC4eybmyE98phEHkqZ5Jw==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/service-error-classification": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/service-error-classification/-/service-error-classification-4.0.1.tgz",
-			"integrity": "sha512-3JNjBfOWpj/mYfjXJHB4Txc/7E4LVq32bwzE7m28GN79+M1f76XHflUaSUkhOriprPDzev9cX/M+dEB80DNDKA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/types": "^4.1.0"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/shared-ini-file-loader": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/shared-ini-file-loader/-/shared-ini-file-loader-4.0.1.tgz",
-			"integrity": "sha512-hC8F6qTBbuHRI/uqDgqqi6J0R4GtEZcgrZPhFQnMhfJs3MnUTGSnR1NSJCJs5VWlMydu0kJz15M640fJlRsIOw==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/signature-v4": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/signature-v4/-/signature-v4-5.0.1.tgz",
-			"integrity": "sha512-nCe6fQ+ppm1bQuw5iKoeJ0MJfz2os7Ic3GBjOkLOPtavbD1ONoyE3ygjBfz2ythFWm4YnRm6OxW+8p/m9uCoIA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/is-array-buffer": "^4.0.0",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-hex-encoding": "^4.0.0",
-				"@smithy/util-middleware": "^4.0.1",
-				"@smithy/util-uri-escape": "^4.0.0",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/smithy-client": {
-			"version": "4.1.6",
-			"resolved": "https://registry.npmjs.org/@smithy/smithy-client/-/smithy-client-4.1.6.tgz",
-			"integrity": "sha512-UYDolNg6h2O0L+cJjtgSyKKvEKCOa/8FHYJnBobyeoeWDmNpXjwOAtw16ezyeu1ETuuLEOZbrynK0ZY1Lx9Jbw==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/core": "^3.1.5",
-				"@smithy/middleware-endpoint": "^4.0.6",
-				"@smithy/middleware-stack": "^4.0.1",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-stream": "^4.1.2",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/types": {
-			"version": "4.1.0",
-			"resolved": "https://registry.npmjs.org/@smithy/types/-/types-4.1.0.tgz",
-			"integrity": "sha512-enhjdwp4D7CXmwLtD6zbcDMbo6/T6WtuuKCY49Xxc6OMOmUWlBEBDREsxxgV2LIdeQPW756+f97GzcgAwp3iLw==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/url-parser": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/url-parser/-/url-parser-4.0.1.tgz",
-			"integrity": "sha512-gPXcIEUtw7VlK8f/QcruNXm7q+T5hhvGu9tl63LsJPZ27exB6dtNwvh2HIi0v7JcXJ5emBxB+CJxwaLEdJfA+g==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/querystring-parser": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/util-base64": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-base64/-/util-base64-4.0.0.tgz",
-			"integrity": "sha512-CvHfCmO2mchox9kjrtzoHkWHxjHZzaFojLc8quxXY7WAAMAg43nuxwv95tATVgQFNDwd4M9S1qFzj40Ul41Kmg==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/util-buffer-from": "^4.0.0",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/util-body-length-browser": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-body-length-browser/-/util-body-length-browser-4.0.0.tgz",
-			"integrity": "sha512-sNi3DL0/k64/LO3A256M+m3CDdG6V7WKWHdAiBBMUN8S3hK3aMPhwnPik2A/a2ONN+9doY9UxaLfgqsIRg69QA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/util-body-length-node": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-body-length-node/-/util-body-length-node-4.0.0.tgz",
-			"integrity": "sha512-q0iDP3VsZzqJyje8xJWEJCNIu3lktUGVoSy1KB0UWym2CL1siV3artm+u1DFYTLejpsrdGyCSWBdGNjJzfDPjg==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/util-buffer-from": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-buffer-from/-/util-buffer-from-4.0.0.tgz",
-			"integrity": "sha512-9TOQ7781sZvddgO8nxueKi3+yGvkY35kotA0Y6BWRajAv8jjmigQ1sBwz0UX47pQMYXJPahSKEKYFgt+rXdcug==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/is-array-buffer": "^4.0.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/util-config-provider": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-config-provider/-/util-config-provider-4.0.0.tgz",
-			"integrity": "sha512-L1RBVzLyfE8OXH+1hsJ8p+acNUSirQnWQ6/EgpchV88G6zGBTDPdXiiExei6Z1wR2RxYvxY/XLw6AMNCCt8H3w==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/util-defaults-mode-browser": {
-			"version": "4.0.7",
-			"resolved": "https://registry.npmjs.org/@smithy/util-defaults-mode-browser/-/util-defaults-mode-browser-4.0.7.tgz",
-			"integrity": "sha512-CZgDDrYHLv0RUElOsmZtAnp1pIjwDVCSuZWOPhIOBvG36RDfX1Q9+6lS61xBf+qqvHoqRjHxgINeQz47cYFC2Q==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"bowser": "^2.11.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/util-defaults-mode-node": {
-			"version": "4.0.7",
-			"resolved": "https://registry.npmjs.org/@smithy/util-defaults-mode-node/-/util-defaults-mode-node-4.0.7.tgz",
-			"integrity": "sha512-79fQW3hnfCdrfIi1soPbK3zmooRFnLpSx3Vxi6nUlqaaQeC5dm8plt4OTNDNqEEEDkvKghZSaoti684dQFVrGQ==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/config-resolver": "^4.0.1",
-				"@smithy/credential-provider-imds": "^4.0.1",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/util-endpoints": {
-			"version": "3.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/util-endpoints/-/util-endpoints-3.0.1.tgz",
-			"integrity": "sha512-zVdUENQpdtn9jbpD9SCFK4+aSiavRb9BxEtw9ZGUR1TYo6bBHbIoi7VkrFQ0/RwZlzx0wRBaRmPclj8iAoJCLA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/util-hex-encoding": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-hex-encoding/-/util-hex-encoding-4.0.0.tgz",
-			"integrity": "sha512-Yk5mLhHtfIgW2W2WQZWSg5kuMZCVbvhFmC7rV4IO2QqnZdbEFPmQnCcGMAX2z/8Qj3B9hYYNjZOhWym+RwhePw==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/util-middleware": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/util-middleware/-/util-middleware-4.0.1.tgz",
-			"integrity": "sha512-HiLAvlcqhbzhuiOa0Lyct5IIlyIz0PQO5dnMlmQ/ubYM46dPInB+3yQGkfxsk6Q24Y0n3/JmcA1v5iEhmOF5mA==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/util-retry": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/util-retry/-/util-retry-4.0.1.tgz",
-			"integrity": "sha512-WmRHqNVwn3kI3rKk1LsKcVgPBG6iLTBGC1iYOV3GQegwJ3E8yjzHytPt26VNzOWr1qu0xE03nK0Ug8S7T7oufw==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/service-error-classification": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/util-stream": {
-			"version": "4.1.2",
-			"resolved": "https://registry.npmjs.org/@smithy/util-stream/-/util-stream-4.1.2.tgz",
-			"integrity": "sha512-44PKEqQ303d3rlQuiDpcCcu//hV8sn+u2JBo84dWCE0rvgeiVl0IlLMagbU++o0jCWhYCsHaAt9wZuZqNe05Hw==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/fetch-http-handler": "^5.0.1",
-				"@smithy/node-http-handler": "^4.0.3",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-base64": "^4.0.0",
-				"@smithy/util-buffer-from": "^4.0.0",
-				"@smithy/util-hex-encoding": "^4.0.0",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/util-uri-escape": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-uri-escape/-/util-uri-escape-4.0.0.tgz",
-			"integrity": "sha512-77yfbCbQMtgtTylO9itEAdpPXSog3ZxMe09AEhm0dU0NLTalV70ghDZFR+Nfi1C60jnJoh/Re4090/DuZh2Omg==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@smithy/util-utf8": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-utf8/-/util-utf8-4.0.0.tgz",
-			"integrity": "sha512-b+zebfKCfRdgNJDknHCob3O7FpeYQN6ZG6YLExMcasDHsCXlsXCEuiPZeLnJLpwa5dvPetGlnGCiMHuLwGvFow==",
-			"license": "Apache-2.0",
-			"optional": true,
-			"dependencies": {
-				"@smithy/util-buffer-from": "^4.0.0",
-				"tslib": "^2.6.2"
-			},
-			"engines": {
-				"node": ">=18.0.0"
-			}
-		},
-		"node_modules/@socket.io/component-emitter": {
-			"version": "3.1.2",
-			"resolved": "https://registry.npmjs.org/@socket.io/component-emitter/-/component-emitter-3.1.2.tgz",
-			"integrity": "sha512-9BCxFwvbGg/RsZK9tjXd8s4UcwR0MWeFQ1XEKIQVVvAGJyINdrqKMcTRyLoK8Rse1GjzLV9cwjWV1olXRWEXVA==",
-			"license": "MIT"
-		},
-		"node_modules/@types/bcrypt": {
-			"version": "5.0.0",
-			"resolved": "https://registry.npmjs.org/@types/bcrypt/-/bcrypt-5.0.0.tgz",
-			"integrity": "sha512-agtcFKaruL8TmcvqbndlqHPSJgsolhf/qPWchFlgnW1gECTN/nKbFcoFnvKAQRFfKbh+BO6A3SWdJu9t+xF3Lw==",
-			"dev": true,
-			"dependencies": {
-				"@types/node": "*"
-			}
-		},
-		"node_modules/@types/body-parser": {
-			"version": "1.19.2",
-			"resolved": "https://registry.npmjs.org/@types/body-parser/-/body-parser-1.19.2.tgz",
-			"integrity": "sha512-ALYone6pm6QmwZoAgeyNksccT9Q4AWZQ6PvfwR37GT6r6FWUPguq6sUmNGSMV2Wr761oQoBxwGGa6DR5o1DC9g==",
-			"dev": true,
-			"dependencies": {
-				"@types/connect": "*",
-				"@types/node": "*"
-			}
-		},
-		"node_modules/@types/connect": {
-			"version": "3.4.35",
-			"resolved": "https://registry.npmjs.org/@types/connect/-/connect-3.4.35.tgz",
-			"integrity": "sha512-cdeYyv4KWoEgpBISTxWvqYsVy444DOqehiF3fM3ne10AmJ62RSyNkUnxMJXHQWRQQX2eR94m5y1IZyDwBjV9FQ==",
-			"dev": true,
-			"dependencies": {
-				"@types/node": "*"
-			}
-		},
-		"node_modules/@types/cors": {
-			"version": "2.8.17",
-			"resolved": "https://registry.npmjs.org/@types/cors/-/cors-2.8.17.tgz",
-			"integrity": "sha512-8CGDvrBj1zgo2qE+oS3pOCyYNqCPryMWY2bGfwA0dcfopWGgxs+78df0Rs3rc9THP4JkOhLsAa+15VdpAqkcUA==",
-			"license": "MIT",
-			"dependencies": {
-				"@types/node": "*"
-			}
-		},
-		"node_modules/@types/express": {
-			"version": "4.17.13",
-			"resolved": "https://registry.npmjs.org/@types/express/-/express-4.17.13.tgz",
-			"integrity": "sha512-6bSZTPaTIACxn48l50SR+axgrqm6qXFIxrdAKaG6PaJk3+zuUr35hBlgT7vOmJcum+OEaIBLtHV/qloEAFITeA==",
-			"dev": true,
-			"dependencies": {
-				"@types/body-parser": "*",
-				"@types/express-serve-static-core": "^4.17.18",
-				"@types/qs": "*",
-				"@types/serve-static": "*"
-			}
-		},
-		"node_modules/@types/express-serve-static-core": {
-			"version": "4.17.28",
-			"resolved": "https://registry.npmjs.org/@types/express-serve-static-core/-/express-serve-static-core-4.17.28.tgz",
-			"integrity": "sha512-P1BJAEAW3E2DJUlkgq4tOL3RyMunoWXqbSCygWo5ZIWTjUgN1YnaXWW4VWl/oc8vs/XoYibEGBKP0uZyF4AHig==",
-			"dev": true,
-			"dependencies": {
-				"@types/node": "*",
-				"@types/qs": "*",
-				"@types/range-parser": "*"
-			}
-		},
-		"node_modules/@types/jsonwebtoken": {
-			"version": "8.5.8",
-			"resolved": "https://registry.npmjs.org/@types/jsonwebtoken/-/jsonwebtoken-8.5.8.tgz",
-			"integrity": "sha512-zm6xBQpFDIDM6o9r6HSgDeIcLy82TKWctCXEPbJJcXb5AKmi5BNNdLXneixK4lplX3PqIVcwLBCGE/kAGnlD4A==",
-			"dev": true,
-			"dependencies": {
-				"@types/node": "*"
-			}
-		},
-		"node_modules/@types/mime": {
-			"version": "1.3.2",
-			"resolved": "https://registry.npmjs.org/@types/mime/-/mime-1.3.2.tgz",
-			"integrity": "sha512-YATxVxgRqNH6nHEIsvg6k2Boc1JHI9ZbH5iWFFv/MTkchz3b1ieGDa5T0a9RznNdI0KhVbdbWSN+KWWrQZRxTw==",
-			"dev": true
-		},
-		"node_modules/@types/node": {
-			"version": "17.0.38",
-			"resolved": "https://registry.npmjs.org/@types/node/-/node-17.0.38.tgz",
-			"integrity": "sha512-5jY9RhV7c0Z4Jy09G+NIDTsCZ5G0L5n+Z+p+Y7t5VJHM30bgwzSjVtlcBxqAj+6L/swIlvtOSzr8rBk/aNyV2g=="
-		},
-		"node_modules/@types/nodemon": {
-			"version": "1.19.1",
-			"resolved": "https://registry.npmjs.org/@types/nodemon/-/nodemon-1.19.1.tgz",
-			"integrity": "sha512-3teAFqCFba3W9zk4dAGUZ+rW/nrQBrSGXWyK9HfJuWxmITk2z2d3u/5cy7oFqNG2fZxPwSAWkP+a8q/QC6UU5Q==",
-			"dev": true,
-			"dependencies": {
-				"@types/node": "*"
-			}
-		},
-		"node_modules/@types/qs": {
-			"version": "6.9.7",
-			"resolved": "https://registry.npmjs.org/@types/qs/-/qs-6.9.7.tgz",
-			"integrity": "sha512-FGa1F62FT09qcrueBA6qYTrJPVDzah9a+493+o2PCXsesWHIn27G98TsSMs3WPNbZIEj4+VJf6saSFpvD+3Zsw==",
-			"dev": true
-		},
-		"node_modules/@types/range-parser": {
-			"version": "1.2.4",
-			"resolved": "https://registry.npmjs.org/@types/range-parser/-/range-parser-1.2.4.tgz",
-			"integrity": "sha512-EEhsLsD6UsDM1yFhAvy0Cjr6VwmpMWqFBCb9w07wVugF7w9nfajxLuVmngTIpgS6svCnm6Vaw+MZhoDCKnOfsw==",
-			"dev": true
-		},
-		"node_modules/@types/serve-static": {
-			"version": "1.13.10",
-			"resolved": "https://registry.npmjs.org/@types/serve-static/-/serve-static-1.13.10.tgz",
-			"integrity": "sha512-nCkHGI4w7ZgAdNkrEu0bv+4xNV/XDqW+DydknebMOQwkpDGx8G+HTlj7R7ABI8i8nKxVw0wtKPi1D+lPOkh4YQ==",
-			"dev": true,
-			"dependencies": {
-				"@types/mime": "^1",
-				"@types/node": "*"
-			}
-		},
-		"node_modules/@types/uuid": {
-			"version": "8.3.4",
-			"resolved": "https://registry.npmjs.org/@types/uuid/-/uuid-8.3.4.tgz",
-			"integrity": "sha512-c/I8ZRb51j+pYGAu5CrFMRxqZ2ke4y2grEBO5AUjgSkSk+qT2Ea+OdWElz/OiMf5MNpn2b17kuVBwZLQJXzihw==",
-			"dev": true
-		},
-		"node_modules/@types/webidl-conversions": {
-			"version": "7.0.3",
-			"resolved": "https://registry.npmjs.org/@types/webidl-conversions/-/webidl-conversions-7.0.3.tgz",
-			"integrity": "sha512-CiJJvcRtIgzadHCYXw7dqEnMNRjhGZlYK05Mj9OyktqV8uVT8fD2BFOB7S1uwBE3Kj2Z+4UyPmFw/Ixgw/LAlA==",
-			"license": "MIT"
-		},
-		"node_modules/@types/whatwg-url": {
-			"version": "8.2.2",
-			"resolved": "https://registry.npmjs.org/@types/whatwg-url/-/whatwg-url-8.2.2.tgz",
-			"integrity": "sha512-FtQu10RWgn3D9U4aazdwIE2yzphmTJREDqNdODHrbrZmmMqI0vMheC/6NE/J1Yveaj8H+ela+YwWTjq5PGmuhA==",
-			"license": "MIT",
-			"dependencies": {
-				"@types/node": "*",
-				"@types/webidl-conversions": "*"
-			}
-		},
-		"node_modules/abbrev": {
-			"version": "1.1.1",
-			"resolved": "https://registry.npmjs.org/abbrev/-/abbrev-1.1.1.tgz",
-			"integrity": "sha512-nne9/IiQ/hzIhY6pdDnbBtz7DjPTKrY00P/zvPSm5pOFkl6xuGrGnXn/VtTNNfNtAfZ9/1RtehkszU9qcTii0Q=="
-		},
-		"node_modules/accepts": {
-			"version": "1.3.8",
-			"resolved": "https://registry.npmjs.org/accepts/-/accepts-1.3.8.tgz",
-			"integrity": "sha512-PYAthTa2m2VKxuvSD3DPC/Gy+U+sOA1LAuT8mkmRuvw+NACSaeXEQ+NHcVF7rONl6qcaxV3Uuemwawk+7+SJLw==",
-			"dependencies": {
-				"mime-types": "~2.1.34",
-				"negotiator": "0.6.3"
-			},
-			"engines": {
-				"node": ">= 0.6"
-			}
-		},
-		"node_modules/agent-base": {
-			"version": "6.0.2",
-			"resolved": "https://registry.npmjs.org/agent-base/-/agent-base-6.0.2.tgz",
-			"integrity": "sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ==",
-			"dependencies": {
-				"debug": "4"
-			},
-			"engines": {
-				"node": ">= 6.0.0"
-			}
-		},
-		"node_modules/agent-base/node_modules/debug": {
-			"version": "4.3.4",
-			"resolved": "https://registry.npmjs.org/debug/-/debug-4.3.4.tgz",
-			"integrity": "sha512-PRWFHuSU3eDtQJPvnNY7Jcket1j0t5OuOsFzPPzsekD52Zl8qUfFIPEiswXqIvHWGVHOgX+7G/vCNNhehwxfkQ==",
-			"dependencies": {
-				"ms": "2.1.2"
-			},
-			"engines": {
-				"node": ">=6.0"
-			},
-			"peerDependenciesMeta": {
-				"supports-color": {
-					"optional": true
-				}
-			}
-		},
-		"node_modules/agent-base/node_modules/ms": {
-			"version": "2.1.2",
-			"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.2.tgz",
-			"integrity": "sha512-sGkPx+VjMtmA6MX27oA4FBFELFCZZ4S4XqeGOXCv68tT+jb3vk/RyaKWP0PTKyWtmLSM0b+adUTEvbs1PEaH2w=="
-		},
-		"node_modules/ansi-regex": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/ansi-regex/-/ansi-regex-5.0.1.tgz",
-			"integrity": "sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==",
-			"engines": {
-				"node": ">=8"
-			}
-		},
-		"node_modules/anymatch": {
-			"version": "3.1.2",
-			"resolved": "https://registry.npmjs.org/anymatch/-/anymatch-3.1.2.tgz",
-			"integrity": "sha512-P43ePfOAIupkguHUycrc4qJ9kz8ZiuOUijaETwX7THt0Y/GNK7v0aa8rY816xWjZ7rJdA5XdMcpVFTKMq+RvWg==",
-			"dev": true,
-			"dependencies": {
-				"normalize-path": "^3.0.0",
-				"picomatch": "^2.0.4"
-			},
-			"engines": {
-				"node": ">= 8"
-			}
-		},
-		"node_modules/aproba": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/aproba/-/aproba-2.0.0.tgz",
-			"integrity": "sha512-lYe4Gx7QT+MKGbDsA+Z+he/Wtef0BiwDOlK/XkBrdfsh9J/jPPXbX0tE9x9cl27Tmu5gg3QUbUrQYa/y+KOHPQ=="
-		},
-		"node_modules/are-we-there-yet": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/are-we-there-yet/-/are-we-there-yet-2.0.0.tgz",
-			"integrity": "sha512-Ci/qENmwHnsYo9xKIcUJN5LeDKdJ6R1Z1j9V/J5wyq8nh/mYPEpIKJbBZXtZjG04HiK7zV/p6Vs9952MrMeUIw==",
-			"dependencies": {
-				"delegates": "^1.0.0",
-				"readable-stream": "^3.6.0"
-			},
-			"engines": {
-				"node": ">=10"
-			}
-		},
-		"node_modules/array-flatten": {
-			"version": "1.1.1",
-			"resolved": "https://registry.npmjs.org/array-flatten/-/array-flatten-1.1.1.tgz",
-			"integrity": "sha512-PCVAQswWemu6UdxsDFFX/+gVeYqKAod3D3UVm91jHwynguOwAvYPhx8nNlM++NqRcK6CxxpUafjmhIdKiHibqg=="
-		},
-		"node_modules/balanced-match": {
-			"version": "1.0.2",
-			"resolved": "https://registry.npmjs.org/balanced-match/-/balanced-match-1.0.2.tgz",
-			"integrity": "sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw=="
-		},
-		"node_modules/base64-js": {
-			"version": "1.5.1",
-			"resolved": "https://registry.npmjs.org/base64-js/-/base64-js-1.5.1.tgz",
-			"integrity": "sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==",
-			"funding": [
-				{
-					"type": "github",
-					"url": "https://github.com/sponsors/feross"
-				},
-				{
-					"type": "patreon",
-					"url": "https://www.patreon.com/feross"
-				},
-				{
-					"type": "consulting",
-					"url": "https://feross.org/support"
-				}
-			],
-			"license": "MIT"
-		},
-		"node_modules/base64id": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/base64id/-/base64id-2.0.0.tgz",
-			"integrity": "sha512-lGe34o6EHj9y3Kts9R4ZYs/Gr+6N7MCaMlIFA3F1R2O5/m7K06AxfSeO5530PEERE6/WyEg3lsuyw4GHlPZHog==",
-			"license": "MIT",
-			"engines": {
-				"node": "^4.5.0 || >= 5.9"
-			}
-		},
-		"node_modules/bcrypt": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/bcrypt/-/bcrypt-5.0.1.tgz",
-			"integrity": "sha512-9BTgmrhZM2t1bNuDtrtIMVSmmxZBrJ71n8Wg+YgdjHuIWYF7SjjmCPZFB+/5i/o/PIeRpwVJR3P+NrpIItUjqw==",
-			"hasInstallScript": true,
-			"dependencies": {
-				"@mapbox/node-pre-gyp": "^1.0.0",
-				"node-addon-api": "^3.1.0"
-			},
-			"engines": {
-				"node": ">= 10.0.0"
-			}
-		},
-		"node_modules/binary-extensions": {
-			"version": "2.2.0",
-			"resolved": "https://registry.npmjs.org/binary-extensions/-/binary-extensions-2.2.0.tgz",
-			"integrity": "sha512-jDctJ/IVQbZoJykoeHbhXpOlNBqGNcwXJKJog42E5HDPUwQTSdjCHdihjj0DlnheQ7blbT6dHOafNAiS8ooQKA==",
-			"dev": true,
-			"engines": {
-				"node": ">=8"
-			}
-		},
-		"node_modules/body-parser": {
-			"version": "1.20.3",
-			"resolved": "https://registry.npmjs.org/body-parser/-/body-parser-1.20.3.tgz",
-			"integrity": "sha512-7rAxByjUMqQ3/bHJy7D6OGXvx/MMc4IqBn/X0fcM1QUcAItpZrBEYhWGem+tzXH90c+G01ypMcYJBO9Y30203g==",
-			"license": "MIT",
-			"dependencies": {
-				"bytes": "3.1.2",
-				"content-type": "~1.0.5",
-				"debug": "2.6.9",
-				"depd": "2.0.0",
-				"destroy": "1.2.0",
-				"http-errors": "2.0.0",
-				"iconv-lite": "0.4.24",
-				"on-finished": "2.4.1",
-				"qs": "6.13.0",
-				"raw-body": "2.5.2",
-				"type-is": "~1.6.18",
-				"unpipe": "1.0.0"
-			},
-			"engines": {
-				"node": ">= 0.8",
-				"npm": "1.2.8000 || >= 1.4.16"
-			}
-		},
-		"node_modules/bowser": {
-			"version": "2.11.0",
-			"resolved": "https://registry.npmjs.org/bowser/-/bowser-2.11.0.tgz",
-			"integrity": "sha512-AlcaJBi/pqqJBIQ8U9Mcpc9i8Aqxn88Skv5d+xBX006BY5u8N3mGLHa5Lgppa7L/HfwgwLgZ6NYs+Ag6uUmJRA==",
-			"license": "MIT",
-			"optional": true
-		},
-		"node_modules/brace-expansion": {
-			"version": "1.1.11",
-			"resolved": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-1.1.11.tgz",
-			"integrity": "sha512-iCuPHDFgrHX7H2vEI/5xpz07zSHB00TpugqhmYtVmMO6518mCuRMoOYFldEBl0g187ufozdaHgWKcYFb61qGiA==",
-			"dependencies": {
-				"balanced-match": "^1.0.0",
-				"concat-map": "0.0.1"
-			}
-		},
-		"node_modules/braces": {
-			"version": "3.0.3",
-			"resolved": "https://registry.npmjs.org/braces/-/braces-3.0.3.tgz",
-			"integrity": "sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==",
-			"dev": true,
-			"license": "MIT",
-			"dependencies": {
-				"fill-range": "^7.1.1"
-			},
-			"engines": {
-				"node": ">=8"
-			}
-		},
-		"node_modules/bson": {
-			"version": "4.7.2",
-			"resolved": "https://registry.npmjs.org/bson/-/bson-4.7.2.tgz",
-			"integrity": "sha512-Ry9wCtIZ5kGqkJoi6aD8KjxFZEx78guTQDnpXWiNthsxzrxAK/i8E6pCHAIZTbaEFWcOCvbecMukfK7XUvyLpQ==",
-			"license": "Apache-2.0",
-			"dependencies": {
-				"buffer": "^5.6.0"
-			},
-			"engines": {
-				"node": ">=6.9.0"
-			}
-		},
-		"node_modules/buffer": {
-			"version": "5.7.1",
-			"resolved": "https://registry.npmjs.org/buffer/-/buffer-5.7.1.tgz",
-			"integrity": "sha512-EHcyIPBQ4BSGlvjB16k5KgAJ27CIsHY/2JBmCRReo48y9rQ3MaUzWX3KVlBa4U7MyX02HdVj0K7C3WaB3ju7FQ==",
-			"funding": [
-				{
-					"type": "github",
-					"url": "https://github.com/sponsors/feross"
-				},
-				{
-					"type": "patreon",
-					"url": "https://www.patreon.com/feross"
-				},
-				{
-					"type": "consulting",
-					"url": "https://feross.org/support"
-				}
-			],
-			"license": "MIT",
-			"dependencies": {
-				"base64-js": "^1.3.1",
-				"ieee754": "^1.1.13"
-			}
-		},
-		"node_modules/buffer-equal-constant-time": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/buffer-equal-constant-time/-/buffer-equal-constant-time-1.0.1.tgz",
-			"integrity": "sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA=="
-		},
-		"node_modules/bytes": {
-			"version": "3.1.2",
-			"resolved": "https://registry.npmjs.org/bytes/-/bytes-3.1.2.tgz",
-			"integrity": "sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.8"
-			}
-		},
-		"node_modules/call-bind-apply-helpers": {
-			"version": "1.0.2",
-			"resolved": "https://registry.npmjs.org/call-bind-apply-helpers/-/call-bind-apply-helpers-1.0.2.tgz",
-			"integrity": "sha512-Sp1ablJ0ivDkSzjcaJdxEunN5/XvksFJ2sMBFfq6x0ryhQV/2b/KwFe21cMpmHtPOSij8K99/wSfoEuTObmuMQ==",
-			"license": "MIT",
-			"dependencies": {
-				"es-errors": "^1.3.0",
-				"function-bind": "^1.1.2"
-			},
-			"engines": {
-				"node": ">= 0.4"
-			}
-		},
-		"node_modules/call-bound": {
-			"version": "1.0.4",
-			"resolved": "https://registry.npmjs.org/call-bound/-/call-bound-1.0.4.tgz",
-			"integrity": "sha512-+ys997U96po4Kx/ABpBCqhA9EuxJaQWDQg7295H4hBphv3IZg0boBKuwYpt4YXp6MZ5AmZQnU/tyMTlRpaSejg==",
-			"license": "MIT",
-			"dependencies": {
-				"call-bind-apply-helpers": "^1.0.2",
-				"get-intrinsic": "^1.3.0"
-			},
-			"engines": {
-				"node": ">= 0.4"
-			},
-			"funding": {
-				"url": "https://github.com/sponsors/ljharb"
-			}
-		},
-		"node_modules/chokidar": {
-			"version": "3.5.3",
-			"resolved": "https://registry.npmjs.org/chokidar/-/chokidar-3.5.3.tgz",
-			"integrity": "sha512-Dr3sfKRP6oTcjf2JmUmFJfeVMvXBdegxB0iVQ5eb2V10uFJUCAS8OByZdVAyVb8xXNz3GjjTgj9kLWsZTqE6kw==",
-			"dev": true,
-			"funding": [
-				{
-					"type": "individual",
-					"url": "https://paulmillr.com/funding/"
-				}
-			],
-			"dependencies": {
-				"anymatch": "~3.1.2",
-				"braces": "~3.0.2",
-				"glob-parent": "~5.1.2",
-				"is-binary-path": "~2.1.0",
-				"is-glob": "~4.0.1",
-				"normalize-path": "~3.0.0",
-				"readdirp": "~3.6.0"
-			},
-			"engines": {
-				"node": ">= 8.10.0"
-			},
-			"optionalDependencies": {
-				"fsevents": "~2.3.2"
-			}
-		},
-		"node_modules/chownr": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/chownr/-/chownr-2.0.0.tgz",
-			"integrity": "sha512-bIomtDF5KGpdogkLd9VspvFzk9KfpyyGlS8YFVZl7TGPBHL5snIOnxeshwVgPteQ9b4Eydl+pVbIyE1DcvCWgQ==",
-			"engines": {
-				"node": ">=10"
-			}
-		},
-		"node_modules/color-support": {
-			"version": "1.1.3",
-			"resolved": "https://registry.npmjs.org/color-support/-/color-support-1.1.3.tgz",
-			"integrity": "sha512-qiBjkpbMLO/HL68y+lh4q0/O1MZFj2RX6X/KmMa3+gJD3z+WwI1ZzDHysvqHGS3mP6mznPckpXmw1nI9cJjyRg==",
-			"bin": {
-				"color-support": "bin.js"
-			}
-		},
-		"node_modules/concat-map": {
-			"version": "0.0.1",
-			"resolved": "https://registry.npmjs.org/concat-map/-/concat-map-0.0.1.tgz",
-			"integrity": "sha512-/Srv4dswyQNBfohGpz9o6Yb3Gz3SrUDqBH5rTuhGR7ahtlbYKnVxw2bCFMRljaA7EXHaXZ8wsHdodFvbkhKmqg=="
-		},
-		"node_modules/console-control-strings": {
-			"version": "1.1.0",
-			"resolved": "https://registry.npmjs.org/console-control-strings/-/console-control-strings-1.1.0.tgz",
-			"integrity": "sha512-ty/fTekppD2fIwRvnZAVdeOiGd1c7YXEixbgJTNzqcxJWKQnjJ/V1bNEEE6hygpM3WjwHFUVK6HTjWSzV4a8sQ=="
-		},
-		"node_modules/content-disposition": {
-			"version": "0.5.4",
-			"resolved": "https://registry.npmjs.org/content-disposition/-/content-disposition-0.5.4.tgz",
-			"integrity": "sha512-FveZTNuGw04cxlAiWbzi6zTAL/lhehaWbTtgluJh4/E95DqMwTmha3KZN1aAWA8cFIhHzMZUvLevkw5Rqk+tSQ==",
-			"dependencies": {
-				"safe-buffer": "5.2.1"
-			},
-			"engines": {
-				"node": ">= 0.6"
-			}
-		},
-		"node_modules/content-type": {
-			"version": "1.0.5",
-			"resolved": "https://registry.npmjs.org/content-type/-/content-type-1.0.5.tgz",
-			"integrity": "sha512-nTjqfcBFEipKdXCv4YDQWCfmcLZKm81ldF0pAopTvyrFGVbcR6P/VAAd5G7N+0tTr8QqiU0tFadD6FK4NtJwOA==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.6"
-			}
-		},
-		"node_modules/cookie": {
-			"version": "0.7.1",
-			"resolved": "https://registry.npmjs.org/cookie/-/cookie-0.7.1.tgz",
-			"integrity": "sha512-6DnInpx7SJ2AK3+CTUE/ZM0vWTUboZCegxhC2xiIydHR9jNuTAASBrfEpHhiGOZw/nX51bHt6YQl8jsGo4y/0w==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.6"
-			}
-		},
-		"node_modules/cookie-signature": {
-			"version": "1.0.6",
-			"resolved": "https://registry.npmjs.org/cookie-signature/-/cookie-signature-1.0.6.tgz",
-			"integrity": "sha512-QADzlaHc8icV8I7vbaJXJwod9HWYp8uCqf1xa4OfNu1T7JVxQIrUgOWtHdNDtPiywmFbiS12VjotIXLrKM3orQ=="
-		},
-		"node_modules/cors": {
-			"version": "2.8.5",
-			"resolved": "https://registry.npmjs.org/cors/-/cors-2.8.5.tgz",
-			"integrity": "sha512-KIHbLJqu73RGr/hnbrO9uBeixNGuvSQjul/jdFvS/KFSIH1hWVd1ng7zOHx+YrEfInLG7q4n6GHQ9cDtxv/P6g==",
-			"license": "MIT",
-			"dependencies": {
-				"object-assign": "^4",
-				"vary": "^1"
-			},
-			"engines": {
-				"node": ">= 0.10"
-			}
-		},
-		"node_modules/debug": {
-			"version": "2.6.9",
-			"resolved": "https://registry.npmjs.org/debug/-/debug-2.6.9.tgz",
-			"integrity": "sha512-bC7ElrdJaJnPbAP+1EotYvqZsb3ecl5wi6Bfi6BJTUcNowp6cvspg0jXznRTKDjm/E7AdgFBVeAPVMNcKGsHMA==",
-			"license": "MIT",
-			"dependencies": {
-				"ms": "2.0.0"
-			}
-		},
-		"node_modules/delegates": {
-			"version": "1.0.0",
-			"resolved": "https://registry.npmjs.org/delegates/-/delegates-1.0.0.tgz",
-			"integrity": "sha512-bd2L678uiWATM6m5Z1VzNCErI3jiGzt6HGY8OVICs40JQq/HALfbyNJmp0UDakEY4pMMaN0Ly5om/B1VI/+xfQ=="
-		},
-		"node_modules/depd": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/depd/-/depd-2.0.0.tgz",
-			"integrity": "sha512-g7nH6P6dyDioJogAAGprGpCtVImJhpPk/roCzdb3fIh61/s/nPsfR6onyMwkCAR/OlC3yBC0lESvUoQEAssIrw==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.8"
-			}
-		},
-		"node_modules/destroy": {
-			"version": "1.2.0",
-			"resolved": "https://registry.npmjs.org/destroy/-/destroy-1.2.0.tgz",
-			"integrity": "sha512-2sJGJTaXIIaR1w4iJSNoN0hnMY7Gpc/n8D4qSCJw8QqFWXf7cuAgnEHxBpweaVcPevC2l3KpjYCx3NypQQgaJg==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.8",
-				"npm": "1.2.8000 || >= 1.4.16"
-			}
-		},
-		"node_modules/detect-libc": {
-			"version": "2.0.1",
-			"resolved": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.0.1.tgz",
-			"integrity": "sha512-463v3ZeIrcWtdgIg6vI6XUncguvr2TnGl4SzDXinkt9mSLpBJKXT3mW6xT3VQdDN11+WVs29pgvivTc4Lp8v+w==",
-			"engines": {
-				"node": ">=8"
-			}
-		},
-		"node_modules/dotenv": {
-			"version": "16.0.1",
-			"resolved": "https://registry.npmjs.org/dotenv/-/dotenv-16.0.1.tgz",
-			"integrity": "sha512-1K6hR6wtk2FviQ4kEiSjFiH5rpzEVi8WW0x96aztHVMhEspNpc4DVOUTEHtEva5VThQ8IaBX1Pe4gSzpVVUsKQ==",
-			"engines": {
-				"node": ">=12"
-			}
-		},
-		"node_modules/dunder-proto": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/dunder-proto/-/dunder-proto-1.0.1.tgz",
-			"integrity": "sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==",
-			"license": "MIT",
-			"dependencies": {
-				"call-bind-apply-helpers": "^1.0.1",
-				"es-errors": "^1.3.0",
-				"gopd": "^1.2.0"
-			},
-			"engines": {
-				"node": ">= 0.4"
-			}
-		},
-		"node_modules/ecdsa-sig-formatter": {
-			"version": "1.0.11",
-			"resolved": "https://registry.npmjs.org/ecdsa-sig-formatter/-/ecdsa-sig-formatter-1.0.11.tgz",
-			"integrity": "sha512-nagl3RYrbNv6kQkeJIpt6NJZy8twLB/2vtz6yN9Z4vRKHN4/QZJIEbqohALSgwKdnksuY3k5Addp5lg8sVoVcQ==",
-			"dependencies": {
-				"safe-buffer": "^5.0.1"
-			}
-		},
-		"node_modules/ee-first": {
-			"version": "1.1.1",
-			"resolved": "https://registry.npmjs.org/ee-first/-/ee-first-1.1.1.tgz",
-			"integrity": "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==",
-			"license": "MIT"
-		},
-		"node_modules/emoji-regex": {
-			"version": "8.0.0",
-			"resolved": "https://registry.npmjs.org/emoji-regex/-/emoji-regex-8.0.0.tgz",
-			"integrity": "sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A=="
-		},
-		"node_modules/encodeurl": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/encodeurl/-/encodeurl-2.0.0.tgz",
-			"integrity": "sha512-Q0n9HRi4m6JuGIV1eFlmvJB7ZEVxu93IrMyiMsGC0lrMJMWzRgx6WGquyfQgZVb31vhGgXnfmPNNXmxnOkRBrg==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.8"
-			}
-		},
-		"node_modules/engine.io": {
-			"version": "6.6.4",
-			"resolved": "https://registry.npmjs.org/engine.io/-/engine.io-6.6.4.tgz",
-			"integrity": "sha512-ZCkIjSYNDyGn0R6ewHDtXgns/Zre/NT6Agvq1/WobF7JXgFff4SeDroKiCO3fNJreU9YG429Sc81o4w5ok/W5g==",
-			"license": "MIT",
-			"dependencies": {
-				"@types/cors": "^2.8.12",
-				"@types/node": ">=10.0.0",
-				"accepts": "~1.3.4",
-				"base64id": "2.0.0",
-				"cookie": "~0.7.2",
-				"cors": "~2.8.5",
-				"debug": "~4.3.1",
-				"engine.io-parser": "~5.2.1",
-				"ws": "~8.17.1"
-			},
-			"engines": {
-				"node": ">=10.2.0"
-			}
-		},
-		"node_modules/engine.io-parser": {
-			"version": "5.2.3",
-			"resolved": "https://registry.npmjs.org/engine.io-parser/-/engine.io-parser-5.2.3.tgz",
-			"integrity": "sha512-HqD3yTBfnBxIrbnM1DoD6Pcq8NECnh8d4As1Qgh0z5Gg3jRRIqijury0CL3ghu/edArpUYiYqQiDUQBIs4np3Q==",
-			"license": "MIT",
-			"engines": {
-				"node": ">=10.0.0"
-			}
-		},
-		"node_modules/engine.io/node_modules/cookie": {
-			"version": "0.7.2",
-			"resolved": "https://registry.npmjs.org/cookie/-/cookie-0.7.2.tgz",
-			"integrity": "sha512-yki5XnKuf750l50uGTllt6kKILY4nQ1eNIQatoXEByZ5dWgnKqbnqmTrBE5B4N7lrMJKQ2ytWMiTO2o0v6Ew/w==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.6"
-			}
-		},
-		"node_modules/engine.io/node_modules/debug": {
-			"version": "4.3.7",
-			"resolved": "https://registry.npmjs.org/debug/-/debug-4.3.7.tgz",
-			"integrity": "sha512-Er2nc/H7RrMXZBFCEim6TCmMk02Z8vLC2Rbi1KEBggpo0fS6l0S1nnapwmIi3yW/+GOJap1Krg4w0Hg80oCqgQ==",
-			"license": "MIT",
-			"dependencies": {
-				"ms": "^2.1.3"
-			},
-			"engines": {
-				"node": ">=6.0"
-			},
-			"peerDependenciesMeta": {
-				"supports-color": {
-					"optional": true
-				}
-			}
-		},
-		"node_modules/engine.io/node_modules/ms": {
-			"version": "2.1.3",
-			"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
-			"integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
-			"license": "MIT"
-		},
-		"node_modules/es-define-property": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/es-define-property/-/es-define-property-1.0.1.tgz",
-			"integrity": "sha512-e3nRfgfUZ4rNGL232gUgX06QNyyez04KdjFrF+LTRoOXmrOgFKDg4BCdsjW8EnT69eqdYGmRpJwiPVYNrCaW3g==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.4"
-			}
-		},
-		"node_modules/es-errors": {
-			"version": "1.3.0",
-			"resolved": "https://registry.npmjs.org/es-errors/-/es-errors-1.3.0.tgz",
-			"integrity": "sha512-Zf5H2Kxt2xjTvbJvP2ZWLEICxA6j+hAmMzIlypy4xcBg1vKVnx89Wy0GbS+kf5cwCVFFzdCFh2XSCFNULS6csw==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.4"
-			}
-		},
-		"node_modules/es-object-atoms": {
-			"version": "1.1.1",
-			"resolved": "https://registry.npmjs.org/es-object-atoms/-/es-object-atoms-1.1.1.tgz",
-			"integrity": "sha512-FGgH2h8zKNim9ljj7dankFPcICIK9Cp5bm+c2gQSYePhpaG5+esrLODihIorn+Pe6FGJzWhXQotPv73jTaldXA==",
-			"license": "MIT",
-			"dependencies": {
-				"es-errors": "^1.3.0"
-			},
-			"engines": {
-				"node": ">= 0.4"
-			}
-		},
-		"node_modules/escape-html": {
-			"version": "1.0.3",
-			"resolved": "https://registry.npmjs.org/escape-html/-/escape-html-1.0.3.tgz",
-			"integrity": "sha512-NiSupZ4OeuGwr68lGIeym/ksIZMJodUGOSCZ/FSnTxcrekbvqrgdUxlJOMpijaKZVjAJrWrGs/6Jy8OMuyj9ow==",
-			"license": "MIT"
-		},
-		"node_modules/etag": {
-			"version": "1.8.1",
-			"resolved": "https://registry.npmjs.org/etag/-/etag-1.8.1.tgz",
-			"integrity": "sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.6"
-			}
-		},
-		"node_modules/express": {
-			"version": "4.21.2",
-			"resolved": "https://registry.npmjs.org/express/-/express-4.21.2.tgz",
-			"integrity": "sha512-28HqgMZAmih1Czt9ny7qr6ek2qddF4FclbMzwhCREB6OFfH+rXAnuNCwo1/wFvrtbgsQDb4kSbX9de9lFbrXnA==",
-			"license": "MIT",
-			"dependencies": {
-				"accepts": "~1.3.8",
-				"array-flatten": "1.1.1",
-				"body-parser": "1.20.3",
-				"content-disposition": "0.5.4",
-				"content-type": "~1.0.4",
-				"cookie": "0.7.1",
-				"cookie-signature": "1.0.6",
-				"debug": "2.6.9",
-				"depd": "2.0.0",
-				"encodeurl": "~2.0.0",
-				"escape-html": "~1.0.3",
-				"etag": "~1.8.1",
-				"finalhandler": "1.3.1",
-				"fresh": "0.5.2",
-				"http-errors": "2.0.0",
-				"merge-descriptors": "1.0.3",
-				"methods": "~1.1.2",
-				"on-finished": "2.4.1",
-				"parseurl": "~1.3.3",
-				"path-to-regexp": "0.1.12",
-				"proxy-addr": "~2.0.7",
-				"qs": "6.13.0",
-				"range-parser": "~1.2.1",
-				"safe-buffer": "5.2.1",
-				"send": "0.19.0",
-				"serve-static": "1.16.2",
-				"setprototypeof": "1.2.0",
-				"statuses": "2.0.1",
-				"type-is": "~1.6.18",
-				"utils-merge": "1.0.1",
-				"vary": "~1.1.2"
-			},
-			"engines": {
-				"node": ">= 0.10.0"
-			},
-			"funding": {
-				"type": "opencollective",
-				"url": "https://opencollective.com/express"
-			}
-		},
-		"node_modules/fast-xml-parser": {
-			"version": "4.4.1",
-			"resolved": "https://registry.npmjs.org/fast-xml-parser/-/fast-xml-parser-4.4.1.tgz",
-			"integrity": "sha512-xkjOecfnKGkSsOwtZ5Pz7Us/T6mrbPQrq0nh+aCO5V9nk5NLWmasAHumTKjiPJPWANe+kAZ84Jc8ooJkzZ88Sw==",
-			"funding": [
-				{
-					"type": "github",
-					"url": "https://github.com/sponsors/NaturalIntelligence"
-				},
-				{
-					"type": "paypal",
-					"url": "https://paypal.me/naturalintelligence"
-				}
-			],
-			"license": "MIT",
-			"optional": true,
-			"dependencies": {
-				"strnum": "^1.0.5"
-			},
-			"bin": {
-				"fxparser": "src/cli/cli.js"
-			}
-		},
-		"node_modules/fill-range": {
-			"version": "7.1.1",
-			"resolved": "https://registry.npmjs.org/fill-range/-/fill-range-7.1.1.tgz",
-			"integrity": "sha512-YsGpe3WHLK8ZYi4tWDg2Jy3ebRz2rXowDxnld4bkQB00cc/1Zw9AWnC0i9ztDJitivtQvaI9KaLyKrc+hBW0yg==",
-			"dev": true,
-			"license": "MIT",
-			"dependencies": {
-				"to-regex-range": "^5.0.1"
-			},
-			"engines": {
-				"node": ">=8"
-			}
-		},
-		"node_modules/finalhandler": {
-			"version": "1.3.1",
-			"resolved": "https://registry.npmjs.org/finalhandler/-/finalhandler-1.3.1.tgz",
-			"integrity": "sha512-6BN9trH7bp3qvnrRyzsBz+g3lZxTNZTbVO2EV1CS0WIcDbawYVdYvGflME/9QP0h0pYlCDBCTjYa9nZzMDpyxQ==",
-			"license": "MIT",
-			"dependencies": {
-				"debug": "2.6.9",
-				"encodeurl": "~2.0.0",
-				"escape-html": "~1.0.3",
-				"on-finished": "2.4.1",
-				"parseurl": "~1.3.3",
-				"statuses": "2.0.1",
-				"unpipe": "~1.0.0"
-			},
-			"engines": {
-				"node": ">= 0.8"
-			}
-		},
-		"node_modules/forwarded": {
-			"version": "0.2.0",
-			"resolved": "https://registry.npmjs.org/forwarded/-/forwarded-0.2.0.tgz",
-			"integrity": "sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow==",
-			"engines": {
-				"node": ">= 0.6"
-			}
-		},
-		"node_modules/fresh": {
-			"version": "0.5.2",
-			"resolved": "https://registry.npmjs.org/fresh/-/fresh-0.5.2.tgz",
-			"integrity": "sha512-zJ2mQYM18rEFOudeV4GShTGIQ7RbzA7ozbU9I/XBpm7kqgMywgmylMwXHxZJmkVoYkna9d2pVXVXPdYTP9ej8Q==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.6"
-			}
-		},
-		"node_modules/fs-minipass": {
-			"version": "2.1.0",
-			"resolved": "https://registry.npmjs.org/fs-minipass/-/fs-minipass-2.1.0.tgz",
-			"integrity": "sha512-V/JgOLFCS+R6Vcq0slCuaeWEdNC3ouDlJMNIsacH2VtALiu9mV4LPrHc5cDl8k5aw6J8jwgWWpiTo5RYhmIzvg==",
-			"dependencies": {
-				"minipass": "^3.0.0"
-			},
-			"engines": {
-				"node": ">= 8"
-			}
-		},
-		"node_modules/fs.realpath": {
-			"version": "1.0.0",
-			"resolved": "https://registry.npmjs.org/fs.realpath/-/fs.realpath-1.0.0.tgz",
-			"integrity": "sha512-OO0pH2lK6a0hZnAdau5ItzHPI6pUlvI7jMVnxUQRtw4owF2wk8lOSabtGDCTP4Ggrg2MbGnWO9X8K1t4+fGMDw=="
-		},
-		"node_modules/fsevents": {
-			"version": "2.3.2",
-			"resolved": "https://registry.npmjs.org/fsevents/-/fsevents-2.3.2.tgz",
-			"integrity": "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==",
-			"dev": true,
-			"hasInstallScript": true,
-			"optional": true,
-			"os": [
-				"darwin"
-			],
-			"engines": {
-				"node": "^8.16.0 || ^10.6.0 || >=11.0.0"
-			}
-		},
-		"node_modules/function-bind": {
-			"version": "1.1.2",
-			"resolved": "https://registry.npmjs.org/function-bind/-/function-bind-1.1.2.tgz",
-			"integrity": "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA==",
-			"license": "MIT",
-			"funding": {
-				"url": "https://github.com/sponsors/ljharb"
-			}
-		},
-		"node_modules/gauge": {
-			"version": "3.0.2",
-			"resolved": "https://registry.npmjs.org/gauge/-/gauge-3.0.2.tgz",
-			"integrity": "sha512-+5J6MS/5XksCuXq++uFRsnUd7Ovu1XenbeuIuNRJxYWjgQbPuFhT14lAvsWfqfAmnwluf1OwMjz39HjfLPci0Q==",
-			"dependencies": {
-				"aproba": "^1.0.3 || ^2.0.0",
-				"color-support": "^1.1.2",
-				"console-control-strings": "^1.0.0",
-				"has-unicode": "^2.0.1",
-				"object-assign": "^4.1.1",
-				"signal-exit": "^3.0.0",
-				"string-width": "^4.2.3",
-				"strip-ansi": "^6.0.1",
-				"wide-align": "^1.1.2"
-			},
-			"engines": {
-				"node": ">=10"
-			}
-		},
-		"node_modules/get-intrinsic": {
-			"version": "1.3.0",
-			"resolved": "https://registry.npmjs.org/get-intrinsic/-/get-intrinsic-1.3.0.tgz",
-			"integrity": "sha512-9fSjSaos/fRIVIp+xSJlE6lfwhES7LNtKaCBIamHsjr2na1BiABJPo0mOjjz8GJDURarmCPGqaiVg5mfjb98CQ==",
-			"license": "MIT",
-			"dependencies": {
-				"call-bind-apply-helpers": "^1.0.2",
-				"es-define-property": "^1.0.1",
-				"es-errors": "^1.3.0",
-				"es-object-atoms": "^1.1.1",
-				"function-bind": "^1.1.2",
-				"get-proto": "^1.0.1",
-				"gopd": "^1.2.0",
-				"has-symbols": "^1.1.0",
-				"hasown": "^2.0.2",
-				"math-intrinsics": "^1.1.0"
-			},
-			"engines": {
-				"node": ">= 0.4"
-			},
-			"funding": {
-				"url": "https://github.com/sponsors/ljharb"
-			}
-		},
-		"node_modules/get-proto": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/get-proto/-/get-proto-1.0.1.tgz",
-			"integrity": "sha512-sTSfBjoXBp89JvIKIefqw7U2CCebsc74kiY6awiGogKtoSGbgjYE/G/+l9sF3MWFPNc9IcoOC4ODfKHfxFmp0g==",
-			"license": "MIT",
-			"dependencies": {
-				"dunder-proto": "^1.0.1",
-				"es-object-atoms": "^1.0.0"
-			},
-			"engines": {
-				"node": ">= 0.4"
-			}
-		},
-		"node_modules/glob": {
-			"version": "7.2.3",
-			"resolved": "https://registry.npmjs.org/glob/-/glob-7.2.3.tgz",
-			"integrity": "sha512-nFR0zLpU2YCaRxwoCJvL6UvCH2JFyFVIvwTLsIf21AuHlMskA1hhTdk+LlYJtOlYt9v6dvszD2BGRqBL+iQK9Q==",
-			"dependencies": {
-				"fs.realpath": "^1.0.0",
-				"inflight": "^1.0.4",
-				"inherits": "2",
-				"minimatch": "^3.1.1",
-				"once": "^1.3.0",
-				"path-is-absolute": "^1.0.0"
-			},
-			"engines": {
-				"node": "*"
-			},
-			"funding": {
-				"url": "https://github.com/sponsors/isaacs"
-			}
-		},
-		"node_modules/glob-parent": {
-			"version": "5.1.2",
-			"resolved": "https://registry.npmjs.org/glob-parent/-/glob-parent-5.1.2.tgz",
-			"integrity": "sha512-AOIgSQCepiJYwP3ARnGx+5VnTu2HBYdzbGP45eLw1vr3zB3vZLeyed1sC9hnbcOc9/SrMyM5RPQrkGz4aS9Zow==",
-			"dev": true,
-			"dependencies": {
-				"is-glob": "^4.0.1"
-			},
-			"engines": {
-				"node": ">= 6"
-			}
-		},
-		"node_modules/gopd": {
-			"version": "1.2.0",
-			"resolved": "https://registry.npmjs.org/gopd/-/gopd-1.2.0.tgz",
-			"integrity": "sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.4"
-			},
-			"funding": {
-				"url": "https://github.com/sponsors/ljharb"
-			}
-		},
-		"node_modules/has-flag": {
-			"version": "3.0.0",
-			"resolved": "https://registry.npmjs.org/has-flag/-/has-flag-3.0.0.tgz",
-			"integrity": "sha512-sKJf1+ceQBr4SMkvQnBDNDtf4TXpVhVGateu0t918bl30FnbE2m4vNLX+VWe/dpjlb+HugGYzW7uQXH98HPEYw==",
-			"dev": true,
-			"engines": {
-				"node": ">=4"
-			}
-		},
-		"node_modules/has-symbols": {
-			"version": "1.1.0",
-			"resolved": "https://registry.npmjs.org/has-symbols/-/has-symbols-1.1.0.tgz",
-			"integrity": "sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.4"
-			},
-			"funding": {
-				"url": "https://github.com/sponsors/ljharb"
-			}
-		},
-		"node_modules/has-unicode": {
-			"version": "2.0.1",
-			"resolved": "https://registry.npmjs.org/has-unicode/-/has-unicode-2.0.1.tgz",
-			"integrity": "sha512-8Rf9Y83NBReMnx0gFzA8JImQACstCYWUplepDa9xprwwtmgEZUF0h/i5xSA625zB/I37EtrswSST6OXxwaaIJQ=="
-		},
-		"node_modules/hasown": {
-			"version": "2.0.2",
-			"resolved": "https://registry.npmjs.org/hasown/-/hasown-2.0.2.tgz",
-			"integrity": "sha512-0hJU9SCPvmMzIBdZFqNPXWa6dqh7WdH0cII9y+CyS8rG3nL48Bclra9HmKhVVUHyPWNH5Y7xDwAB7bfgSjkUMQ==",
-			"license": "MIT",
-			"dependencies": {
-				"function-bind": "^1.1.2"
-			},
-			"engines": {
-				"node": ">= 0.4"
-			}
-		},
-		"node_modules/http-errors": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/http-errors/-/http-errors-2.0.0.tgz",
-			"integrity": "sha512-FtwrG/euBzaEjYeRqOgly7G0qviiXoJWnvEH2Z1plBdXgbyjv34pHTSb9zoeHMyDy33+DWy5Wt9Wo+TURtOYSQ==",
-			"license": "MIT",
-			"dependencies": {
-				"depd": "2.0.0",
-				"inherits": "2.0.4",
-				"setprototypeof": "1.2.0",
-				"statuses": "2.0.1",
-				"toidentifier": "1.0.1"
-			},
-			"engines": {
-				"node": ">= 0.8"
-			}
-		},
-		"node_modules/https-proxy-agent": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/https-proxy-agent/-/https-proxy-agent-5.0.1.tgz",
-			"integrity": "sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA==",
-			"dependencies": {
-				"agent-base": "6",
-				"debug": "4"
-			},
-			"engines": {
-				"node": ">= 6"
-			}
-		},
-		"node_modules/https-proxy-agent/node_modules/debug": {
-			"version": "4.3.4",
-			"resolved": "https://registry.npmjs.org/debug/-/debug-4.3.4.tgz",
-			"integrity": "sha512-PRWFHuSU3eDtQJPvnNY7Jcket1j0t5OuOsFzPPzsekD52Zl8qUfFIPEiswXqIvHWGVHOgX+7G/vCNNhehwxfkQ==",
-			"dependencies": {
-				"ms": "2.1.2"
-			},
-			"engines": {
-				"node": ">=6.0"
-			},
-			"peerDependenciesMeta": {
-				"supports-color": {
-					"optional": true
-				}
-			}
-		},
-		"node_modules/https-proxy-agent/node_modules/ms": {
-			"version": "2.1.2",
-			"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.2.tgz",
-			"integrity": "sha512-sGkPx+VjMtmA6MX27oA4FBFELFCZZ4S4XqeGOXCv68tT+jb3vk/RyaKWP0PTKyWtmLSM0b+adUTEvbs1PEaH2w=="
-		},
-		"node_modules/iconv-lite": {
-			"version": "0.4.24",
-			"resolved": "https://registry.npmjs.org/iconv-lite/-/iconv-lite-0.4.24.tgz",
-			"integrity": "sha512-v3MXnZAcvnywkTUEZomIActle7RXXeedOR31wwl7VlyoXO4Qi9arvSenNQWne1TcRwhCL1HwLI21bEqdpj8/rA==",
-			"license": "MIT",
-			"dependencies": {
-				"safer-buffer": ">= 2.1.2 < 3"
-			},
-			"engines": {
-				"node": ">=0.10.0"
-			}
-		},
-		"node_modules/ieee754": {
-			"version": "1.2.1",
-			"resolved": "https://registry.npmjs.org/ieee754/-/ieee754-1.2.1.tgz",
-			"integrity": "sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==",
-			"funding": [
-				{
-					"type": "github",
-					"url": "https://github.com/sponsors/feross"
-				},
-				{
-					"type": "patreon",
-					"url": "https://www.patreon.com/feross"
-				},
-				{
-					"type": "consulting",
-					"url": "https://feross.org/support"
-				}
-			],
-			"license": "BSD-3-Clause"
-		},
-		"node_modules/ignore-by-default": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/ignore-by-default/-/ignore-by-default-1.0.1.tgz",
-			"integrity": "sha512-Ius2VYcGNk7T90CppJqcIkS5ooHUZyIQK+ClZfMfMNFEF9VSE73Fq+906u/CWu92x4gzZMWOwfFYckPObzdEbA==",
-			"dev": true
-		},
-		"node_modules/inflight": {
-			"version": "1.0.6",
-			"resolved": "https://registry.npmjs.org/inflight/-/inflight-1.0.6.tgz",
-			"integrity": "sha512-k92I/b08q4wvFscXCLvqfsHCrjrF7yiXsQuIVvVE7N82W3+aqpzuUdBbfhWcy/FZR3/4IgflMgKLOsvPDrGCJA==",
-			"dependencies": {
-				"once": "^1.3.0",
-				"wrappy": "1"
-			}
-		},
-		"node_modules/inherits": {
-			"version": "2.0.4",
-			"resolved": "https://registry.npmjs.org/inherits/-/inherits-2.0.4.tgz",
-			"integrity": "sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ=="
-		},
-		"node_modules/ip-address": {
-			"version": "9.0.5",
-			"resolved": "https://registry.npmjs.org/ip-address/-/ip-address-9.0.5.tgz",
-			"integrity": "sha512-zHtQzGojZXTwZTHQqra+ETKd4Sn3vgi7uBmlPoXVWZqYvuKmtI0l/VZTjqGmJY9x88GGOaZ9+G9ES8hC4T4X8g==",
-			"license": "MIT",
-			"dependencies": {
-				"jsbn": "1.1.0",
-				"sprintf-js": "^1.1.3"
-			},
-			"engines": {
-				"node": ">= 12"
-			}
-		},
-		"node_modules/ipaddr.js": {
-			"version": "1.9.1",
-			"resolved": "https://registry.npmjs.org/ipaddr.js/-/ipaddr.js-1.9.1.tgz",
-			"integrity": "sha512-0KI/607xoxSToH7GjN1FfSbLoU0+btTicjsQSWQlh/hZykN8KpmMf7uYwPW3R+akZ6R/w18ZlXSHBYXiYUPO3g==",
-			"engines": {
-				"node": ">= 0.10"
-			}
-		},
-		"node_modules/is-binary-path": {
-			"version": "2.1.0",
-			"resolved": "https://registry.npmjs.org/is-binary-path/-/is-binary-path-2.1.0.tgz",
-			"integrity": "sha512-ZMERYes6pDydyuGidse7OsHxtbI7WVeUEozgR/g7rd0xUimYNlvZRE/K2MgZTjWy725IfelLeVcEM97mmtRGXw==",
-			"dev": true,
-			"dependencies": {
-				"binary-extensions": "^2.0.0"
-			},
-			"engines": {
-				"node": ">=8"
-			}
-		},
-		"node_modules/is-extglob": {
-			"version": "2.1.1",
-			"resolved": "https://registry.npmjs.org/is-extglob/-/is-extglob-2.1.1.tgz",
-			"integrity": "sha512-SbKbANkN603Vi4jEZv49LeVJMn4yGwsbzZworEoyEiutsN3nJYdbO36zfhGJ6QEDpOZIFkDtnq5JRxmvl3jsoQ==",
-			"dev": true,
-			"engines": {
-				"node": ">=0.10.0"
-			}
-		},
-		"node_modules/is-fullwidth-code-point": {
-			"version": "3.0.0",
-			"resolved": "https://registry.npmjs.org/is-fullwidth-code-point/-/is-fullwidth-code-point-3.0.0.tgz",
-			"integrity": "sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==",
-			"engines": {
-				"node": ">=8"
-			}
-		},
-		"node_modules/is-glob": {
-			"version": "4.0.3",
-			"resolved": "https://registry.npmjs.org/is-glob/-/is-glob-4.0.3.tgz",
-			"integrity": "sha512-xelSayHH36ZgE7ZWhli7pW34hNbNl8Ojv5KVmkJD4hBdD3th8Tfk9vYasLM+mXWOZhFkgZfxhLSnrwRr4elSSg==",
-			"dev": true,
-			"dependencies": {
-				"is-extglob": "^2.1.1"
-			},
-			"engines": {
-				"node": ">=0.10.0"
-			}
-		},
-		"node_modules/is-number": {
-			"version": "7.0.0",
-			"resolved": "https://registry.npmjs.org/is-number/-/is-number-7.0.0.tgz",
-			"integrity": "sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==",
-			"dev": true,
-			"license": "MIT",
-			"engines": {
-				"node": ">=0.12.0"
-			}
-		},
-		"node_modules/jsbn": {
-			"version": "1.1.0",
-			"resolved": "https://registry.npmjs.org/jsbn/-/jsbn-1.1.0.tgz",
-			"integrity": "sha512-4bYVV3aAMtDTTu4+xsDYa6sy9GyJ69/amsu9sYF2zqjiEoZA5xJi3BrfX3uY+/IekIu7MwdObdbDWpoZdBv3/A==",
-			"license": "MIT"
-		},
-		"node_modules/jsonwebtoken": {
-			"version": "9.0.2",
-			"resolved": "https://registry.npmjs.org/jsonwebtoken/-/jsonwebtoken-9.0.2.tgz",
-			"integrity": "sha512-PRp66vJ865SSqOlgqS8hujT5U4AOgMfhrwYIuIhfKaoSCZcirrmASQr8CX7cUg+RMih+hgznrjp99o+W4pJLHQ==",
-			"license": "MIT",
-			"dependencies": {
-				"jws": "^3.2.2",
-				"lodash.includes": "^4.3.0",
-				"lodash.isboolean": "^3.0.3",
-				"lodash.isinteger": "^4.0.4",
-				"lodash.isnumber": "^3.0.3",
-				"lodash.isplainobject": "^4.0.6",
-				"lodash.isstring": "^4.0.1",
-				"lodash.once": "^4.0.0",
-				"ms": "^2.1.1",
-				"semver": "^7.5.4"
-			},
-			"engines": {
-				"node": ">=12",
-				"npm": ">=6"
-			}
-		},
-		"node_modules/jsonwebtoken/node_modules/ms": {
-			"version": "2.1.3",
-			"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
-			"integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="
-		},
-		"node_modules/jwa": {
-			"version": "1.4.1",
-			"resolved": "https://registry.npmjs.org/jwa/-/jwa-1.4.1.tgz",
-			"integrity": "sha512-qiLX/xhEEFKUAJ6FiBMbes3w9ATzyk5W7Hvzpa/SLYdxNtng+gcurvrI7TbACjIXlsJyr05/S1oUhZrc63evQA==",
-			"dependencies": {
-				"buffer-equal-constant-time": "1.0.1",
-				"ecdsa-sig-formatter": "1.0.11",
-				"safe-buffer": "^5.0.1"
-			}
-		},
-		"node_modules/jws": {
-			"version": "3.2.2",
-			"resolved": "https://registry.npmjs.org/jws/-/jws-3.2.2.tgz",
-			"integrity": "sha512-YHlZCB6lMTllWDtSPHz/ZXTsi8S00usEV6v1tjq8tOUZzw7DpSDWVXjXDre6ed1w/pd495ODpHZYSdkRTsa0HA==",
-			"dependencies": {
-				"jwa": "^1.4.1",
-				"safe-buffer": "^5.0.1"
-			}
-		},
-		"node_modules/lodash.includes": {
-			"version": "4.3.0",
-			"resolved": "https://registry.npmjs.org/lodash.includes/-/lodash.includes-4.3.0.tgz",
-			"integrity": "sha512-W3Bx6mdkRTGtlJISOvVD/lbqjTlPPUDTMnlXZFnVwi9NKJ6tiAk6LVdlhZMm17VZisqhKcgzpO5Wz91PCt5b0w=="
-		},
-		"node_modules/lodash.isboolean": {
-			"version": "3.0.3",
-			"resolved": "https://registry.npmjs.org/lodash.isboolean/-/lodash.isboolean-3.0.3.tgz",
-			"integrity": "sha512-Bz5mupy2SVbPHURB98VAcw+aHh4vRV5IPNhILUCsOzRmsTmSQ17jIuqopAentWoehktxGd9e/hbIXq980/1QJg=="
-		},
-		"node_modules/lodash.isinteger": {
-			"version": "4.0.4",
-			"resolved": "https://registry.npmjs.org/lodash.isinteger/-/lodash.isinteger-4.0.4.tgz",
-			"integrity": "sha512-DBwtEWN2caHQ9/imiNeEA5ys1JoRtRfY3d7V9wkqtbycnAmTvRRmbHKDV4a0EYc678/dia0jrte4tjYwVBaZUA=="
-		},
-		"node_modules/lodash.isnumber": {
-			"version": "3.0.3",
-			"resolved": "https://registry.npmjs.org/lodash.isnumber/-/lodash.isnumber-3.0.3.tgz",
-			"integrity": "sha512-QYqzpfwO3/CWf3XP+Z+tkQsfaLL/EnUlXWVkIk5FUPc4sBdTehEqZONuyRt2P67PXAk+NXmTBcc97zw9t1FQrw=="
-		},
-		"node_modules/lodash.isplainobject": {
-			"version": "4.0.6",
-			"resolved": "https://registry.npmjs.org/lodash.isplainobject/-/lodash.isplainobject-4.0.6.tgz",
-			"integrity": "sha512-oSXzaWypCMHkPC3NvBEaPHf0KsA5mvPrOPgQWDsbg8n7orZ290M0BmC/jgRZ4vcJ6DTAhjrsSYgdsW/F+MFOBA=="
-		},
-		"node_modules/lodash.isstring": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/lodash.isstring/-/lodash.isstring-4.0.1.tgz",
-			"integrity": "sha512-0wJxfxH1wgO3GrbuP+dTTk7op+6L41QCXbGINEmD+ny/G/eCqGzxyCsh7159S+mgDDcoarnBw6PC1PS5+wUGgw=="
-		},
-		"node_modules/lodash.once": {
-			"version": "4.1.1",
-			"resolved": "https://registry.npmjs.org/lodash.once/-/lodash.once-4.1.1.tgz",
-			"integrity": "sha512-Sb487aTOCr9drQVL8pIxOzVhafOjZN9UU54hiN8PU3uAiSV7lx1yYNpbNmex2PK6dSJoNTSJUUswT651yww3Mg=="
-		},
-		"node_modules/make-dir": {
-			"version": "3.1.0",
-			"resolved": "https://registry.npmjs.org/make-dir/-/make-dir-3.1.0.tgz",
-			"integrity": "sha512-g3FeP20LNwhALb/6Cz6Dd4F2ngze0jz7tbzrD2wAV+o9FeNHe4rL+yK2md0J/fiSf1sa1ADhXqi5+oVwOM/eGw==",
-			"dependencies": {
-				"semver": "^6.0.0"
-			},
-			"engines": {
-				"node": ">=8"
-			},
-			"funding": {
-				"url": "https://github.com/sponsors/sindresorhus"
-			}
-		},
-		"node_modules/make-dir/node_modules/semver": {
-			"version": "6.3.1",
-			"resolved": "https://registry.npmjs.org/semver/-/semver-6.3.1.tgz",
-			"integrity": "sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA==",
-			"license": "ISC",
-			"bin": {
-				"semver": "bin/semver.js"
-			}
-		},
-		"node_modules/math-intrinsics": {
-			"version": "1.1.0",
-			"resolved": "https://registry.npmjs.org/math-intrinsics/-/math-intrinsics-1.1.0.tgz",
-			"integrity": "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.4"
-			}
-		},
-		"node_modules/media-typer": {
-			"version": "0.3.0",
-			"resolved": "https://registry.npmjs.org/media-typer/-/media-typer-0.3.0.tgz",
-			"integrity": "sha512-dq+qelQ9akHpcOl/gUVRTxVIOkAJ1wR3QAvb4RsVjS8oVoFjDGTc679wJYmUmknUF5HwMLOgb5O+a3KxfWapPQ==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.6"
-			}
-		},
-		"node_modules/memory-pager": {
-			"version": "1.5.0",
-			"resolved": "https://registry.npmjs.org/memory-pager/-/memory-pager-1.5.0.tgz",
-			"integrity": "sha512-ZS4Bp4r/Zoeq6+NLJpP+0Zzm0pR8whtGPf1XExKLJBAczGMnSi3It14OiNCStjQjM6NU1okjQGSxgEZN8eBYKg==",
-			"license": "MIT",
-			"optional": true
-		},
-		"node_modules/merge-descriptors": {
-			"version": "1.0.3",
-			"resolved": "https://registry.npmjs.org/merge-descriptors/-/merge-descriptors-1.0.3.tgz",
-			"integrity": "sha512-gaNvAS7TZ897/rVaZ0nMtAyxNyi/pdbjbAwUpFQpN70GqnVfOiXpeUUMKRBmzXaSQ8DdTX4/0ms62r2K+hE6mQ==",
-			"license": "MIT",
-			"funding": {
-				"url": "https://github.com/sponsors/sindresorhus"
-			}
-		},
-		"node_modules/methods": {
-			"version": "1.1.2",
-			"resolved": "https://registry.npmjs.org/methods/-/methods-1.1.2.tgz",
-			"integrity": "sha512-iclAHeNqNm68zFtnZ0e+1L2yUIdvzNoauKU4WBA3VvH/vPFieF7qfRlwUZU+DA9P9bPXIS90ulxoUoCH23sV2w==",
-			"engines": {
-				"node": ">= 0.6"
-			}
-		},
-		"node_modules/mime": {
-			"version": "1.6.0",
-			"resolved": "https://registry.npmjs.org/mime/-/mime-1.6.0.tgz",
-			"integrity": "sha512-x0Vn8spI+wuJ1O6S7gnbaQg8Pxh4NNHb7KSINmEWKiPE4RKOplvijn+NkmYmmRgP68mc70j2EbeTFRsrswaQeg==",
-			"license": "MIT",
-			"bin": {
-				"mime": "cli.js"
-			},
-			"engines": {
-				"node": ">=4"
-			}
-		},
-		"node_modules/mime-db": {
-			"version": "1.52.0",
-			"resolved": "https://registry.npmjs.org/mime-db/-/mime-db-1.52.0.tgz",
-			"integrity": "sha512-sPU4uV7dYlvtWJxwwxHD0PuihVNiE7TyAbQ5SWxDCB9mUYvOgroQOwYQQOKPJ8CIbE+1ETVlOoK1UC2nU3gYvg==",
-			"engines": {
-				"node": ">= 0.6"
-			}
-		},
-		"node_modules/mime-types": {
-			"version": "2.1.35",
-			"resolved": "https://registry.npmjs.org/mime-types/-/mime-types-2.1.35.tgz",
-			"integrity": "sha512-ZDY+bPm5zTTF+YpCrAU9nK0UgICYPT0QtT1NZWFv4s++TNkcgVaT0g6+4R2uI4MjQjzysHB1zxuWL50hzaeXiw==",
-			"dependencies": {
-				"mime-db": "1.52.0"
-			},
-			"engines": {
-				"node": ">= 0.6"
-			}
-		},
-		"node_modules/minimatch": {
-			"version": "3.1.2",
-			"resolved": "https://registry.npmjs.org/minimatch/-/minimatch-3.1.2.tgz",
-			"integrity": "sha512-J7p63hRiAjw1NDEww1W7i37+ByIrOWO5XQQAzZ3VOcL0PNybwpfmV/N05zFAzwQ9USyEcX6t3UO+K5aqBQOIHw==",
-			"dependencies": {
-				"brace-expansion": "^1.1.7"
-			},
-			"engines": {
-				"node": "*"
-			}
-		},
-		"node_modules/minipass": {
-			"version": "3.1.6",
-			"resolved": "https://registry.npmjs.org/minipass/-/minipass-3.1.6.tgz",
-			"integrity": "sha512-rty5kpw9/z8SX9dmxblFA6edItUmwJgMeYDZRrwlIVN27i8gysGbznJwUggw2V/FVqFSDdWy040ZPS811DYAqQ==",
-			"dependencies": {
-				"yallist": "^4.0.0"
-			},
-			"engines": {
-				"node": ">=8"
-			}
-		},
-		"node_modules/minizlib": {
-			"version": "2.1.2",
-			"resolved": "https://registry.npmjs.org/minizlib/-/minizlib-2.1.2.tgz",
-			"integrity": "sha512-bAxsR8BVfj60DWXHE3u30oHzfl4G7khkSuPW+qvpd7jFRHm7dLxOjUk1EHACJ/hxLY8phGJ0YhYHZo7jil7Qdg==",
-			"dependencies": {
-				"minipass": "^3.0.0",
-				"yallist": "^4.0.0"
-			},
-			"engines": {
-				"node": ">= 8"
-			}
-		},
-		"node_modules/mkdirp": {
-			"version": "1.0.4",
-			"resolved": "https://registry.npmjs.org/mkdirp/-/mkdirp-1.0.4.tgz",
-			"integrity": "sha512-vVqVZQyf3WLx2Shd0qJ9xuvqgAyKPLAiqITEtqW0oIUjzo3PePDd6fW9iFz30ef7Ysp/oiWqbhszeGWW2T6Gzw==",
-			"bin": {
-				"mkdirp": "bin/cmd.js"
-			},
-			"engines": {
-				"node": ">=10"
-			}
-		},
-		"node_modules/mongodb": {
-			"version": "4.17.2",
-			"resolved": "https://registry.npmjs.org/mongodb/-/mongodb-4.17.2.tgz",
-			"integrity": "sha512-mLV7SEiov2LHleRJPMPrK2PMyhXFZt2UQLC4VD4pnth3jMjYKHhtqfwwkkvS/NXuo/Fp3vbhaNcXrIDaLRb9Tg==",
-			"license": "Apache-2.0",
-			"dependencies": {
-				"bson": "^4.7.2",
-				"mongodb-connection-string-url": "^2.6.0",
-				"socks": "^2.7.1"
-			},
-			"engines": {
-				"node": ">=12.9.0"
-			},
-			"optionalDependencies": {
-				"@aws-sdk/credential-providers": "^3.186.0",
-				"@mongodb-js/saslprep": "^1.1.0"
-			}
-		},
-		"node_modules/mongodb-connection-string-url": {
-			"version": "2.6.0",
-			"resolved": "https://registry.npmjs.org/mongodb-connection-string-url/-/mongodb-connection-string-url-2.6.0.tgz",
-			"integrity": "sha512-WvTZlI9ab0QYtTYnuMLgobULWhokRjtC7db9LtcVfJ+Hsnyr5eo6ZtNAt3Ly24XZScGMelOcGtm7lSn0332tPQ==",
-			"license": "Apache-2.0",
-			"dependencies": {
-				"@types/whatwg-url": "^8.2.1",
-				"whatwg-url": "^11.0.0"
-			}
-		},
-		"node_modules/ms": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/ms/-/ms-2.0.0.tgz",
-			"integrity": "sha512-Tpp60P6IUJDTuOq/5Z8cdskzJujfwqfOTkrwIwj7IRISpnkJnT6SyJ4PCPnGMoFjC9ddhal5KVIYtAt97ix05A==",
-			"license": "MIT"
-		},
-		"node_modules/negotiator": {
-			"version": "0.6.3",
-			"resolved": "https://registry.npmjs.org/negotiator/-/negotiator-0.6.3.tgz",
-			"integrity": "sha512-+EUsqGPLsM+j/zdChZjsnX51g4XrHFOIXwfnCVPGlQk/k5giakcKsuxCObBRu6DSm9opw/O6slWbJdghQM4bBg==",
-			"engines": {
-				"node": ">= 0.6"
-			}
-		},
-		"node_modules/node-addon-api": {
-			"version": "3.2.1",
-			"resolved": "https://registry.npmjs.org/node-addon-api/-/node-addon-api-3.2.1.tgz",
-			"integrity": "sha512-mmcei9JghVNDYydghQmeDX8KoAm0FAiYyIcUt/N4nhyAipB17pllZQDOJD2fotxABnt4Mdz+dKTO7eftLg4d0A=="
-		},
-		"node_modules/node-fetch": {
-			"version": "2.6.7",
-			"resolved": "https://registry.npmjs.org/node-fetch/-/node-fetch-2.6.7.tgz",
-			"integrity": "sha512-ZjMPFEfVx5j+y2yF35Kzx5sF7kDzxuDj6ziH4FFbOp87zKDZNx8yExJIb05OGF4Nlt9IHFIMBkRl41VdvcNdbQ==",
-			"dependencies": {
-				"whatwg-url": "^5.0.0"
-			},
-			"engines": {
-				"node": "4.x || >=6.0.0"
-			},
-			"peerDependencies": {
-				"encoding": "^0.1.0"
-			},
-			"peerDependenciesMeta": {
-				"encoding": {
-					"optional": true
-				}
-			}
-		},
-		"node_modules/node-fetch/node_modules/tr46": {
-			"version": "0.0.3",
-			"resolved": "https://registry.npmjs.org/tr46/-/tr46-0.0.3.tgz",
-			"integrity": "sha1-gYT9NH2snNwYWZLzpmIuFLnZq2o="
-		},
-		"node_modules/node-fetch/node_modules/webidl-conversions": {
-			"version": "3.0.1",
-			"resolved": "https://registry.npmjs.org/webidl-conversions/-/webidl-conversions-3.0.1.tgz",
-			"integrity": "sha1-JFNCdeKnvGvnvIZhHMFq4KVlSHE="
-		},
-		"node_modules/node-fetch/node_modules/whatwg-url": {
-			"version": "5.0.0",
-			"resolved": "https://registry.npmjs.org/whatwg-url/-/whatwg-url-5.0.0.tgz",
-			"integrity": "sha1-lmRU6HZUYuN2RNNib2dCzotwll0=",
-			"dependencies": {
-				"tr46": "~0.0.3",
-				"webidl-conversions": "^3.0.0"
-			}
-		},
-		"node_modules/nodemon": {
-			"version": "3.1.9",
-			"resolved": "https://registry.npmjs.org/nodemon/-/nodemon-3.1.9.tgz",
-			"integrity": "sha512-hdr1oIb2p6ZSxu3PB2JWWYS7ZQ0qvaZsc3hK8DR8f02kRzc8rjYmxAIvdz+aYC+8F2IjNaB7HMcSDg8nQpJxyg==",
-			"dev": true,
-			"license": "MIT",
-			"dependencies": {
-				"chokidar": "^3.5.2",
-				"debug": "^4",
-				"ignore-by-default": "^1.0.1",
-				"minimatch": "^3.1.2",
-				"pstree.remy": "^1.1.8",
-				"semver": "^7.5.3",
-				"simple-update-notifier": "^2.0.0",
-				"supports-color": "^5.5.0",
-				"touch": "^3.1.0",
-				"undefsafe": "^2.0.5"
-			},
-			"bin": {
-				"nodemon": "bin/nodemon.js"
-			},
-			"engines": {
-				"node": ">=10"
-			},
-			"funding": {
-				"type": "opencollective",
-				"url": "https://opencollective.com/nodemon"
-			}
-		},
-		"node_modules/nodemon/node_modules/debug": {
-			"version": "4.4.0",
-			"resolved": "https://registry.npmjs.org/debug/-/debug-4.4.0.tgz",
-			"integrity": "sha512-6WTZ/IxCY/T6BALoZHaE4ctp9xm+Z5kY/pzYaCHRFeyVhojxlrm+46y68HA6hr0TcwEssoxNiDEUJQjfPZ/RYA==",
-			"dev": true,
-			"license": "MIT",
-			"dependencies": {
-				"ms": "^2.1.3"
-			},
-			"engines": {
-				"node": ">=6.0"
-			},
-			"peerDependenciesMeta": {
-				"supports-color": {
-					"optional": true
-				}
-			}
-		},
-		"node_modules/nodemon/node_modules/ms": {
-			"version": "2.1.3",
-			"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
-			"integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
-			"dev": true,
-			"license": "MIT"
-		},
-		"node_modules/nopt": {
-			"version": "5.0.0",
-			"resolved": "https://registry.npmjs.org/nopt/-/nopt-5.0.0.tgz",
-			"integrity": "sha512-Tbj67rffqceeLpcRXrT7vKAN8CwfPeIBgM7E6iBkmKLV7bEMwpGgYLGv0jACUsECaa/vuxP0IjEont6umdMgtQ==",
-			"dependencies": {
-				"abbrev": "1"
-			},
-			"bin": {
-				"nopt": "bin/nopt.js"
-			},
-			"engines": {
-				"node": ">=6"
-			}
-		},
-		"node_modules/normalize-path": {
-			"version": "3.0.0",
-			"resolved": "https://registry.npmjs.org/normalize-path/-/normalize-path-3.0.0.tgz",
-			"integrity": "sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA==",
-			"dev": true,
-			"engines": {
-				"node": ">=0.10.0"
-			}
-		},
-		"node_modules/npmlog": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/npmlog/-/npmlog-5.0.1.tgz",
-			"integrity": "sha512-AqZtDUWOMKs1G/8lwylVjrdYgqA4d9nu8hc+0gzRxlDb1I10+FHBGMXs6aiQHFdCUUlqH99MUMuLfzWDNDtfxw==",
-			"dependencies": {
-				"are-we-there-yet": "^2.0.0",
-				"console-control-strings": "^1.1.0",
-				"gauge": "^3.0.0",
-				"set-blocking": "^2.0.0"
-			}
-		},
-		"node_modules/object-assign": {
-			"version": "4.1.1",
-			"resolved": "https://registry.npmjs.org/object-assign/-/object-assign-4.1.1.tgz",
-			"integrity": "sha512-rJgTQnkUnH1sFw8yT6VSU3zD3sWmu6sZhIseY8VX+GRu3P6F7Fu+JNDoXfklElbLJSnc3FUQHVe4cU5hj+BcUg==",
-			"engines": {
-				"node": ">=0.10.0"
-			}
-		},
-		"node_modules/object-inspect": {
-			"version": "1.13.4",
-			"resolved": "https://registry.npmjs.org/object-inspect/-/object-inspect-1.13.4.tgz",
-			"integrity": "sha512-W67iLl4J2EXEGTbfeHCffrjDfitvLANg0UlX3wFUUSTx92KXRFegMHUVgSqE+wvhAbi4WqjGg9czysTV2Epbew==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.4"
-			},
-			"funding": {
-				"url": "https://github.com/sponsors/ljharb"
-			}
-		},
-		"node_modules/on-finished": {
-			"version": "2.4.1",
-			"resolved": "https://registry.npmjs.org/on-finished/-/on-finished-2.4.1.tgz",
-			"integrity": "sha512-oVlzkg3ENAhCk2zdv7IJwd/QUD4z2RxRwpkcGY8psCVcCYZNq4wYnVWALHM+brtuJjePWiYF/ClmuDr8Ch5+kg==",
-			"license": "MIT",
-			"dependencies": {
-				"ee-first": "1.1.1"
-			},
-			"engines": {
-				"node": ">= 0.8"
-			}
-		},
-		"node_modules/once": {
-			"version": "1.4.0",
-			"resolved": "https://registry.npmjs.org/once/-/once-1.4.0.tgz",
-			"integrity": "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==",
-			"dependencies": {
-				"wrappy": "1"
-			}
-		},
-		"node_modules/parseurl": {
-			"version": "1.3.3",
-			"resolved": "https://registry.npmjs.org/parseurl/-/parseurl-1.3.3.tgz",
-			"integrity": "sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.8"
-			}
-		},
-		"node_modules/path-is-absolute": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/path-is-absolute/-/path-is-absolute-1.0.1.tgz",
-			"integrity": "sha512-AVbw3UJ2e9bq64vSaS9Am0fje1Pa8pbGqTTsmXfaIiMpnr5DlDhfJOuLj9Sf95ZPVDAUerDfEk88MPmPe7UCQg==",
-			"engines": {
-				"node": ">=0.10.0"
-			}
-		},
-		"node_modules/path-to-regexp": {
-			"version": "0.1.12",
-			"resolved": "https://registry.npmjs.org/path-to-regexp/-/path-to-regexp-0.1.12.tgz",
-			"integrity": "sha512-RA1GjUVMnvYFxuqovrEqZoxxW5NUZqbwKtYz/Tt7nXerk0LbLblQmrsgdeOxV5SFHf0UDggjS/bSeOZwt1pmEQ==",
-			"license": "MIT"
-		},
-		"node_modules/picomatch": {
-			"version": "2.3.1",
-			"resolved": "https://registry.npmjs.org/picomatch/-/picomatch-2.3.1.tgz",
-			"integrity": "sha512-JU3teHTNjmE2VCGFzuY8EXzCDVwEqB2a8fsIvwaStHhAWJEeVd1o1QD80CU6+ZdEXXSLbSsuLwJjkCBWqRQUVA==",
-			"dev": true,
-			"engines": {
-				"node": ">=8.6"
-			},
-			"funding": {
-				"url": "https://github.com/sponsors/jonschlinkert"
-			}
-		},
-		"node_modules/proxy-addr": {
-			"version": "2.0.7",
-			"resolved": "https://registry.npmjs.org/proxy-addr/-/proxy-addr-2.0.7.tgz",
-			"integrity": "sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg==",
-			"dependencies": {
-				"forwarded": "0.2.0",
-				"ipaddr.js": "1.9.1"
-			},
-			"engines": {
-				"node": ">= 0.10"
-			}
-		},
-		"node_modules/pstree.remy": {
-			"version": "1.1.8",
-			"resolved": "https://registry.npmjs.org/pstree.remy/-/pstree.remy-1.1.8.tgz",
-			"integrity": "sha512-77DZwxQmxKnu3aR542U+X8FypNzbfJ+C5XQDk3uWjWxn6151aIMGthWYRXTqT1E5oJvg+ljaa2OJi+VfvCOQ8w==",
-			"dev": true
-		},
-		"node_modules/punycode": {
-			"version": "2.3.1",
-			"resolved": "https://registry.npmjs.org/punycode/-/punycode-2.3.1.tgz",
-			"integrity": "sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==",
-			"license": "MIT",
-			"engines": {
-				"node": ">=6"
-			}
-		},
-		"node_modules/qs": {
-			"version": "6.13.0",
-			"resolved": "https://registry.npmjs.org/qs/-/qs-6.13.0.tgz",
-			"integrity": "sha512-+38qI9SOr8tfZ4QmJNplMUxqjbe7LKvvZgWdExBOmd+egZTtjLB67Gu0HRX3u/XOq7UU2Nx6nsjvS16Z9uwfpg==",
-			"license": "BSD-3-Clause",
-			"dependencies": {
-				"side-channel": "^1.0.6"
-			},
-			"engines": {
-				"node": ">=0.6"
-			},
-			"funding": {
-				"url": "https://github.com/sponsors/ljharb"
-			}
-		},
-		"node_modules/range-parser": {
-			"version": "1.2.1",
-			"resolved": "https://registry.npmjs.org/range-parser/-/range-parser-1.2.1.tgz",
-			"integrity": "sha512-Hrgsx+orqoygnmhFbKaHE6c296J+HTAQXoxEF6gNupROmmGJRoyzfG3ccAveqCBrwr/2yxQ5BVd/GTl5agOwSg==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.6"
-			}
-		},
-		"node_modules/raw-body": {
-			"version": "2.5.2",
-			"resolved": "https://registry.npmjs.org/raw-body/-/raw-body-2.5.2.tgz",
-			"integrity": "sha512-8zGqypfENjCIqGhgXToC8aB2r7YrBX+AQAfIPs/Mlk+BtPTztOvTS01NRW/3Eh60J+a48lt8qsCzirQ6loCVfA==",
-			"license": "MIT",
-			"dependencies": {
-				"bytes": "3.1.2",
-				"http-errors": "2.0.0",
-				"iconv-lite": "0.4.24",
-				"unpipe": "1.0.0"
-			},
-			"engines": {
-				"node": ">= 0.8"
-			}
-		},
-		"node_modules/readable-stream": {
-			"version": "3.6.0",
-			"resolved": "https://registry.npmjs.org/readable-stream/-/readable-stream-3.6.0.tgz",
-			"integrity": "sha512-BViHy7LKeTz4oNnkcLJ+lVSL6vpiFeX6/d3oSH8zCW7UxP2onchk+vTGB143xuFjHS3deTgkKoXXymXqymiIdA==",
-			"dependencies": {
-				"inherits": "^2.0.3",
-				"string_decoder": "^1.1.1",
-				"util-deprecate": "^1.0.1"
-			},
-			"engines": {
-				"node": ">= 6"
-			}
-		},
-		"node_modules/readdirp": {
-			"version": "3.6.0",
-			"resolved": "https://registry.npmjs.org/readdirp/-/readdirp-3.6.0.tgz",
-			"integrity": "sha512-hOS089on8RduqdbhvQ5Z37A0ESjsqz6qnRcffsMU3495FuTdqSm+7bhJ29JvIOsBDEEnan5DPu9t3To9VRlMzA==",
-			"dev": true,
-			"dependencies": {
-				"picomatch": "^2.2.1"
-			},
-			"engines": {
-				"node": ">=8.10.0"
-			}
-		},
-		"node_modules/rimraf": {
-			"version": "3.0.2",
-			"resolved": "https://registry.npmjs.org/rimraf/-/rimraf-3.0.2.tgz",
-			"integrity": "sha512-JZkJMZkAGFFPP2YqXZXPbMlMBgsxzE8ILs4lMIX/2o0L9UBw9O/Y3o6wFw/i9YLapcUJWwqbi3kdxIPdC62TIA==",
-			"dependencies": {
-				"glob": "^7.1.3"
-			},
-			"bin": {
-				"rimraf": "bin.js"
-			},
-			"funding": {
-				"url": "https://github.com/sponsors/isaacs"
-			}
-		},
-		"node_modules/safe-buffer": {
-			"version": "5.2.1",
-			"resolved": "https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.2.1.tgz",
-			"integrity": "sha512-rp3So07KcdmmKbGvgaNxQSJr7bGVSVk5S9Eq1F+ppbRo70+YeaDxkw5Dd8NPN+GD6bjnYm2VuPuCXmpuYvmCXQ==",
-			"funding": [
-				{
-					"type": "github",
-					"url": "https://github.com/sponsors/feross"
-				},
-				{
-					"type": "patreon",
-					"url": "https://www.patreon.com/feross"
-				},
-				{
-					"type": "consulting",
-					"url": "https://feross.org/support"
-				}
-			]
-		},
-		"node_modules/safer-buffer": {
-			"version": "2.1.2",
-			"resolved": "https://registry.npmjs.org/safer-buffer/-/safer-buffer-2.1.2.tgz",
-			"integrity": "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==",
-			"license": "MIT"
-		},
-		"node_modules/semver": {
-			"version": "7.7.1",
-			"resolved": "https://registry.npmjs.org/semver/-/semver-7.7.1.tgz",
-			"integrity": "sha512-hlq8tAfn0m/61p4BVRcPzIGr6LKiMwo4VM6dGi6pt4qcRkmNzTcWq6eCEjEh+qXjkMDvPlOFFSGwQjoEa6gyMA==",
-			"license": "ISC",
-			"bin": {
-				"semver": "bin/semver.js"
-			},
-			"engines": {
-				"node": ">=10"
-			}
-		},
-		"node_modules/send": {
-			"version": "0.19.0",
-			"resolved": "https://registry.npmjs.org/send/-/send-0.19.0.tgz",
-			"integrity": "sha512-dW41u5VfLXu8SJh5bwRmyYUbAoSB3c9uQh6L8h/KtsFREPWpbX1lrljJo186Jc4nmci/sGUZ9a0a0J2zgfq2hw==",
-			"license": "MIT",
-			"dependencies": {
-				"debug": "2.6.9",
-				"depd": "2.0.0",
-				"destroy": "1.2.0",
-				"encodeurl": "~1.0.2",
-				"escape-html": "~1.0.3",
-				"etag": "~1.8.1",
-				"fresh": "0.5.2",
-				"http-errors": "2.0.0",
-				"mime": "1.6.0",
-				"ms": "2.1.3",
-				"on-finished": "2.4.1",
-				"range-parser": "~1.2.1",
-				"statuses": "2.0.1"
-			},
-			"engines": {
-				"node": ">= 0.8.0"
-			}
-		},
-		"node_modules/send/node_modules/encodeurl": {
-			"version": "1.0.2",
-			"resolved": "https://registry.npmjs.org/encodeurl/-/encodeurl-1.0.2.tgz",
-			"integrity": "sha512-TPJXq8JqFaVYm2CWmPvnP2Iyo4ZSM7/QKcSmuMLDObfpH5fi7RUGmd/rTDf+rut/saiDiQEeVTNgAmJEdAOx0w==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.8"
-			}
-		},
-		"node_modules/send/node_modules/ms": {
-			"version": "2.1.3",
-			"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
-			"integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
-			"license": "MIT"
-		},
-		"node_modules/serve-static": {
-			"version": "1.16.2",
-			"resolved": "https://registry.npmjs.org/serve-static/-/serve-static-1.16.2.tgz",
-			"integrity": "sha512-VqpjJZKadQB/PEbEwvFdO43Ax5dFBZ2UECszz8bQ7pi7wt//PWe1P6MN7eCnjsatYtBT6EuiClbjSWP2WrIoTw==",
-			"license": "MIT",
-			"dependencies": {
-				"encodeurl": "~2.0.0",
-				"escape-html": "~1.0.3",
-				"parseurl": "~1.3.3",
-				"send": "0.19.0"
-			},
-			"engines": {
-				"node": ">= 0.8.0"
-			}
-		},
-		"node_modules/set-blocking": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/set-blocking/-/set-blocking-2.0.0.tgz",
-			"integrity": "sha1-BF+XgtARrppoA93TgrJDkrPYkPc="
-		},
-		"node_modules/setprototypeof": {
-			"version": "1.2.0",
-			"resolved": "https://registry.npmjs.org/setprototypeof/-/setprototypeof-1.2.0.tgz",
-			"integrity": "sha512-E5LDX7Wrp85Kil5bhZv46j8jOeboKq5JMmYM3gVGdGH8xFpPWXUMsNrlODCrkoxMEeNi/XZIwuRvY4XNwYMJpw==",
-			"license": "ISC"
-		},
-		"node_modules/side-channel": {
-			"version": "1.1.0",
-			"resolved": "https://registry.npmjs.org/side-channel/-/side-channel-1.1.0.tgz",
-			"integrity": "sha512-ZX99e6tRweoUXqR+VBrslhda51Nh5MTQwou5tnUDgbtyM0dBgmhEDtWGP/xbKn6hqfPRHujUNwz5fy/wbbhnpw==",
-			"license": "MIT",
-			"dependencies": {
-				"es-errors": "^1.3.0",
-				"object-inspect": "^1.13.3",
-				"side-channel-list": "^1.0.0",
-				"side-channel-map": "^1.0.1",
-				"side-channel-weakmap": "^1.0.2"
-			},
-			"engines": {
-				"node": ">= 0.4"
-			},
-			"funding": {
-				"url": "https://github.com/sponsors/ljharb"
-			}
-		},
-		"node_modules/side-channel-list": {
-			"version": "1.0.0",
-			"resolved": "https://registry.npmjs.org/side-channel-list/-/side-channel-list-1.0.0.tgz",
-			"integrity": "sha512-FCLHtRD/gnpCiCHEiJLOwdmFP+wzCmDEkc9y7NsYxeF4u7Btsn1ZuwgwJGxImImHicJArLP4R0yX4c2KCrMrTA==",
-			"license": "MIT",
-			"dependencies": {
-				"es-errors": "^1.3.0",
-				"object-inspect": "^1.13.3"
-			},
-			"engines": {
-				"node": ">= 0.4"
-			},
-			"funding": {
-				"url": "https://github.com/sponsors/ljharb"
-			}
-		},
-		"node_modules/side-channel-map": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/side-channel-map/-/side-channel-map-1.0.1.tgz",
-			"integrity": "sha512-VCjCNfgMsby3tTdo02nbjtM/ewra6jPHmpThenkTYh8pG9ucZ/1P8So4u4FGBek/BjpOVsDCMoLA/iuBKIFXRA==",
-			"license": "MIT",
-			"dependencies": {
-				"call-bound": "^1.0.2",
-				"es-errors": "^1.3.0",
-				"get-intrinsic": "^1.2.5",
-				"object-inspect": "^1.13.3"
-			},
-			"engines": {
-				"node": ">= 0.4"
-			},
-			"funding": {
-				"url": "https://github.com/sponsors/ljharb"
-			}
-		},
-		"node_modules/side-channel-weakmap": {
-			"version": "1.0.2",
-			"resolved": "https://registry.npmjs.org/side-channel-weakmap/-/side-channel-weakmap-1.0.2.tgz",
-			"integrity": "sha512-WPS/HvHQTYnHisLo9McqBHOJk2FkHO/tlpvldyrnem4aeQp4hai3gythswg6p01oSoTl58rcpiFAjF2br2Ak2A==",
-			"license": "MIT",
-			"dependencies": {
-				"call-bound": "^1.0.2",
-				"es-errors": "^1.3.0",
-				"get-intrinsic": "^1.2.5",
-				"object-inspect": "^1.13.3",
-				"side-channel-map": "^1.0.1"
-			},
-			"engines": {
-				"node": ">= 0.4"
-			},
-			"funding": {
-				"url": "https://github.com/sponsors/ljharb"
-			}
-		},
-		"node_modules/signal-exit": {
-			"version": "3.0.7",
-			"resolved": "https://registry.npmjs.org/signal-exit/-/signal-exit-3.0.7.tgz",
-			"integrity": "sha512-wnD2ZE+l+SPC/uoS0vXeE9L1+0wuaMqKlfz9AMUo38JsyLSBWSFcHR1Rri62LZc12vLr1gb3jl7iwQhgwpAbGQ=="
-		},
-		"node_modules/simple-update-notifier": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/simple-update-notifier/-/simple-update-notifier-2.0.0.tgz",
-			"integrity": "sha512-a2B9Y0KlNXl9u/vsW6sTIu9vGEpfKu2wRV6l1H3XEas/0gUIzGzBoP/IouTcUQbm9JWZLH3COxyn03TYlFax6w==",
-			"dev": true,
-			"license": "MIT",
-			"dependencies": {
-				"semver": "^7.5.3"
-			},
-			"engines": {
-				"node": ">=10"
-			}
-		},
-		"node_modules/smart-buffer": {
-			"version": "4.2.0",
-			"resolved": "https://registry.npmjs.org/smart-buffer/-/smart-buffer-4.2.0.tgz",
-			"integrity": "sha512-94hK0Hh8rPqQl2xXc3HsaBoOXKV20MToPkcXvwbISWLEs+64sBq5kFgn2kJDHb1Pry9yrP0dxrCI9RRci7RXKg==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 6.0.0",
-				"npm": ">= 3.0.0"
-			}
-		},
-		"node_modules/socket.io": {
-			"version": "4.8.1",
-			"resolved": "https://registry.npmjs.org/socket.io/-/socket.io-4.8.1.tgz",
-			"integrity": "sha512-oZ7iUCxph8WYRHHcjBEc9unw3adt5CmSNlppj/5Q4k2RIrhl8Z5yY2Xr4j9zj0+wzVZ0bxmYoGSzKJnRl6A4yg==",
-			"license": "MIT",
-			"dependencies": {
-				"accepts": "~1.3.4",
-				"base64id": "~2.0.0",
-				"cors": "~2.8.5",
-				"debug": "~4.3.2",
-				"engine.io": "~6.6.0",
-				"socket.io-adapter": "~2.5.2",
-				"socket.io-parser": "~4.2.4"
-			},
-			"engines": {
-				"node": ">=10.2.0"
-			}
-		},
-		"node_modules/socket.io-adapter": {
-			"version": "2.5.5",
-			"resolved": "https://registry.npmjs.org/socket.io-adapter/-/socket.io-adapter-2.5.5.tgz",
-			"integrity": "sha512-eLDQas5dzPgOWCk9GuuJC2lBqItuhKI4uxGgo9aIV7MYbk2h9Q6uULEh8WBzThoI7l+qU9Ast9fVUmkqPP9wYg==",
-			"license": "MIT",
-			"dependencies": {
-				"debug": "~4.3.4",
-				"ws": "~8.17.1"
-			}
-		},
-		"node_modules/socket.io-adapter/node_modules/debug": {
-			"version": "4.3.7",
-			"resolved": "https://registry.npmjs.org/debug/-/debug-4.3.7.tgz",
-			"integrity": "sha512-Er2nc/H7RrMXZBFCEim6TCmMk02Z8vLC2Rbi1KEBggpo0fS6l0S1nnapwmIi3yW/+GOJap1Krg4w0Hg80oCqgQ==",
-			"license": "MIT",
-			"dependencies": {
-				"ms": "^2.1.3"
-			},
-			"engines": {
-				"node": ">=6.0"
-			},
-			"peerDependenciesMeta": {
-				"supports-color": {
-					"optional": true
-				}
-			}
-		},
-		"node_modules/socket.io-adapter/node_modules/ms": {
-			"version": "2.1.3",
-			"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
-			"integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
-			"license": "MIT"
-		},
-		"node_modules/socket.io-parser": {
-			"version": "4.2.4",
-			"resolved": "https://registry.npmjs.org/socket.io-parser/-/socket.io-parser-4.2.4.tgz",
-			"integrity": "sha512-/GbIKmo8ioc+NIWIhwdecY0ge+qVBSMdgxGygevmdHj24bsfgtCmcUUcQ5ZzcylGFHsN3k4HB4Cgkl96KVnuew==",
-			"license": "MIT",
-			"dependencies": {
-				"@socket.io/component-emitter": "~3.1.0",
-				"debug": "~4.3.1"
-			},
-			"engines": {
-				"node": ">=10.0.0"
-			}
-		},
-		"node_modules/socket.io-parser/node_modules/debug": {
-			"version": "4.3.7",
-			"resolved": "https://registry.npmjs.org/debug/-/debug-4.3.7.tgz",
-			"integrity": "sha512-Er2nc/H7RrMXZBFCEim6TCmMk02Z8vLC2Rbi1KEBggpo0fS6l0S1nnapwmIi3yW/+GOJap1Krg4w0Hg80oCqgQ==",
-			"license": "MIT",
-			"dependencies": {
-				"ms": "^2.1.3"
-			},
-			"engines": {
-				"node": ">=6.0"
-			},
-			"peerDependenciesMeta": {
-				"supports-color": {
-					"optional": true
-				}
-			}
-		},
-		"node_modules/socket.io-parser/node_modules/ms": {
-			"version": "2.1.3",
-			"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
-			"integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
-			"license": "MIT"
-		},
-		"node_modules/socket.io/node_modules/debug": {
-			"version": "4.3.4",
-			"resolved": "https://registry.npmjs.org/debug/-/debug-4.3.4.tgz",
-			"integrity": "sha512-PRWFHuSU3eDtQJPvnNY7Jcket1j0t5OuOsFzPPzsekD52Zl8qUfFIPEiswXqIvHWGVHOgX+7G/vCNNhehwxfkQ==",
-			"dependencies": {
-				"ms": "2.1.2"
-			},
-			"engines": {
-				"node": ">=6.0"
-			},
-			"peerDependenciesMeta": {
-				"supports-color": {
-					"optional": true
-				}
-			}
-		},
-		"node_modules/socket.io/node_modules/ms": {
-			"version": "2.1.2",
-			"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.2.tgz",
-			"integrity": "sha512-sGkPx+VjMtmA6MX27oA4FBFELFCZZ4S4XqeGOXCv68tT+jb3vk/RyaKWP0PTKyWtmLSM0b+adUTEvbs1PEaH2w=="
-		},
-		"node_modules/socks": {
-			"version": "2.8.4",
-			"resolved": "https://registry.npmjs.org/socks/-/socks-2.8.4.tgz",
-			"integrity": "sha512-D3YaD0aRxR3mEcqnidIs7ReYJFVzWdd6fXJYUM8ixcQcJRGTka/b3saV0KflYhyVJXKhb947GndU35SxYNResQ==",
-			"license": "MIT",
-			"dependencies": {
-				"ip-address": "^9.0.5",
-				"smart-buffer": "^4.2.0"
-			},
-			"engines": {
-				"node": ">= 10.0.0",
-				"npm": ">= 3.0.0"
-			}
-		},
-		"node_modules/sparse-bitfield": {
-			"version": "3.0.3",
-			"resolved": "https://registry.npmjs.org/sparse-bitfield/-/sparse-bitfield-3.0.3.tgz",
-			"integrity": "sha512-kvzhi7vqKTfkh0PZU+2D2PIllw2ymqJKujUcyPMd9Y75Nv4nPbGJZXNhxsgdQab2BmlDct1YnfQCguEvHr7VsQ==",
-			"license": "MIT",
-			"optional": true,
-			"dependencies": {
-				"memory-pager": "^1.0.2"
-			}
-		},
-		"node_modules/sprintf-js": {
-			"version": "1.1.3",
-			"resolved": "https://registry.npmjs.org/sprintf-js/-/sprintf-js-1.1.3.tgz",
-			"integrity": "sha512-Oo+0REFV59/rz3gfJNKQiBlwfHaSESl1pcGyABQsnnIfWOFt6JNj5gCog2U6MLZ//IGYD+nA8nI+mTShREReaA==",
-			"license": "BSD-3-Clause"
-		},
-		"node_modules/statuses": {
-			"version": "2.0.1",
-			"resolved": "https://registry.npmjs.org/statuses/-/statuses-2.0.1.tgz",
-			"integrity": "sha512-RwNA9Z/7PrK06rYLIzFMlaF+l73iwpzsqRIFgbMLbTcLD6cOao82TaWefPXQvB2fOC4AjuYSEndS7N/mTCbkdQ==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.8"
-			}
-		},
-		"node_modules/string_decoder": {
-			"version": "1.3.0",
-			"resolved": "https://registry.npmjs.org/string_decoder/-/string_decoder-1.3.0.tgz",
-			"integrity": "sha512-hkRX8U1WjJFd8LsDJ2yQ/wWWxaopEsABU1XfkM8A+j0+85JAGppt16cr1Whg6KIbb4okU6Mql6BOj+uup/wKeA==",
-			"dependencies": {
-				"safe-buffer": "~5.2.0"
-			}
-		},
-		"node_modules/string-width": {
-			"version": "4.2.3",
-			"resolved": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
-			"integrity": "sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g==",
-			"dependencies": {
-				"emoji-regex": "^8.0.0",
-				"is-fullwidth-code-point": "^3.0.0",
-				"strip-ansi": "^6.0.1"
-			},
-			"engines": {
-				"node": ">=8"
-			}
-		},
-		"node_modules/strip-ansi": {
-			"version": "6.0.1",
-			"resolved": "https://registry.npmjs.org/strip-ansi/-/strip-ansi-6.0.1.tgz",
-			"integrity": "sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==",
-			"dependencies": {
-				"ansi-regex": "^5.0.1"
-			},
-			"engines": {
-				"node": ">=8"
-			}
-		},
-		"node_modules/strnum": {
-			"version": "1.1.2",
-			"resolved": "https://registry.npmjs.org/strnum/-/strnum-1.1.2.tgz",
-			"integrity": "sha512-vrN+B7DBIoTTZjnPNewwhx6cBA/H+IS7rfW68n7XxC1y7uoiGQBxaKzqucGUgavX15dJgiGztLJ8vxuEzwqBdA==",
-			"funding": [
-				{
-					"type": "github",
-					"url": "https://github.com/sponsors/NaturalIntelligence"
-				}
-			],
-			"license": "MIT",
-			"optional": true
-		},
-		"node_modules/supports-color": {
-			"version": "5.5.0",
-			"resolved": "https://registry.npmjs.org/supports-color/-/supports-color-5.5.0.tgz",
-			"integrity": "sha512-QjVjwdXIt408MIiAqCX4oUKsgU2EqAGzs2Ppkm4aQYbjm+ZEWEcW4SfFNTr4uMNZma0ey4f5lgLrkB0aX0QMow==",
-			"dev": true,
-			"dependencies": {
-				"has-flag": "^3.0.0"
-			},
-			"engines": {
-				"node": ">=4"
-			}
-		},
-		"node_modules/tar": {
-			"version": "6.2.1",
-			"resolved": "https://registry.npmjs.org/tar/-/tar-6.2.1.tgz",
-			"integrity": "sha512-DZ4yORTwrbTj/7MZYq2w+/ZFdI6OZ/f9SFHR+71gIVUZhOQPHzVCLpvRnPgyaMpfWxxk/4ONva3GQSyNIKRv6A==",
-			"license": "ISC",
-			"dependencies": {
-				"chownr": "^2.0.0",
-				"fs-minipass": "^2.0.0",
-				"minipass": "^5.0.0",
-				"minizlib": "^2.1.1",
-				"mkdirp": "^1.0.3",
-				"yallist": "^4.0.0"
-			},
-			"engines": {
-				"node": ">=10"
-			}
-		},
-		"node_modules/tar/node_modules/minipass": {
-			"version": "5.0.0",
-			"resolved": "https://registry.npmjs.org/minipass/-/minipass-5.0.0.tgz",
-			"integrity": "sha512-3FnjYuehv9k6ovOEbyOswadCDPX1piCfhV8ncmYtHOjuPwylVWsghTLo7rabjC3Rx5xD4HDx8Wm1xnMF7S5qFQ==",
-			"license": "ISC",
-			"engines": {
-				"node": ">=8"
-			}
-		},
-		"node_modules/to-regex-range": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/to-regex-range/-/to-regex-range-5.0.1.tgz",
-			"integrity": "sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ==",
-			"dev": true,
-			"license": "MIT",
-			"dependencies": {
-				"is-number": "^7.0.0"
-			},
-			"engines": {
-				"node": ">=8.0"
-			}
-		},
-		"node_modules/toidentifier": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/toidentifier/-/toidentifier-1.0.1.tgz",
-			"integrity": "sha512-o5sSPKEkg/DIQNmH43V0/uerLrpzVedkUh8tGNvaeXpfpuwjKenlSox/2O/BTlZUtEe+JG7s5YhEz608PlAHRA==",
-			"license": "MIT",
-			"engines": {
-				"node": ">=0.6"
-			}
-		},
-		"node_modules/touch": {
-			"version": "3.1.0",
-			"resolved": "https://registry.npmjs.org/touch/-/touch-3.1.0.tgz",
-			"integrity": "sha512-WBx8Uy5TLtOSRtIq+M03/sKDrXCLHxwDcquSP2c43Le03/9serjQBIztjRz6FkJez9D/hleyAXTBGLwwZUw9lA==",
-			"dev": true,
-			"dependencies": {
-				"nopt": "~1.0.10"
-			},
-			"bin": {
-				"nodetouch": "bin/nodetouch.js"
-			}
-		},
-		"node_modules/touch/node_modules/nopt": {
-			"version": "1.0.10",
-			"resolved": "https://registry.npmjs.org/nopt/-/nopt-1.0.10.tgz",
-			"integrity": "sha512-NWmpvLSqUrgrAC9HCuxEvb+PSloHpqVu+FqcO4eeF2h5qYRhA7ev6KvelyQAKtegUbC6RypJnlEOhd8vloNKYg==",
-			"dev": true,
-			"dependencies": {
-				"abbrev": "1"
-			},
-			"bin": {
-				"nopt": "bin/nopt.js"
-			},
-			"engines": {
-				"node": "*"
-			}
-		},
-		"node_modules/tr46": {
-			"version": "3.0.0",
-			"resolved": "https://registry.npmjs.org/tr46/-/tr46-3.0.0.tgz",
-			"integrity": "sha512-l7FvfAHlcmulp8kr+flpQZmVwtu7nfRV7NZujtN0OqES8EL4O4e0qqzL0DC5gAvx/ZC/9lk6rhcUwYvkBnBnYA==",
-			"license": "MIT",
-			"dependencies": {
-				"punycode": "^2.1.1"
-			},
-			"engines": {
-				"node": ">=12"
-			}
-		},
-		"node_modules/tslib": {
-			"version": "2.8.1",
-			"resolved": "https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz",
-			"integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==",
-			"license": "0BSD",
-			"optional": true
-		},
-		"node_modules/type-is": {
-			"version": "1.6.18",
-			"resolved": "https://registry.npmjs.org/type-is/-/type-is-1.6.18.tgz",
-			"integrity": "sha512-TkRKr9sUTxEH8MdfuCSP7VizJyzRNMjj2J2do2Jr3Kym598JVdEksuzPQCnlFPW4ky9Q+iA+ma9BGm06XQBy8g==",
-			"license": "MIT",
-			"dependencies": {
-				"media-typer": "0.3.0",
-				"mime-types": "~2.1.24"
-			},
-			"engines": {
-				"node": ">= 0.6"
-			}
-		},
-		"node_modules/undefsafe": {
-			"version": "2.0.5",
-			"resolved": "https://registry.npmjs.org/undefsafe/-/undefsafe-2.0.5.tgz",
-			"integrity": "sha512-WxONCrssBM8TSPRqN5EmsjVrsv4A8X12J4ArBiiayv3DyyG3ZlIg6yysuuSYdZsVz3TKcTg2fd//Ujd4CHV1iA==",
-			"dev": true
-		},
-		"node_modules/unpipe": {
-			"version": "1.0.0",
-			"resolved": "https://registry.npmjs.org/unpipe/-/unpipe-1.0.0.tgz",
-			"integrity": "sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ==",
-			"license": "MIT",
-			"engines": {
-				"node": ">= 0.8"
-			}
-		},
-		"node_modules/util-deprecate": {
-			"version": "1.0.2",
-			"resolved": "https://registry.npmjs.org/util-deprecate/-/util-deprecate-1.0.2.tgz",
-			"integrity": "sha1-RQ1Nyfpw3nMnYvvS1KKJgUGaDM8="
-		},
-		"node_modules/utils-merge": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/utils-merge/-/utils-merge-1.0.1.tgz",
-			"integrity": "sha1-n5VxD1CiZ5R7LMwSR0HBAoQn5xM=",
-			"engines": {
-				"node": ">= 0.4.0"
-			}
-		},
-		"node_modules/uuid": {
-			"version": "8.3.2",
-			"resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-			"integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==",
-			"bin": {
-				"uuid": "dist/bin/uuid"
-			}
-		},
-		"node_modules/vary": {
-			"version": "1.1.2",
-			"resolved": "https://registry.npmjs.org/vary/-/vary-1.1.2.tgz",
-			"integrity": "sha1-IpnwLG3tMNSllhsLn3RSShj2NPw=",
-			"engines": {
-				"node": ">= 0.8"
-			}
-		},
-		"node_modules/webidl-conversions": {
-			"version": "7.0.0",
-			"resolved": "https://registry.npmjs.org/webidl-conversions/-/webidl-conversions-7.0.0.tgz",
-			"integrity": "sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g==",
-			"license": "BSD-2-Clause",
-			"engines": {
-				"node": ">=12"
-			}
-		},
-		"node_modules/whatwg-url": {
-			"version": "11.0.0",
-			"resolved": "https://registry.npmjs.org/whatwg-url/-/whatwg-url-11.0.0.tgz",
-			"integrity": "sha512-RKT8HExMpoYx4igMiVMY83lN6UeITKJlBQ+vR/8ZJ8OCdSiN3RwCq+9gH0+Xzj0+5IrM6i4j/6LuvzbZIQgEcQ==",
-			"license": "MIT",
-			"dependencies": {
-				"tr46": "^3.0.0",
-				"webidl-conversions": "^7.0.0"
-			},
-			"engines": {
-				"node": ">=12"
-			}
-		},
-		"node_modules/wide-align": {
-			"version": "1.1.5",
-			"resolved": "https://registry.npmjs.org/wide-align/-/wide-align-1.1.5.tgz",
-			"integrity": "sha512-eDMORYaPNZ4sQIuuYPDHdQvf4gyCF9rEEV/yPxGfwPkRodwEgiMUUXTx/dex+Me0wxx53S+NgUHaP7y3MGlDmg==",
-			"dependencies": {
-				"string-width": "^1.0.2 || 2 || 3 || 4"
-			}
-		},
-		"node_modules/wrappy": {
-			"version": "1.0.2",
-			"resolved": "https://registry.npmjs.org/wrappy/-/wrappy-1.0.2.tgz",
-			"integrity": "sha1-tSQ9jz7BqjXxNkYFvA0QNuMKtp8="
-		},
-		"node_modules/ws": {
-			"version": "8.17.1",
-			"resolved": "https://registry.npmjs.org/ws/-/ws-8.17.1.tgz",
-			"integrity": "sha512-6XQFvXTkbfUOZOKKILFG1PDK2NDQs4azKQl26T0YS5CxqWLgXajbPZ+h4gZekJyRqFU8pvnbAbbs/3TgRPy+GQ==",
-			"license": "MIT",
-			"engines": {
-				"node": ">=10.0.0"
-			},
-			"peerDependencies": {
-				"bufferutil": "^4.0.1",
-				"utf-8-validate": ">=5.0.2"
-			},
-			"peerDependenciesMeta": {
-				"bufferutil": {
-					"optional": true
-				},
-				"utf-8-validate": {
-					"optional": true
-				}
-			}
-		},
-		"node_modules/yallist": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/yallist/-/yallist-4.0.0.tgz",
-			"integrity": "sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A=="
-		}
-	},
-	"dependencies": {
-		"@aws-crypto/sha256-browser": {
-			"version": "5.2.0",
-			"resolved": "https://registry.npmjs.org/@aws-crypto/sha256-browser/-/sha256-browser-5.2.0.tgz",
-			"integrity": "sha512-AXfN/lGotSQwu6HNcEsIASo7kWXZ5HYWvfOmSNKDsEqC4OashTp8alTmaz+F7TC2L083SFv5RdB+qU3Vs1kZqw==",
-			"optional": true,
-			"requires": {
-				"@aws-crypto/sha256-js": "^5.2.0",
-				"@aws-crypto/supports-web-crypto": "^5.2.0",
-				"@aws-crypto/util": "^5.2.0",
-				"@aws-sdk/types": "^3.222.0",
-				"@aws-sdk/util-locate-window": "^3.0.0",
-				"@smithy/util-utf8": "^2.0.0",
-				"tslib": "^2.6.2"
-			},
-			"dependencies": {
-				"@smithy/is-array-buffer": {
-					"version": "2.2.0",
-					"resolved": "https://registry.npmjs.org/@smithy/is-array-buffer/-/is-array-buffer-2.2.0.tgz",
-					"integrity": "sha512-GGP3O9QFD24uGeAXYUjwSTXARoqpZykHadOmA8G5vfJPK0/DC67qa//0qvqrJzL1xc8WQWX7/yc7fwudjPHPhA==",
-					"optional": true,
-					"requires": {
-						"tslib": "^2.6.2"
-					}
-				},
-				"@smithy/util-buffer-from": {
-					"version": "2.2.0",
-					"resolved": "https://registry.npmjs.org/@smithy/util-buffer-from/-/util-buffer-from-2.2.0.tgz",
-					"integrity": "sha512-IJdWBbTcMQ6DA0gdNhh/BwrLkDR+ADW5Kr1aZmd4k3DIF6ezMV4R2NIAmT08wQJ3yUK82thHWmC/TnK/wpMMIA==",
-					"optional": true,
-					"requires": {
-						"@smithy/is-array-buffer": "^2.2.0",
-						"tslib": "^2.6.2"
-					}
-				},
-				"@smithy/util-utf8": {
-					"version": "2.3.0",
-					"resolved": "https://registry.npmjs.org/@smithy/util-utf8/-/util-utf8-2.3.0.tgz",
-					"integrity": "sha512-R8Rdn8Hy72KKcebgLiv8jQcQkXoLMOGGv5uI1/k0l+snqkOzQ1R0ChUBCxWMlBsFMekWjq0wRudIweFs7sKT5A==",
-					"optional": true,
-					"requires": {
-						"@smithy/util-buffer-from": "^2.2.0",
-						"tslib": "^2.6.2"
-					}
-				}
-			}
-		},
-		"@aws-crypto/sha256-js": {
-			"version": "5.2.0",
-			"resolved": "https://registry.npmjs.org/@aws-crypto/sha256-js/-/sha256-js-5.2.0.tgz",
-			"integrity": "sha512-FFQQyu7edu4ufvIZ+OadFpHHOt+eSTBaYaki44c+akjg7qZg9oOQeLlk77F6tSYqjDAFClrHJk9tMf0HdVyOvA==",
-			"optional": true,
-			"requires": {
-				"@aws-crypto/util": "^5.2.0",
-				"@aws-sdk/types": "^3.222.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-crypto/supports-web-crypto": {
-			"version": "5.2.0",
-			"resolved": "https://registry.npmjs.org/@aws-crypto/supports-web-crypto/-/supports-web-crypto-5.2.0.tgz",
-			"integrity": "sha512-iAvUotm021kM33eCdNfwIN//F77/IADDSs58i+MDaOqFrVjZo9bAal0NK7HurRuWLLpF1iLX7gbWrjHjeo+YFg==",
-			"optional": true,
-			"requires": {
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-crypto/util": {
-			"version": "5.2.0",
-			"resolved": "https://registry.npmjs.org/@aws-crypto/util/-/util-5.2.0.tgz",
-			"integrity": "sha512-4RkU9EsI6ZpBve5fseQlGNUWKMa1RLPQ1dnjnQoe07ldfIzcsGb5hC5W0Dm7u423KWzawlrpbjXBrXCEv9zazQ==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/types": "^3.222.0",
-				"@smithy/util-utf8": "^2.0.0",
-				"tslib": "^2.6.2"
-			},
-			"dependencies": {
-				"@smithy/is-array-buffer": {
-					"version": "2.2.0",
-					"resolved": "https://registry.npmjs.org/@smithy/is-array-buffer/-/is-array-buffer-2.2.0.tgz",
-					"integrity": "sha512-GGP3O9QFD24uGeAXYUjwSTXARoqpZykHadOmA8G5vfJPK0/DC67qa//0qvqrJzL1xc8WQWX7/yc7fwudjPHPhA==",
-					"optional": true,
-					"requires": {
-						"tslib": "^2.6.2"
-					}
-				},
-				"@smithy/util-buffer-from": {
-					"version": "2.2.0",
-					"resolved": "https://registry.npmjs.org/@smithy/util-buffer-from/-/util-buffer-from-2.2.0.tgz",
-					"integrity": "sha512-IJdWBbTcMQ6DA0gdNhh/BwrLkDR+ADW5Kr1aZmd4k3DIF6ezMV4R2NIAmT08wQJ3yUK82thHWmC/TnK/wpMMIA==",
-					"optional": true,
-					"requires": {
-						"@smithy/is-array-buffer": "^2.2.0",
-						"tslib": "^2.6.2"
-					}
-				},
-				"@smithy/util-utf8": {
-					"version": "2.3.0",
-					"resolved": "https://registry.npmjs.org/@smithy/util-utf8/-/util-utf8-2.3.0.tgz",
-					"integrity": "sha512-R8Rdn8Hy72KKcebgLiv8jQcQkXoLMOGGv5uI1/k0l+snqkOzQ1R0ChUBCxWMlBsFMekWjq0wRudIweFs7sKT5A==",
-					"optional": true,
-					"requires": {
-						"@smithy/util-buffer-from": "^2.2.0",
-						"tslib": "^2.6.2"
-					}
-				}
-			}
-		},
-		"@aws-sdk/client-cognito-identity": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/client-cognito-identity/-/client-cognito-identity-3.758.0.tgz",
-			"integrity": "sha512-8bOXVYtf/0OUN0jXTIHLv3V0TAS6kvvCRAy7nmiL/fDde0O+ChW1WZU7CVPAOtFEpFCdKskDcxFspM7m1k6qyg==",
-			"optional": true,
-			"requires": {
-				"@aws-crypto/sha256-browser": "5.2.0",
-				"@aws-crypto/sha256-js": "5.2.0",
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/credential-provider-node": "3.758.0",
-				"@aws-sdk/middleware-host-header": "3.734.0",
-				"@aws-sdk/middleware-logger": "3.734.0",
-				"@aws-sdk/middleware-recursion-detection": "3.734.0",
-				"@aws-sdk/middleware-user-agent": "3.758.0",
-				"@aws-sdk/region-config-resolver": "3.734.0",
-				"@aws-sdk/types": "3.734.0",
-				"@aws-sdk/util-endpoints": "3.743.0",
-				"@aws-sdk/util-user-agent-browser": "3.734.0",
-				"@aws-sdk/util-user-agent-node": "3.758.0",
-				"@smithy/config-resolver": "^4.0.1",
-				"@smithy/core": "^3.1.5",
-				"@smithy/fetch-http-handler": "^5.0.1",
-				"@smithy/hash-node": "^4.0.1",
-				"@smithy/invalid-dependency": "^4.0.1",
-				"@smithy/middleware-content-length": "^4.0.1",
-				"@smithy/middleware-endpoint": "^4.0.6",
-				"@smithy/middleware-retry": "^4.0.7",
-				"@smithy/middleware-serde": "^4.0.2",
-				"@smithy/middleware-stack": "^4.0.1",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/node-http-handler": "^4.0.3",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"@smithy/url-parser": "^4.0.1",
-				"@smithy/util-base64": "^4.0.0",
-				"@smithy/util-body-length-browser": "^4.0.0",
-				"@smithy/util-body-length-node": "^4.0.0",
-				"@smithy/util-defaults-mode-browser": "^4.0.7",
-				"@smithy/util-defaults-mode-node": "^4.0.7",
-				"@smithy/util-endpoints": "^3.0.1",
-				"@smithy/util-middleware": "^4.0.1",
-				"@smithy/util-retry": "^4.0.1",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/client-sso": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/client-sso/-/client-sso-3.758.0.tgz",
-			"integrity": "sha512-BoGO6IIWrLyLxQG6txJw6RT2urmbtlwfggapNCrNPyYjlXpzTSJhBYjndg7TpDATFd0SXL0zm8y/tXsUXNkdYQ==",
-			"optional": true,
-			"requires": {
-				"@aws-crypto/sha256-browser": "5.2.0",
-				"@aws-crypto/sha256-js": "5.2.0",
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/middleware-host-header": "3.734.0",
-				"@aws-sdk/middleware-logger": "3.734.0",
-				"@aws-sdk/middleware-recursion-detection": "3.734.0",
-				"@aws-sdk/middleware-user-agent": "3.758.0",
-				"@aws-sdk/region-config-resolver": "3.734.0",
-				"@aws-sdk/types": "3.734.0",
-				"@aws-sdk/util-endpoints": "3.743.0",
-				"@aws-sdk/util-user-agent-browser": "3.734.0",
-				"@aws-sdk/util-user-agent-node": "3.758.0",
-				"@smithy/config-resolver": "^4.0.1",
-				"@smithy/core": "^3.1.5",
-				"@smithy/fetch-http-handler": "^5.0.1",
-				"@smithy/hash-node": "^4.0.1",
-				"@smithy/invalid-dependency": "^4.0.1",
-				"@smithy/middleware-content-length": "^4.0.1",
-				"@smithy/middleware-endpoint": "^4.0.6",
-				"@smithy/middleware-retry": "^4.0.7",
-				"@smithy/middleware-serde": "^4.0.2",
-				"@smithy/middleware-stack": "^4.0.1",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/node-http-handler": "^4.0.3",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"@smithy/url-parser": "^4.0.1",
-				"@smithy/util-base64": "^4.0.0",
-				"@smithy/util-body-length-browser": "^4.0.0",
-				"@smithy/util-body-length-node": "^4.0.0",
-				"@smithy/util-defaults-mode-browser": "^4.0.7",
-				"@smithy/util-defaults-mode-node": "^4.0.7",
-				"@smithy/util-endpoints": "^3.0.1",
-				"@smithy/util-middleware": "^4.0.1",
-				"@smithy/util-retry": "^4.0.1",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/core": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/core/-/core-3.758.0.tgz",
-			"integrity": "sha512-0RswbdR9jt/XKemaLNuxi2gGr4xGlHyGxkTdhSQzCyUe9A9OPCoLl3rIESRguQEech+oJnbHk/wuiwHqTuP9sg==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/core": "^3.1.5",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/signature-v4": "^5.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-middleware": "^4.0.1",
-				"fast-xml-parser": "4.4.1",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/credential-provider-cognito-identity": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-cognito-identity/-/credential-provider-cognito-identity-3.758.0.tgz",
-			"integrity": "sha512-y/rHZqyChlEkNRr59gn4hv0gjhJwGmdCdW0JI1K9p3P9p7EurWGjr2M6+goTn3ilOlcAwrl5oFKR5jLt27TkOA==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/client-cognito-identity": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/credential-provider-env": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-env/-/credential-provider-env-3.758.0.tgz",
-			"integrity": "sha512-N27eFoRrO6MeUNumtNHDW9WOiwfd59LPXPqDrIa3kWL/s+fOKFHb9xIcF++bAwtcZnAxKkgpDCUP+INNZskE+w==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/credential-provider-http": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-http/-/credential-provider-http-3.758.0.tgz",
-			"integrity": "sha512-Xt9/U8qUCiw1hihztWkNeIR+arg6P+yda10OuCHX6kFVx3auTlU7+hCqs3UxqniGU4dguHuftf3mRpi5/GJ33Q==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/fetch-http-handler": "^5.0.1",
-				"@smithy/node-http-handler": "^4.0.3",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-stream": "^4.1.2",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/credential-provider-ini": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-ini/-/credential-provider-ini-3.758.0.tgz",
-			"integrity": "sha512-cymSKMcP5d+OsgetoIZ5QCe1wnp2Q/tq+uIxVdh9MbfdBBEnl9Ecq6dH6VlYS89sp4QKuxHxkWXVnbXU3Q19Aw==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/credential-provider-env": "3.758.0",
-				"@aws-sdk/credential-provider-http": "3.758.0",
-				"@aws-sdk/credential-provider-process": "3.758.0",
-				"@aws-sdk/credential-provider-sso": "3.758.0",
-				"@aws-sdk/credential-provider-web-identity": "3.758.0",
-				"@aws-sdk/nested-clients": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/credential-provider-imds": "^4.0.1",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/shared-ini-file-loader": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/credential-provider-node": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-node/-/credential-provider-node-3.758.0.tgz",
-			"integrity": "sha512-+DaMv63wiq7pJrhIQzZYMn4hSarKiizDoJRvyR7WGhnn0oQ/getX9Z0VNCV3i7lIFoLNTb7WMmQ9k7+z/uD5EQ==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/credential-provider-env": "3.758.0",
-				"@aws-sdk/credential-provider-http": "3.758.0",
-				"@aws-sdk/credential-provider-ini": "3.758.0",
-				"@aws-sdk/credential-provider-process": "3.758.0",
-				"@aws-sdk/credential-provider-sso": "3.758.0",
-				"@aws-sdk/credential-provider-web-identity": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/credential-provider-imds": "^4.0.1",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/shared-ini-file-loader": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/credential-provider-process": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-process/-/credential-provider-process-3.758.0.tgz",
-			"integrity": "sha512-AzcY74QTPqcbXWVgjpPZ3HOmxQZYPROIBz2YINF0OQk0MhezDWV/O7Xec+K1+MPGQO3qS6EDrUUlnPLjsqieHA==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/shared-ini-file-loader": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/credential-provider-sso": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-sso/-/credential-provider-sso-3.758.0.tgz",
-			"integrity": "sha512-x0FYJqcOLUCv8GLLFDYMXRAQKGjoM+L0BG4BiHYZRDf24yQWFCAZsCQAYKo6XZYh2qznbsW6f//qpyJ5b0QVKQ==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/client-sso": "3.758.0",
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/token-providers": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/shared-ini-file-loader": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/credential-provider-web-identity": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-provider-web-identity/-/credential-provider-web-identity-3.758.0.tgz",
-			"integrity": "sha512-XGguXhBqiCXMXRxcfCAVPlMbm3VyJTou79r/3mxWddHWF0XbhaQiBIbUz6vobVTD25YQRbWSmSch7VA8kI5Lrw==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/nested-clients": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/credential-providers": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/credential-providers/-/credential-providers-3.758.0.tgz",
-			"integrity": "sha512-BaGVBdm9ynsErIc/mLuUwJ1OQcL/pkhCuAm24jpsif3evZ5wgyZnEAZB2yRin+mQnQaQT3L+KvTbdKGfjL8+fQ==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/client-cognito-identity": "3.758.0",
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/credential-provider-cognito-identity": "3.758.0",
-				"@aws-sdk/credential-provider-env": "3.758.0",
-				"@aws-sdk/credential-provider-http": "3.758.0",
-				"@aws-sdk/credential-provider-ini": "3.758.0",
-				"@aws-sdk/credential-provider-node": "3.758.0",
-				"@aws-sdk/credential-provider-process": "3.758.0",
-				"@aws-sdk/credential-provider-sso": "3.758.0",
-				"@aws-sdk/credential-provider-web-identity": "3.758.0",
-				"@aws-sdk/nested-clients": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/core": "^3.1.5",
-				"@smithy/credential-provider-imds": "^4.0.1",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/middleware-host-header": {
-			"version": "3.734.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/middleware-host-header/-/middleware-host-header-3.734.0.tgz",
-			"integrity": "sha512-LW7RRgSOHHBzWZnigNsDIzu3AiwtjeI2X66v+Wn1P1u+eXssy1+up4ZY/h+t2sU4LU36UvEf+jrZti9c6vRnFw==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/middleware-logger": {
-			"version": "3.734.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/middleware-logger/-/middleware-logger-3.734.0.tgz",
-			"integrity": "sha512-mUMFITpJUW3LcKvFok176eI5zXAUomVtahb9IQBwLzkqFYOrMJvWAvoV4yuxrJ8TlQBG8gyEnkb9SnhZvjg67w==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/middleware-recursion-detection": {
-			"version": "3.734.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/middleware-recursion-detection/-/middleware-recursion-detection-3.734.0.tgz",
-			"integrity": "sha512-CUat2d9ITsFc2XsmeiRQO96iWpxSKYFjxvj27Hc7vo87YUHRnfMfnc8jw1EpxEwMcvBD7LsRa6vDNky6AjcrFA==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/middleware-user-agent": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/middleware-user-agent/-/middleware-user-agent-3.758.0.tgz",
-			"integrity": "sha512-iNyehQXtQlj69JCgfaOssgZD4HeYGOwxcaKeG6F+40cwBjTAi0+Ph1yfDwqk2qiBPIRWJ/9l2LodZbxiBqgrwg==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@aws-sdk/util-endpoints": "3.743.0",
-				"@smithy/core": "^3.1.5",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/nested-clients": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/nested-clients/-/nested-clients-3.758.0.tgz",
-			"integrity": "sha512-YZ5s7PSvyF3Mt2h1EQulCG93uybprNGbBkPmVuy/HMMfbFTt4iL3SbKjxqvOZelm86epFfj7pvK7FliI2WOEcg==",
-			"optional": true,
-			"requires": {
-				"@aws-crypto/sha256-browser": "5.2.0",
-				"@aws-crypto/sha256-js": "5.2.0",
-				"@aws-sdk/core": "3.758.0",
-				"@aws-sdk/middleware-host-header": "3.734.0",
-				"@aws-sdk/middleware-logger": "3.734.0",
-				"@aws-sdk/middleware-recursion-detection": "3.734.0",
-				"@aws-sdk/middleware-user-agent": "3.758.0",
-				"@aws-sdk/region-config-resolver": "3.734.0",
-				"@aws-sdk/types": "3.734.0",
-				"@aws-sdk/util-endpoints": "3.743.0",
-				"@aws-sdk/util-user-agent-browser": "3.734.0",
-				"@aws-sdk/util-user-agent-node": "3.758.0",
-				"@smithy/config-resolver": "^4.0.1",
-				"@smithy/core": "^3.1.5",
-				"@smithy/fetch-http-handler": "^5.0.1",
-				"@smithy/hash-node": "^4.0.1",
-				"@smithy/invalid-dependency": "^4.0.1",
-				"@smithy/middleware-content-length": "^4.0.1",
-				"@smithy/middleware-endpoint": "^4.0.6",
-				"@smithy/middleware-retry": "^4.0.7",
-				"@smithy/middleware-serde": "^4.0.2",
-				"@smithy/middleware-stack": "^4.0.1",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/node-http-handler": "^4.0.3",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"@smithy/url-parser": "^4.0.1",
-				"@smithy/util-base64": "^4.0.0",
-				"@smithy/util-body-length-browser": "^4.0.0",
-				"@smithy/util-body-length-node": "^4.0.0",
-				"@smithy/util-defaults-mode-browser": "^4.0.7",
-				"@smithy/util-defaults-mode-node": "^4.0.7",
-				"@smithy/util-endpoints": "^3.0.1",
-				"@smithy/util-middleware": "^4.0.1",
-				"@smithy/util-retry": "^4.0.1",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/region-config-resolver": {
-			"version": "3.734.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/region-config-resolver/-/region-config-resolver-3.734.0.tgz",
-			"integrity": "sha512-Lvj1kPRC5IuJBr9DyJ9T9/plkh+EfKLy+12s/mykOy1JaKHDpvj+XGy2YO6YgYVOb8JFtaqloid+5COtje4JTQ==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-config-provider": "^4.0.0",
-				"@smithy/util-middleware": "^4.0.1",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/token-providers": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/token-providers/-/token-providers-3.758.0.tgz",
-			"integrity": "sha512-ckptN1tNrIfQUaGWm/ayW1ddG+imbKN7HHhjFdS4VfItsP0QQOB0+Ov+tpgb4MoNR4JaUghMIVStjIeHN2ks1w==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/nested-clients": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/shared-ini-file-loader": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/types": {
-			"version": "3.734.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/types/-/types-3.734.0.tgz",
-			"integrity": "sha512-o11tSPTT70nAkGV1fN9wm/hAIiLPyWX6SuGf+9JyTp7S/rC2cFWhR26MvA69nplcjNaXVzB0f+QFrLXXjOqCrg==",
-			"optional": true,
-			"requires": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/util-endpoints": {
-			"version": "3.743.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/util-endpoints/-/util-endpoints-3.743.0.tgz",
-			"integrity": "sha512-sN1l559zrixeh5x+pttrnd0A3+r34r0tmPkJ/eaaMaAzXqsmKU/xYre9K3FNnsSS1J1k4PEfk/nHDTVUgFYjnw==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-endpoints": "^3.0.1",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/util-locate-window": {
-			"version": "3.723.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/util-locate-window/-/util-locate-window-3.723.0.tgz",
-			"integrity": "sha512-Yf2CS10BqK688DRsrKI/EO6B8ff5J86NXe4C+VCysK7UOgN0l1zOTeTukZ3H8Q9tYYX3oaF1961o8vRkFm7Nmw==",
-			"optional": true,
-			"requires": {
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/util-user-agent-browser": {
-			"version": "3.734.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/util-user-agent-browser/-/util-user-agent-browser-3.734.0.tgz",
-			"integrity": "sha512-xQTCus6Q9LwUuALW+S76OL0jcWtMOVu14q+GoLnWPUM7QeUw963oQcLhF7oq0CtaLLKyl4GOUfcwc773Zmwwng==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/types": "^4.1.0",
-				"bowser": "^2.11.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@aws-sdk/util-user-agent-node": {
-			"version": "3.758.0",
-			"resolved": "https://registry.npmjs.org/@aws-sdk/util-user-agent-node/-/util-user-agent-node-3.758.0.tgz",
-			"integrity": "sha512-A5EZw85V6WhoKMV2hbuFRvb9NPlxEErb4HPO6/SPXYY4QrjprIzScHxikqcWv1w4J3apB1wto9LPU3IMsYtfrw==",
-			"optional": true,
-			"requires": {
-				"@aws-sdk/middleware-user-agent": "3.758.0",
-				"@aws-sdk/types": "3.734.0",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@mapbox/node-pre-gyp": {
-			"version": "1.0.9",
-			"resolved": "https://registry.npmjs.org/@mapbox/node-pre-gyp/-/node-pre-gyp-1.0.9.tgz",
-			"integrity": "sha512-aDF3S3rK9Q2gey/WAttUlISduDItz5BU3306M9Eyv6/oS40aMprnopshtlKTykxRNIBEZuRMaZAnbrQ4QtKGyw==",
-			"requires": {
-				"detect-libc": "^2.0.0",
-				"https-proxy-agent": "^5.0.0",
-				"make-dir": "^3.1.0",
-				"node-fetch": "^2.6.7",
-				"nopt": "^5.0.0",
-				"npmlog": "^5.0.1",
-				"rimraf": "^3.0.2",
-				"semver": "^7.3.5",
-				"tar": "^6.1.11"
-			}
-		},
-		"@mongodb-js/saslprep": {
-			"version": "1.2.0",
-			"resolved": "https://registry.npmjs.org/@mongodb-js/saslprep/-/saslprep-1.2.0.tgz",
-			"integrity": "sha512-+ywrb0AqkfaYuhHs6LxKWgqbh3I72EpEgESCw37o+9qPx9WTCkgDm2B+eMrwehGtHBWHFU4GXvnSCNiFhhausg==",
-			"optional": true,
-			"requires": {
-				"sparse-bitfield": "^3.0.3"
-			}
-		},
-		"@smithy/abort-controller": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/abort-controller/-/abort-controller-4.0.1.tgz",
-			"integrity": "sha512-fiUIYgIgRjMWznk6iLJz35K2YxSLHzLBA/RC6lBrKfQ8fHbPfvk7Pk9UvpKoHgJjI18MnbPuEju53zcVy6KF1g==",
-			"optional": true,
-			"requires": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/config-resolver": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/config-resolver/-/config-resolver-4.0.1.tgz",
-			"integrity": "sha512-Igfg8lKu3dRVkTSEm98QpZUvKEOa71jDX4vKRcvJVyRc3UgN3j7vFMf0s7xLQhYmKa8kyJGQgUJDOV5V3neVlQ==",
-			"optional": true,
-			"requires": {
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-config-provider": "^4.0.0",
-				"@smithy/util-middleware": "^4.0.1",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/core": {
-			"version": "3.1.5",
-			"resolved": "https://registry.npmjs.org/@smithy/core/-/core-3.1.5.tgz",
-			"integrity": "sha512-HLclGWPkCsekQgsyzxLhCQLa8THWXtB5PxyYN+2O6nkyLt550KQKTlbV2D1/j5dNIQapAZM1+qFnpBFxZQkgCA==",
-			"optional": true,
-			"requires": {
-				"@smithy/middleware-serde": "^4.0.2",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-body-length-browser": "^4.0.0",
-				"@smithy/util-middleware": "^4.0.1",
-				"@smithy/util-stream": "^4.1.2",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/credential-provider-imds": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/credential-provider-imds/-/credential-provider-imds-4.0.1.tgz",
-			"integrity": "sha512-l/qdInaDq1Zpznpmev/+52QomsJNZ3JkTl5yrTl02V6NBgJOQ4LY0SFw/8zsMwj3tLe8vqiIuwF6nxaEwgf6mg==",
-			"optional": true,
-			"requires": {
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/url-parser": "^4.0.1",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/fetch-http-handler": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/fetch-http-handler/-/fetch-http-handler-5.0.1.tgz",
-			"integrity": "sha512-3aS+fP28urrMW2KTjb6z9iFow6jO8n3MFfineGbndvzGZit3taZhKWtTorf+Gp5RpFDDafeHlhfsGlDCXvUnJA==",
-			"optional": true,
-			"requires": {
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/querystring-builder": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-base64": "^4.0.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/hash-node": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/hash-node/-/hash-node-4.0.1.tgz",
-			"integrity": "sha512-TJ6oZS+3r2Xu4emVse1YPB3Dq3d8RkZDKcPr71Nj/lJsdAP1c7oFzYqEn1IBc915TsgLl2xIJNuxCz+gLbLE0w==",
-			"optional": true,
-			"requires": {
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-buffer-from": "^4.0.0",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/invalid-dependency": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/invalid-dependency/-/invalid-dependency-4.0.1.tgz",
-			"integrity": "sha512-gdudFPf4QRQ5pzj7HEnu6FhKRi61BfH/Gk5Yf6O0KiSbr1LlVhgjThcvjdu658VE6Nve8vaIWB8/fodmS1rBPQ==",
-			"optional": true,
-			"requires": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/is-array-buffer": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/is-array-buffer/-/is-array-buffer-4.0.0.tgz",
-			"integrity": "sha512-saYhF8ZZNoJDTvJBEWgeBccCg+yvp1CX+ed12yORU3NilJScfc6gfch2oVb4QgxZrGUx3/ZJlb+c/dJbyupxlw==",
-			"optional": true,
-			"requires": {
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/middleware-content-length": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/middleware-content-length/-/middleware-content-length-4.0.1.tgz",
-			"integrity": "sha512-OGXo7w5EkB5pPiac7KNzVtfCW2vKBTZNuCctn++TTSOMpe6RZO/n6WEC1AxJINn3+vWLKW49uad3lo/u0WJ9oQ==",
-			"optional": true,
-			"requires": {
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/middleware-endpoint": {
-			"version": "4.0.6",
-			"resolved": "https://registry.npmjs.org/@smithy/middleware-endpoint/-/middleware-endpoint-4.0.6.tgz",
-			"integrity": "sha512-ftpmkTHIFqgaFugcjzLZv3kzPEFsBFSnq1JsIkr2mwFzCraZVhQk2gqN51OOeRxqhbPTkRFj39Qd2V91E/mQxg==",
-			"optional": true,
-			"requires": {
-				"@smithy/core": "^3.1.5",
-				"@smithy/middleware-serde": "^4.0.2",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/shared-ini-file-loader": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/url-parser": "^4.0.1",
-				"@smithy/util-middleware": "^4.0.1",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/middleware-retry": {
-			"version": "4.0.7",
-			"resolved": "https://registry.npmjs.org/@smithy/middleware-retry/-/middleware-retry-4.0.7.tgz",
-			"integrity": "sha512-58j9XbUPLkqAcV1kHzVX/kAR16GT+j7DUZJqwzsxh1jtz7G82caZiGyyFgUvogVfNTg3TeAOIJepGc8TXF4AVQ==",
-			"optional": true,
-			"requires": {
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/service-error-classification": "^4.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-middleware": "^4.0.1",
-				"@smithy/util-retry": "^4.0.1",
-				"tslib": "^2.6.2",
-				"uuid": "^9.0.1"
-			},
-			"dependencies": {
-				"uuid": {
-					"version": "9.0.1",
-					"resolved": "https://registry.npmjs.org/uuid/-/uuid-9.0.1.tgz",
-					"integrity": "sha512-b+1eJOlsR9K8HJpow9Ok3fiWOWSIcIzXodvv0rQjVoOVNpWMpxf1wZNpt4y9h10odCNrqnYp1OBzRktckBe3sA==",
-					"optional": true
-				}
-			}
-		},
-		"@smithy/middleware-serde": {
-			"version": "4.0.2",
-			"resolved": "https://registry.npmjs.org/@smithy/middleware-serde/-/middleware-serde-4.0.2.tgz",
-			"integrity": "sha512-Sdr5lOagCn5tt+zKsaW+U2/iwr6bI9p08wOkCp6/eL6iMbgdtc2R5Ety66rf87PeohR0ExI84Txz9GYv5ou3iQ==",
-			"optional": true,
-			"requires": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/middleware-stack": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/middleware-stack/-/middleware-stack-4.0.1.tgz",
-			"integrity": "sha512-dHwDmrtR/ln8UTHpaIavRSzeIk5+YZTBtLnKwDW3G2t6nAupCiQUvNzNoHBpik63fwUaJPtlnMzXbQrNFWssIA==",
-			"optional": true,
-			"requires": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/node-config-provider": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/node-config-provider/-/node-config-provider-4.0.1.tgz",
-			"integrity": "sha512-8mRTjvCtVET8+rxvmzRNRR0hH2JjV0DFOmwXPrISmTIJEfnCBugpYYGAsCj8t41qd+RB5gbheSQ/6aKZCQvFLQ==",
-			"optional": true,
-			"requires": {
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/shared-ini-file-loader": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/node-http-handler": {
-			"version": "4.0.3",
-			"resolved": "https://registry.npmjs.org/@smithy/node-http-handler/-/node-http-handler-4.0.3.tgz",
-			"integrity": "sha512-dYCLeINNbYdvmMLtW0VdhW1biXt+PPCGazzT5ZjKw46mOtdgToQEwjqZSS9/EN8+tNs/RO0cEWG044+YZs97aA==",
-			"optional": true,
-			"requires": {
-				"@smithy/abort-controller": "^4.0.1",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/querystring-builder": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/property-provider": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/property-provider/-/property-provider-4.0.1.tgz",
-			"integrity": "sha512-o+VRiwC2cgmk/WFV0jaETGOtX16VNPp2bSQEzu0whbReqE1BMqsP2ami2Vi3cbGVdKu1kq9gQkDAGKbt0WOHAQ==",
-			"optional": true,
-			"requires": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/protocol-http": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/protocol-http/-/protocol-http-5.0.1.tgz",
-			"integrity": "sha512-TE4cpj49jJNB/oHyh/cRVEgNZaoPaxd4vteJNB0yGidOCVR0jCw/hjPVsT8Q8FRmj8Bd3bFZt8Dh7xGCT+xMBQ==",
-			"optional": true,
-			"requires": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/querystring-builder": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/querystring-builder/-/querystring-builder-4.0.1.tgz",
-			"integrity": "sha512-wU87iWZoCbcqrwszsOewEIuq+SU2mSoBE2CcsLwE0I19m0B2gOJr1MVjxWcDQYOzHbR1xCk7AcOBbGFUYOKvdg==",
-			"optional": true,
-			"requires": {
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-uri-escape": "^4.0.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/querystring-parser": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/querystring-parser/-/querystring-parser-4.0.1.tgz",
-			"integrity": "sha512-Ma2XC7VS9aV77+clSFylVUnPZRindhB7BbmYiNOdr+CHt/kZNJoPP0cd3QxCnCFyPXC4eybmyE98phEHkqZ5Jw==",
-			"optional": true,
-			"requires": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/service-error-classification": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/service-error-classification/-/service-error-classification-4.0.1.tgz",
-			"integrity": "sha512-3JNjBfOWpj/mYfjXJHB4Txc/7E4LVq32bwzE7m28GN79+M1f76XHflUaSUkhOriprPDzev9cX/M+dEB80DNDKA==",
-			"optional": true,
-			"requires": {
-				"@smithy/types": "^4.1.0"
-			}
-		},
-		"@smithy/shared-ini-file-loader": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/shared-ini-file-loader/-/shared-ini-file-loader-4.0.1.tgz",
-			"integrity": "sha512-hC8F6qTBbuHRI/uqDgqqi6J0R4GtEZcgrZPhFQnMhfJs3MnUTGSnR1NSJCJs5VWlMydu0kJz15M640fJlRsIOw==",
-			"optional": true,
-			"requires": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/signature-v4": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/signature-v4/-/signature-v4-5.0.1.tgz",
-			"integrity": "sha512-nCe6fQ+ppm1bQuw5iKoeJ0MJfz2os7Ic3GBjOkLOPtavbD1ONoyE3ygjBfz2ythFWm4YnRm6OxW+8p/m9uCoIA==",
-			"optional": true,
-			"requires": {
-				"@smithy/is-array-buffer": "^4.0.0",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-hex-encoding": "^4.0.0",
-				"@smithy/util-middleware": "^4.0.1",
-				"@smithy/util-uri-escape": "^4.0.0",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/smithy-client": {
-			"version": "4.1.6",
-			"resolved": "https://registry.npmjs.org/@smithy/smithy-client/-/smithy-client-4.1.6.tgz",
-			"integrity": "sha512-UYDolNg6h2O0L+cJjtgSyKKvEKCOa/8FHYJnBobyeoeWDmNpXjwOAtw16ezyeu1ETuuLEOZbrynK0ZY1Lx9Jbw==",
-			"optional": true,
-			"requires": {
-				"@smithy/core": "^3.1.5",
-				"@smithy/middleware-endpoint": "^4.0.6",
-				"@smithy/middleware-stack": "^4.0.1",
-				"@smithy/protocol-http": "^5.0.1",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-stream": "^4.1.2",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/types": {
-			"version": "4.1.0",
-			"resolved": "https://registry.npmjs.org/@smithy/types/-/types-4.1.0.tgz",
-			"integrity": "sha512-enhjdwp4D7CXmwLtD6zbcDMbo6/T6WtuuKCY49Xxc6OMOmUWlBEBDREsxxgV2LIdeQPW756+f97GzcgAwp3iLw==",
-			"optional": true,
-			"requires": {
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/url-parser": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/url-parser/-/url-parser-4.0.1.tgz",
-			"integrity": "sha512-gPXcIEUtw7VlK8f/QcruNXm7q+T5hhvGu9tl63LsJPZ27exB6dtNwvh2HIi0v7JcXJ5emBxB+CJxwaLEdJfA+g==",
-			"optional": true,
-			"requires": {
-				"@smithy/querystring-parser": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/util-base64": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-base64/-/util-base64-4.0.0.tgz",
-			"integrity": "sha512-CvHfCmO2mchox9kjrtzoHkWHxjHZzaFojLc8quxXY7WAAMAg43nuxwv95tATVgQFNDwd4M9S1qFzj40Ul41Kmg==",
-			"optional": true,
-			"requires": {
-				"@smithy/util-buffer-from": "^4.0.0",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/util-body-length-browser": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-body-length-browser/-/util-body-length-browser-4.0.0.tgz",
-			"integrity": "sha512-sNi3DL0/k64/LO3A256M+m3CDdG6V7WKWHdAiBBMUN8S3hK3aMPhwnPik2A/a2ONN+9doY9UxaLfgqsIRg69QA==",
-			"optional": true,
-			"requires": {
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/util-body-length-node": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-body-length-node/-/util-body-length-node-4.0.0.tgz",
-			"integrity": "sha512-q0iDP3VsZzqJyje8xJWEJCNIu3lktUGVoSy1KB0UWym2CL1siV3artm+u1DFYTLejpsrdGyCSWBdGNjJzfDPjg==",
-			"optional": true,
-			"requires": {
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/util-buffer-from": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-buffer-from/-/util-buffer-from-4.0.0.tgz",
-			"integrity": "sha512-9TOQ7781sZvddgO8nxueKi3+yGvkY35kotA0Y6BWRajAv8jjmigQ1sBwz0UX47pQMYXJPahSKEKYFgt+rXdcug==",
-			"optional": true,
-			"requires": {
-				"@smithy/is-array-buffer": "^4.0.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/util-config-provider": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-config-provider/-/util-config-provider-4.0.0.tgz",
-			"integrity": "sha512-L1RBVzLyfE8OXH+1hsJ8p+acNUSirQnWQ6/EgpchV88G6zGBTDPdXiiExei6Z1wR2RxYvxY/XLw6AMNCCt8H3w==",
-			"optional": true,
-			"requires": {
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/util-defaults-mode-browser": {
-			"version": "4.0.7",
-			"resolved": "https://registry.npmjs.org/@smithy/util-defaults-mode-browser/-/util-defaults-mode-browser-4.0.7.tgz",
-			"integrity": "sha512-CZgDDrYHLv0RUElOsmZtAnp1pIjwDVCSuZWOPhIOBvG36RDfX1Q9+6lS61xBf+qqvHoqRjHxgINeQz47cYFC2Q==",
-			"optional": true,
-			"requires": {
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"bowser": "^2.11.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/util-defaults-mode-node": {
-			"version": "4.0.7",
-			"resolved": "https://registry.npmjs.org/@smithy/util-defaults-mode-node/-/util-defaults-mode-node-4.0.7.tgz",
-			"integrity": "sha512-79fQW3hnfCdrfIi1soPbK3zmooRFnLpSx3Vxi6nUlqaaQeC5dm8plt4OTNDNqEEEDkvKghZSaoti684dQFVrGQ==",
-			"optional": true,
-			"requires": {
-				"@smithy/config-resolver": "^4.0.1",
-				"@smithy/credential-provider-imds": "^4.0.1",
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/property-provider": "^4.0.1",
-				"@smithy/smithy-client": "^4.1.6",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/util-endpoints": {
-			"version": "3.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/util-endpoints/-/util-endpoints-3.0.1.tgz",
-			"integrity": "sha512-zVdUENQpdtn9jbpD9SCFK4+aSiavRb9BxEtw9ZGUR1TYo6bBHbIoi7VkrFQ0/RwZlzx0wRBaRmPclj8iAoJCLA==",
-			"optional": true,
-			"requires": {
-				"@smithy/node-config-provider": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/util-hex-encoding": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-hex-encoding/-/util-hex-encoding-4.0.0.tgz",
-			"integrity": "sha512-Yk5mLhHtfIgW2W2WQZWSg5kuMZCVbvhFmC7rV4IO2QqnZdbEFPmQnCcGMAX2z/8Qj3B9hYYNjZOhWym+RwhePw==",
-			"optional": true,
-			"requires": {
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/util-middleware": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/util-middleware/-/util-middleware-4.0.1.tgz",
-			"integrity": "sha512-HiLAvlcqhbzhuiOa0Lyct5IIlyIz0PQO5dnMlmQ/ubYM46dPInB+3yQGkfxsk6Q24Y0n3/JmcA1v5iEhmOF5mA==",
-			"optional": true,
-			"requires": {
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/util-retry": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/@smithy/util-retry/-/util-retry-4.0.1.tgz",
-			"integrity": "sha512-WmRHqNVwn3kI3rKk1LsKcVgPBG6iLTBGC1iYOV3GQegwJ3E8yjzHytPt26VNzOWr1qu0xE03nK0Ug8S7T7oufw==",
-			"optional": true,
-			"requires": {
-				"@smithy/service-error-classification": "^4.0.1",
-				"@smithy/types": "^4.1.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/util-stream": {
-			"version": "4.1.2",
-			"resolved": "https://registry.npmjs.org/@smithy/util-stream/-/util-stream-4.1.2.tgz",
-			"integrity": "sha512-44PKEqQ303d3rlQuiDpcCcu//hV8sn+u2JBo84dWCE0rvgeiVl0IlLMagbU++o0jCWhYCsHaAt9wZuZqNe05Hw==",
-			"optional": true,
-			"requires": {
-				"@smithy/fetch-http-handler": "^5.0.1",
-				"@smithy/node-http-handler": "^4.0.3",
-				"@smithy/types": "^4.1.0",
-				"@smithy/util-base64": "^4.0.0",
-				"@smithy/util-buffer-from": "^4.0.0",
-				"@smithy/util-hex-encoding": "^4.0.0",
-				"@smithy/util-utf8": "^4.0.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/util-uri-escape": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-uri-escape/-/util-uri-escape-4.0.0.tgz",
-			"integrity": "sha512-77yfbCbQMtgtTylO9itEAdpPXSog3ZxMe09AEhm0dU0NLTalV70ghDZFR+Nfi1C60jnJoh/Re4090/DuZh2Omg==",
-			"optional": true,
-			"requires": {
-				"tslib": "^2.6.2"
-			}
-		},
-		"@smithy/util-utf8": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/@smithy/util-utf8/-/util-utf8-4.0.0.tgz",
-			"integrity": "sha512-b+zebfKCfRdgNJDknHCob3O7FpeYQN6ZG6YLExMcasDHsCXlsXCEuiPZeLnJLpwa5dvPetGlnGCiMHuLwGvFow==",
-			"optional": true,
-			"requires": {
-				"@smithy/util-buffer-from": "^4.0.0",
-				"tslib": "^2.6.2"
-			}
-		},
-		"@socket.io/component-emitter": {
-			"version": "3.1.2",
-			"resolved": "https://registry.npmjs.org/@socket.io/component-emitter/-/component-emitter-3.1.2.tgz",
-			"integrity": "sha512-9BCxFwvbGg/RsZK9tjXd8s4UcwR0MWeFQ1XEKIQVVvAGJyINdrqKMcTRyLoK8Rse1GjzLV9cwjWV1olXRWEXVA=="
-		},
-		"@types/bcrypt": {
-			"version": "5.0.0",
-			"resolved": "https://registry.npmjs.org/@types/bcrypt/-/bcrypt-5.0.0.tgz",
-			"integrity": "sha512-agtcFKaruL8TmcvqbndlqHPSJgsolhf/qPWchFlgnW1gECTN/nKbFcoFnvKAQRFfKbh+BO6A3SWdJu9t+xF3Lw==",
-			"dev": true,
-			"requires": {
-				"@types/node": "*"
-			}
-		},
-		"@types/body-parser": {
-			"version": "1.19.2",
-			"resolved": "https://registry.npmjs.org/@types/body-parser/-/body-parser-1.19.2.tgz",
-			"integrity": "sha512-ALYone6pm6QmwZoAgeyNksccT9Q4AWZQ6PvfwR37GT6r6FWUPguq6sUmNGSMV2Wr761oQoBxwGGa6DR5o1DC9g==",
-			"dev": true,
-			"requires": {
-				"@types/connect": "*",
-				"@types/node": "*"
-			}
-		},
-		"@types/connect": {
-			"version": "3.4.35",
-			"resolved": "https://registry.npmjs.org/@types/connect/-/connect-3.4.35.tgz",
-			"integrity": "sha512-cdeYyv4KWoEgpBISTxWvqYsVy444DOqehiF3fM3ne10AmJ62RSyNkUnxMJXHQWRQQX2eR94m5y1IZyDwBjV9FQ==",
-			"dev": true,
-			"requires": {
-				"@types/node": "*"
-			}
-		},
-		"@types/cors": {
-			"version": "2.8.17",
-			"resolved": "https://registry.npmjs.org/@types/cors/-/cors-2.8.17.tgz",
-			"integrity": "sha512-8CGDvrBj1zgo2qE+oS3pOCyYNqCPryMWY2bGfwA0dcfopWGgxs+78df0Rs3rc9THP4JkOhLsAa+15VdpAqkcUA==",
-			"requires": {
-				"@types/node": "*"
-			}
-		},
-		"@types/express": {
-			"version": "4.17.13",
-			"resolved": "https://registry.npmjs.org/@types/express/-/express-4.17.13.tgz",
-			"integrity": "sha512-6bSZTPaTIACxn48l50SR+axgrqm6qXFIxrdAKaG6PaJk3+zuUr35hBlgT7vOmJcum+OEaIBLtHV/qloEAFITeA==",
-			"dev": true,
-			"requires": {
-				"@types/body-parser": "*",
-				"@types/express-serve-static-core": "^4.17.18",
-				"@types/qs": "*",
-				"@types/serve-static": "*"
-			}
-		},
-		"@types/express-serve-static-core": {
-			"version": "4.17.28",
-			"resolved": "https://registry.npmjs.org/@types/express-serve-static-core/-/express-serve-static-core-4.17.28.tgz",
-			"integrity": "sha512-P1BJAEAW3E2DJUlkgq4tOL3RyMunoWXqbSCygWo5ZIWTjUgN1YnaXWW4VWl/oc8vs/XoYibEGBKP0uZyF4AHig==",
-			"dev": true,
-			"requires": {
-				"@types/node": "*",
-				"@types/qs": "*",
-				"@types/range-parser": "*"
-			}
-		},
-		"@types/jsonwebtoken": {
-			"version": "8.5.8",
-			"resolved": "https://registry.npmjs.org/@types/jsonwebtoken/-/jsonwebtoken-8.5.8.tgz",
-			"integrity": "sha512-zm6xBQpFDIDM6o9r6HSgDeIcLy82TKWctCXEPbJJcXb5AKmi5BNNdLXneixK4lplX3PqIVcwLBCGE/kAGnlD4A==",
-			"dev": true,
-			"requires": {
-				"@types/node": "*"
-			}
-		},
-		"@types/mime": {
-			"version": "1.3.2",
-			"resolved": "https://registry.npmjs.org/@types/mime/-/mime-1.3.2.tgz",
-			"integrity": "sha512-YATxVxgRqNH6nHEIsvg6k2Boc1JHI9ZbH5iWFFv/MTkchz3b1ieGDa5T0a9RznNdI0KhVbdbWSN+KWWrQZRxTw==",
-			"dev": true
-		},
-		"@types/node": {
-			"version": "17.0.38",
-			"resolved": "https://registry.npmjs.org/@types/node/-/node-17.0.38.tgz",
-			"integrity": "sha512-5jY9RhV7c0Z4Jy09G+NIDTsCZ5G0L5n+Z+p+Y7t5VJHM30bgwzSjVtlcBxqAj+6L/swIlvtOSzr8rBk/aNyV2g=="
-		},
-		"@types/nodemon": {
-			"version": "1.19.1",
-			"resolved": "https://registry.npmjs.org/@types/nodemon/-/nodemon-1.19.1.tgz",
-			"integrity": "sha512-3teAFqCFba3W9zk4dAGUZ+rW/nrQBrSGXWyK9HfJuWxmITk2z2d3u/5cy7oFqNG2fZxPwSAWkP+a8q/QC6UU5Q==",
-			"dev": true,
-			"requires": {
-				"@types/node": "*"
-			}
-		},
-		"@types/qs": {
-			"version": "6.9.7",
-			"resolved": "https://registry.npmjs.org/@types/qs/-/qs-6.9.7.tgz",
-			"integrity": "sha512-FGa1F62FT09qcrueBA6qYTrJPVDzah9a+493+o2PCXsesWHIn27G98TsSMs3WPNbZIEj4+VJf6saSFpvD+3Zsw==",
-			"dev": true
-		},
-		"@types/range-parser": {
-			"version": "1.2.4",
-			"resolved": "https://registry.npmjs.org/@types/range-parser/-/range-parser-1.2.4.tgz",
-			"integrity": "sha512-EEhsLsD6UsDM1yFhAvy0Cjr6VwmpMWqFBCb9w07wVugF7w9nfajxLuVmngTIpgS6svCnm6Vaw+MZhoDCKnOfsw==",
-			"dev": true
-		},
-		"@types/serve-static": {
-			"version": "1.13.10",
-			"resolved": "https://registry.npmjs.org/@types/serve-static/-/serve-static-1.13.10.tgz",
-			"integrity": "sha512-nCkHGI4w7ZgAdNkrEu0bv+4xNV/XDqW+DydknebMOQwkpDGx8G+HTlj7R7ABI8i8nKxVw0wtKPi1D+lPOkh4YQ==",
-			"dev": true,
-			"requires": {
-				"@types/mime": "^1",
-				"@types/node": "*"
-			}
-		},
-		"@types/uuid": {
-			"version": "8.3.4",
-			"resolved": "https://registry.npmjs.org/@types/uuid/-/uuid-8.3.4.tgz",
-			"integrity": "sha512-c/I8ZRb51j+pYGAu5CrFMRxqZ2ke4y2grEBO5AUjgSkSk+qT2Ea+OdWElz/OiMf5MNpn2b17kuVBwZLQJXzihw==",
-			"dev": true
-		},
-		"@types/webidl-conversions": {
-			"version": "7.0.3",
-			"resolved": "https://registry.npmjs.org/@types/webidl-conversions/-/webidl-conversions-7.0.3.tgz",
-			"integrity": "sha512-CiJJvcRtIgzadHCYXw7dqEnMNRjhGZlYK05Mj9OyktqV8uVT8fD2BFOB7S1uwBE3Kj2Z+4UyPmFw/Ixgw/LAlA=="
-		},
-		"@types/whatwg-url": {
-			"version": "8.2.2",
-			"resolved": "https://registry.npmjs.org/@types/whatwg-url/-/whatwg-url-8.2.2.tgz",
-			"integrity": "sha512-FtQu10RWgn3D9U4aazdwIE2yzphmTJREDqNdODHrbrZmmMqI0vMheC/6NE/J1Yveaj8H+ela+YwWTjq5PGmuhA==",
-			"requires": {
-				"@types/node": "*",
-				"@types/webidl-conversions": "*"
-			}
-		},
-		"abbrev": {
-			"version": "1.1.1",
-			"resolved": "https://registry.npmjs.org/abbrev/-/abbrev-1.1.1.tgz",
-			"integrity": "sha512-nne9/IiQ/hzIhY6pdDnbBtz7DjPTKrY00P/zvPSm5pOFkl6xuGrGnXn/VtTNNfNtAfZ9/1RtehkszU9qcTii0Q=="
-		},
-		"accepts": {
-			"version": "1.3.8",
-			"resolved": "https://registry.npmjs.org/accepts/-/accepts-1.3.8.tgz",
-			"integrity": "sha512-PYAthTa2m2VKxuvSD3DPC/Gy+U+sOA1LAuT8mkmRuvw+NACSaeXEQ+NHcVF7rONl6qcaxV3Uuemwawk+7+SJLw==",
-			"requires": {
-				"mime-types": "~2.1.34",
-				"negotiator": "0.6.3"
-			}
-		},
-		"agent-base": {
-			"version": "6.0.2",
-			"resolved": "https://registry.npmjs.org/agent-base/-/agent-base-6.0.2.tgz",
-			"integrity": "sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ==",
-			"requires": {
-				"debug": "4"
-			},
-			"dependencies": {
-				"debug": {
-					"version": "4.3.4",
-					"resolved": "https://registry.npmjs.org/debug/-/debug-4.3.4.tgz",
-					"integrity": "sha512-PRWFHuSU3eDtQJPvnNY7Jcket1j0t5OuOsFzPPzsekD52Zl8qUfFIPEiswXqIvHWGVHOgX+7G/vCNNhehwxfkQ==",
-					"requires": {
-						"ms": "2.1.2"
-					}
-				},
-				"ms": {
-					"version": "2.1.2",
-					"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.2.tgz",
-					"integrity": "sha512-sGkPx+VjMtmA6MX27oA4FBFELFCZZ4S4XqeGOXCv68tT+jb3vk/RyaKWP0PTKyWtmLSM0b+adUTEvbs1PEaH2w=="
-				}
-			}
-		},
-		"ansi-regex": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/ansi-regex/-/ansi-regex-5.0.1.tgz",
-			"integrity": "sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ=="
-		},
-		"anymatch": {
-			"version": "3.1.2",
-			"resolved": "https://registry.npmjs.org/anymatch/-/anymatch-3.1.2.tgz",
-			"integrity": "sha512-P43ePfOAIupkguHUycrc4qJ9kz8ZiuOUijaETwX7THt0Y/GNK7v0aa8rY816xWjZ7rJdA5XdMcpVFTKMq+RvWg==",
-			"dev": true,
-			"requires": {
-				"normalize-path": "^3.0.0",
-				"picomatch": "^2.0.4"
-			}
-		},
-		"aproba": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/aproba/-/aproba-2.0.0.tgz",
-			"integrity": "sha512-lYe4Gx7QT+MKGbDsA+Z+he/Wtef0BiwDOlK/XkBrdfsh9J/jPPXbX0tE9x9cl27Tmu5gg3QUbUrQYa/y+KOHPQ=="
-		},
-		"are-we-there-yet": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/are-we-there-yet/-/are-we-there-yet-2.0.0.tgz",
-			"integrity": "sha512-Ci/qENmwHnsYo9xKIcUJN5LeDKdJ6R1Z1j9V/J5wyq8nh/mYPEpIKJbBZXtZjG04HiK7zV/p6Vs9952MrMeUIw==",
-			"requires": {
-				"delegates": "^1.0.0",
-				"readable-stream": "^3.6.0"
-			}
-		},
-		"array-flatten": {
-			"version": "1.1.1",
-			"resolved": "https://registry.npmjs.org/array-flatten/-/array-flatten-1.1.1.tgz",
-			"integrity": "sha512-PCVAQswWemu6UdxsDFFX/+gVeYqKAod3D3UVm91jHwynguOwAvYPhx8nNlM++NqRcK6CxxpUafjmhIdKiHibqg=="
-		},
-		"balanced-match": {
-			"version": "1.0.2",
-			"resolved": "https://registry.npmjs.org/balanced-match/-/balanced-match-1.0.2.tgz",
-			"integrity": "sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw=="
-		},
-		"base64-js": {
-			"version": "1.5.1",
-			"resolved": "https://registry.npmjs.org/base64-js/-/base64-js-1.5.1.tgz",
-			"integrity": "sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA=="
-		},
-		"base64id": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/base64id/-/base64id-2.0.0.tgz",
-			"integrity": "sha512-lGe34o6EHj9y3Kts9R4ZYs/Gr+6N7MCaMlIFA3F1R2O5/m7K06AxfSeO5530PEERE6/WyEg3lsuyw4GHlPZHog=="
-		},
-		"bcrypt": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/bcrypt/-/bcrypt-5.0.1.tgz",
-			"integrity": "sha512-9BTgmrhZM2t1bNuDtrtIMVSmmxZBrJ71n8Wg+YgdjHuIWYF7SjjmCPZFB+/5i/o/PIeRpwVJR3P+NrpIItUjqw==",
-			"requires": {
-				"@mapbox/node-pre-gyp": "^1.0.0",
-				"node-addon-api": "^3.1.0"
-			}
-		},
-		"binary-extensions": {
-			"version": "2.2.0",
-			"resolved": "https://registry.npmjs.org/binary-extensions/-/binary-extensions-2.2.0.tgz",
-			"integrity": "sha512-jDctJ/IVQbZoJykoeHbhXpOlNBqGNcwXJKJog42E5HDPUwQTSdjCHdihjj0DlnheQ7blbT6dHOafNAiS8ooQKA==",
-			"dev": true
-		},
-		"body-parser": {
-			"version": "1.20.3",
-			"resolved": "https://registry.npmjs.org/body-parser/-/body-parser-1.20.3.tgz",
-			"integrity": "sha512-7rAxByjUMqQ3/bHJy7D6OGXvx/MMc4IqBn/X0fcM1QUcAItpZrBEYhWGem+tzXH90c+G01ypMcYJBO9Y30203g==",
-			"requires": {
-				"bytes": "3.1.2",
-				"content-type": "~1.0.5",
-				"debug": "2.6.9",
-				"depd": "2.0.0",
-				"destroy": "1.2.0",
-				"http-errors": "2.0.0",
-				"iconv-lite": "0.4.24",
-				"on-finished": "2.4.1",
-				"qs": "6.13.0",
-				"raw-body": "2.5.2",
-				"type-is": "~1.6.18",
-				"unpipe": "1.0.0"
-			}
-		},
-		"bowser": {
-			"version": "2.11.0",
-			"resolved": "https://registry.npmjs.org/bowser/-/bowser-2.11.0.tgz",
-			"integrity": "sha512-AlcaJBi/pqqJBIQ8U9Mcpc9i8Aqxn88Skv5d+xBX006BY5u8N3mGLHa5Lgppa7L/HfwgwLgZ6NYs+Ag6uUmJRA==",
-			"optional": true
-		},
-		"brace-expansion": {
-			"version": "1.1.11",
-			"resolved": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-1.1.11.tgz",
-			"integrity": "sha512-iCuPHDFgrHX7H2vEI/5xpz07zSHB00TpugqhmYtVmMO6518mCuRMoOYFldEBl0g187ufozdaHgWKcYFb61qGiA==",
-			"requires": {
-				"balanced-match": "^1.0.0",
-				"concat-map": "0.0.1"
-			}
-		},
-		"braces": {
-			"version": "3.0.3",
-			"resolved": "https://registry.npmjs.org/braces/-/braces-3.0.3.tgz",
-			"integrity": "sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==",
-			"dev": true,
-			"requires": {
-				"fill-range": "^7.1.1"
-			}
-		},
-		"bson": {
-			"version": "4.7.2",
-			"resolved": "https://registry.npmjs.org/bson/-/bson-4.7.2.tgz",
-			"integrity": "sha512-Ry9wCtIZ5kGqkJoi6aD8KjxFZEx78guTQDnpXWiNthsxzrxAK/i8E6pCHAIZTbaEFWcOCvbecMukfK7XUvyLpQ==",
-			"requires": {
-				"buffer": "^5.6.0"
-			}
-		},
-		"buffer": {
-			"version": "5.7.1",
-			"resolved": "https://registry.npmjs.org/buffer/-/buffer-5.7.1.tgz",
-			"integrity": "sha512-EHcyIPBQ4BSGlvjB16k5KgAJ27CIsHY/2JBmCRReo48y9rQ3MaUzWX3KVlBa4U7MyX02HdVj0K7C3WaB3ju7FQ==",
-			"requires": {
-				"base64-js": "^1.3.1",
-				"ieee754": "^1.1.13"
-			}
-		},
-		"buffer-equal-constant-time": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/buffer-equal-constant-time/-/buffer-equal-constant-time-1.0.1.tgz",
-			"integrity": "sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA=="
-		},
-		"bytes": {
-			"version": "3.1.2",
-			"resolved": "https://registry.npmjs.org/bytes/-/bytes-3.1.2.tgz",
-			"integrity": "sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg=="
-		},
-		"call-bind-apply-helpers": {
-			"version": "1.0.2",
-			"resolved": "https://registry.npmjs.org/call-bind-apply-helpers/-/call-bind-apply-helpers-1.0.2.tgz",
-			"integrity": "sha512-Sp1ablJ0ivDkSzjcaJdxEunN5/XvksFJ2sMBFfq6x0ryhQV/2b/KwFe21cMpmHtPOSij8K99/wSfoEuTObmuMQ==",
-			"requires": {
-				"es-errors": "^1.3.0",
-				"function-bind": "^1.1.2"
-			}
-		},
-		"call-bound": {
-			"version": "1.0.4",
-			"resolved": "https://registry.npmjs.org/call-bound/-/call-bound-1.0.4.tgz",
-			"integrity": "sha512-+ys997U96po4Kx/ABpBCqhA9EuxJaQWDQg7295H4hBphv3IZg0boBKuwYpt4YXp6MZ5AmZQnU/tyMTlRpaSejg==",
-			"requires": {
-				"call-bind-apply-helpers": "^1.0.2",
-				"get-intrinsic": "^1.3.0"
-			}
-		},
-		"chokidar": {
-			"version": "3.5.3",
-			"resolved": "https://registry.npmjs.org/chokidar/-/chokidar-3.5.3.tgz",
-			"integrity": "sha512-Dr3sfKRP6oTcjf2JmUmFJfeVMvXBdegxB0iVQ5eb2V10uFJUCAS8OByZdVAyVb8xXNz3GjjTgj9kLWsZTqE6kw==",
-			"dev": true,
-			"requires": {
-				"anymatch": "~3.1.2",
-				"braces": "~3.0.2",
-				"fsevents": "~2.3.2",
-				"glob-parent": "~5.1.2",
-				"is-binary-path": "~2.1.0",
-				"is-glob": "~4.0.1",
-				"normalize-path": "~3.0.0",
-				"readdirp": "~3.6.0"
-			}
-		},
-		"chownr": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/chownr/-/chownr-2.0.0.tgz",
-			"integrity": "sha512-bIomtDF5KGpdogkLd9VspvFzk9KfpyyGlS8YFVZl7TGPBHL5snIOnxeshwVgPteQ9b4Eydl+pVbIyE1DcvCWgQ=="
-		},
-		"color-support": {
-			"version": "1.1.3",
-			"resolved": "https://registry.npmjs.org/color-support/-/color-support-1.1.3.tgz",
-			"integrity": "sha512-qiBjkpbMLO/HL68y+lh4q0/O1MZFj2RX6X/KmMa3+gJD3z+WwI1ZzDHysvqHGS3mP6mznPckpXmw1nI9cJjyRg=="
-		},
-		"concat-map": {
-			"version": "0.0.1",
-			"resolved": "https://registry.npmjs.org/concat-map/-/concat-map-0.0.1.tgz",
-			"integrity": "sha512-/Srv4dswyQNBfohGpz9o6Yb3Gz3SrUDqBH5rTuhGR7ahtlbYKnVxw2bCFMRljaA7EXHaXZ8wsHdodFvbkhKmqg=="
-		},
-		"console-control-strings": {
-			"version": "1.1.0",
-			"resolved": "https://registry.npmjs.org/console-control-strings/-/console-control-strings-1.1.0.tgz",
-			"integrity": "sha512-ty/fTekppD2fIwRvnZAVdeOiGd1c7YXEixbgJTNzqcxJWKQnjJ/V1bNEEE6hygpM3WjwHFUVK6HTjWSzV4a8sQ=="
-		},
-		"content-disposition": {
-			"version": "0.5.4",
-			"resolved": "https://registry.npmjs.org/content-disposition/-/content-disposition-0.5.4.tgz",
-			"integrity": "sha512-FveZTNuGw04cxlAiWbzi6zTAL/lhehaWbTtgluJh4/E95DqMwTmha3KZN1aAWA8cFIhHzMZUvLevkw5Rqk+tSQ==",
-			"requires": {
-				"safe-buffer": "5.2.1"
-			}
-		},
-		"content-type": {
-			"version": "1.0.5",
-			"resolved": "https://registry.npmjs.org/content-type/-/content-type-1.0.5.tgz",
-			"integrity": "sha512-nTjqfcBFEipKdXCv4YDQWCfmcLZKm81ldF0pAopTvyrFGVbcR6P/VAAd5G7N+0tTr8QqiU0tFadD6FK4NtJwOA=="
-		},
-		"cookie": {
-			"version": "0.7.1",
-			"resolved": "https://registry.npmjs.org/cookie/-/cookie-0.7.1.tgz",
-			"integrity": "sha512-6DnInpx7SJ2AK3+CTUE/ZM0vWTUboZCegxhC2xiIydHR9jNuTAASBrfEpHhiGOZw/nX51bHt6YQl8jsGo4y/0w=="
-		},
-		"cookie-signature": {
-			"version": "1.0.6",
-			"resolved": "https://registry.npmjs.org/cookie-signature/-/cookie-signature-1.0.6.tgz",
-			"integrity": "sha512-QADzlaHc8icV8I7vbaJXJwod9HWYp8uCqf1xa4OfNu1T7JVxQIrUgOWtHdNDtPiywmFbiS12VjotIXLrKM3orQ=="
-		},
-		"cors": {
-			"version": "2.8.5",
-			"resolved": "https://registry.npmjs.org/cors/-/cors-2.8.5.tgz",
-			"integrity": "sha512-KIHbLJqu73RGr/hnbrO9uBeixNGuvSQjul/jdFvS/KFSIH1hWVd1ng7zOHx+YrEfInLG7q4n6GHQ9cDtxv/P6g==",
-			"requires": {
-				"object-assign": "^4",
-				"vary": "^1"
-			}
-		},
-		"debug": {
-			"version": "2.6.9",
-			"resolved": "https://registry.npmjs.org/debug/-/debug-2.6.9.tgz",
-			"integrity": "sha512-bC7ElrdJaJnPbAP+1EotYvqZsb3ecl5wi6Bfi6BJTUcNowp6cvspg0jXznRTKDjm/E7AdgFBVeAPVMNcKGsHMA==",
-			"requires": {
-				"ms": "2.0.0"
-			}
-		},
-		"delegates": {
-			"version": "1.0.0",
-			"resolved": "https://registry.npmjs.org/delegates/-/delegates-1.0.0.tgz",
-			"integrity": "sha512-bd2L678uiWATM6m5Z1VzNCErI3jiGzt6HGY8OVICs40JQq/HALfbyNJmp0UDakEY4pMMaN0Ly5om/B1VI/+xfQ=="
-		},
-		"depd": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/depd/-/depd-2.0.0.tgz",
-			"integrity": "sha512-g7nH6P6dyDioJogAAGprGpCtVImJhpPk/roCzdb3fIh61/s/nPsfR6onyMwkCAR/OlC3yBC0lESvUoQEAssIrw=="
-		},
-		"destroy": {
-			"version": "1.2.0",
-			"resolved": "https://registry.npmjs.org/destroy/-/destroy-1.2.0.tgz",
-			"integrity": "sha512-2sJGJTaXIIaR1w4iJSNoN0hnMY7Gpc/n8D4qSCJw8QqFWXf7cuAgnEHxBpweaVcPevC2l3KpjYCx3NypQQgaJg=="
-		},
-		"detect-libc": {
-			"version": "2.0.1",
-			"resolved": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.0.1.tgz",
-			"integrity": "sha512-463v3ZeIrcWtdgIg6vI6XUncguvr2TnGl4SzDXinkt9mSLpBJKXT3mW6xT3VQdDN11+WVs29pgvivTc4Lp8v+w=="
-		},
-		"dotenv": {
-			"version": "16.0.1",
-			"resolved": "https://registry.npmjs.org/dotenv/-/dotenv-16.0.1.tgz",
-			"integrity": "sha512-1K6hR6wtk2FviQ4kEiSjFiH5rpzEVi8WW0x96aztHVMhEspNpc4DVOUTEHtEva5VThQ8IaBX1Pe4gSzpVVUsKQ=="
-		},
-		"dunder-proto": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/dunder-proto/-/dunder-proto-1.0.1.tgz",
-			"integrity": "sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==",
-			"requires": {
-				"call-bind-apply-helpers": "^1.0.1",
-				"es-errors": "^1.3.0",
-				"gopd": "^1.2.0"
-			}
-		},
-		"ecdsa-sig-formatter": {
-			"version": "1.0.11",
-			"resolved": "https://registry.npmjs.org/ecdsa-sig-formatter/-/ecdsa-sig-formatter-1.0.11.tgz",
-			"integrity": "sha512-nagl3RYrbNv6kQkeJIpt6NJZy8twLB/2vtz6yN9Z4vRKHN4/QZJIEbqohALSgwKdnksuY3k5Addp5lg8sVoVcQ==",
-			"requires": {
-				"safe-buffer": "^5.0.1"
-			}
-		},
-		"ee-first": {
-			"version": "1.1.1",
-			"resolved": "https://registry.npmjs.org/ee-first/-/ee-first-1.1.1.tgz",
-			"integrity": "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow=="
-		},
-		"emoji-regex": {
-			"version": "8.0.0",
-			"resolved": "https://registry.npmjs.org/emoji-regex/-/emoji-regex-8.0.0.tgz",
-			"integrity": "sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A=="
-		},
-		"encodeurl": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/encodeurl/-/encodeurl-2.0.0.tgz",
-			"integrity": "sha512-Q0n9HRi4m6JuGIV1eFlmvJB7ZEVxu93IrMyiMsGC0lrMJMWzRgx6WGquyfQgZVb31vhGgXnfmPNNXmxnOkRBrg=="
-		},
-		"engine.io": {
-			"version": "6.6.4",
-			"resolved": "https://registry.npmjs.org/engine.io/-/engine.io-6.6.4.tgz",
-			"integrity": "sha512-ZCkIjSYNDyGn0R6ewHDtXgns/Zre/NT6Agvq1/WobF7JXgFff4SeDroKiCO3fNJreU9YG429Sc81o4w5ok/W5g==",
-			"requires": {
-				"@types/cors": "^2.8.12",
-				"@types/node": ">=10.0.0",
-				"accepts": "~1.3.4",
-				"base64id": "2.0.0",
-				"cookie": "~0.7.2",
-				"cors": "~2.8.5",
-				"debug": "~4.3.1",
-				"engine.io-parser": "~5.2.1",
-				"ws": "~8.17.1"
-			},
-			"dependencies": {
-				"cookie": {
-					"version": "0.7.2",
-					"resolved": "https://registry.npmjs.org/cookie/-/cookie-0.7.2.tgz",
-					"integrity": "sha512-yki5XnKuf750l50uGTllt6kKILY4nQ1eNIQatoXEByZ5dWgnKqbnqmTrBE5B4N7lrMJKQ2ytWMiTO2o0v6Ew/w=="
-				},
-				"debug": {
-					"version": "4.3.7",
-					"resolved": "https://registry.npmjs.org/debug/-/debug-4.3.7.tgz",
-					"integrity": "sha512-Er2nc/H7RrMXZBFCEim6TCmMk02Z8vLC2Rbi1KEBggpo0fS6l0S1nnapwmIi3yW/+GOJap1Krg4w0Hg80oCqgQ==",
-					"requires": {
-						"ms": "^2.1.3"
-					}
-				},
-				"ms": {
-					"version": "2.1.3",
-					"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
-					"integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="
-				}
-			}
-		},
-		"engine.io-parser": {
-			"version": "5.2.3",
-			"resolved": "https://registry.npmjs.org/engine.io-parser/-/engine.io-parser-5.2.3.tgz",
-			"integrity": "sha512-HqD3yTBfnBxIrbnM1DoD6Pcq8NECnh8d4As1Qgh0z5Gg3jRRIqijury0CL3ghu/edArpUYiYqQiDUQBIs4np3Q=="
-		},
-		"es-define-property": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/es-define-property/-/es-define-property-1.0.1.tgz",
-			"integrity": "sha512-e3nRfgfUZ4rNGL232gUgX06QNyyez04KdjFrF+LTRoOXmrOgFKDg4BCdsjW8EnT69eqdYGmRpJwiPVYNrCaW3g=="
-		},
-		"es-errors": {
-			"version": "1.3.0",
-			"resolved": "https://registry.npmjs.org/es-errors/-/es-errors-1.3.0.tgz",
-			"integrity": "sha512-Zf5H2Kxt2xjTvbJvP2ZWLEICxA6j+hAmMzIlypy4xcBg1vKVnx89Wy0GbS+kf5cwCVFFzdCFh2XSCFNULS6csw=="
-		},
-		"es-object-atoms": {
-			"version": "1.1.1",
-			"resolved": "https://registry.npmjs.org/es-object-atoms/-/es-object-atoms-1.1.1.tgz",
-			"integrity": "sha512-FGgH2h8zKNim9ljj7dankFPcICIK9Cp5bm+c2gQSYePhpaG5+esrLODihIorn+Pe6FGJzWhXQotPv73jTaldXA==",
-			"requires": {
-				"es-errors": "^1.3.0"
-			}
-		},
-		"escape-html": {
-			"version": "1.0.3",
-			"resolved": "https://registry.npmjs.org/escape-html/-/escape-html-1.0.3.tgz",
-			"integrity": "sha512-NiSupZ4OeuGwr68lGIeym/ksIZMJodUGOSCZ/FSnTxcrekbvqrgdUxlJOMpijaKZVjAJrWrGs/6Jy8OMuyj9ow=="
-		},
-		"etag": {
-			"version": "1.8.1",
-			"resolved": "https://registry.npmjs.org/etag/-/etag-1.8.1.tgz",
-			"integrity": "sha512-aIL5Fx7mawVa300al2BnEE4iNvo1qETxLrPI/o05L7z6go7fCw1J6EQmbK4FmJ2AS7kgVF/KEZWufBfdClMcPg=="
-		},
-		"express": {
-			"version": "4.21.2",
-			"resolved": "https://registry.npmjs.org/express/-/express-4.21.2.tgz",
-			"integrity": "sha512-28HqgMZAmih1Czt9ny7qr6ek2qddF4FclbMzwhCREB6OFfH+rXAnuNCwo1/wFvrtbgsQDb4kSbX9de9lFbrXnA==",
-			"requires": {
-				"accepts": "~1.3.8",
-				"array-flatten": "1.1.1",
-				"body-parser": "1.20.3",
-				"content-disposition": "0.5.4",
-				"content-type": "~1.0.4",
-				"cookie": "0.7.1",
-				"cookie-signature": "1.0.6",
-				"debug": "2.6.9",
-				"depd": "2.0.0",
-				"encodeurl": "~2.0.0",
-				"escape-html": "~1.0.3",
-				"etag": "~1.8.1",
-				"finalhandler": "1.3.1",
-				"fresh": "0.5.2",
-				"http-errors": "2.0.0",
-				"merge-descriptors": "1.0.3",
-				"methods": "~1.1.2",
-				"on-finished": "2.4.1",
-				"parseurl": "~1.3.3",
-				"path-to-regexp": "0.1.12",
-				"proxy-addr": "~2.0.7",
-				"qs": "6.13.0",
-				"range-parser": "~1.2.1",
-				"safe-buffer": "5.2.1",
-				"send": "0.19.0",
-				"serve-static": "1.16.2",
-				"setprototypeof": "1.2.0",
-				"statuses": "2.0.1",
-				"type-is": "~1.6.18",
-				"utils-merge": "1.0.1",
-				"vary": "~1.1.2"
-			}
-		},
-		"fast-xml-parser": {
-			"version": "4.4.1",
-			"resolved": "https://registry.npmjs.org/fast-xml-parser/-/fast-xml-parser-4.4.1.tgz",
-			"integrity": "sha512-xkjOecfnKGkSsOwtZ5Pz7Us/T6mrbPQrq0nh+aCO5V9nk5NLWmasAHumTKjiPJPWANe+kAZ84Jc8ooJkzZ88Sw==",
-			"optional": true,
-			"requires": {
-				"strnum": "^1.0.5"
-			}
-		},
-		"fill-range": {
-			"version": "7.1.1",
-			"resolved": "https://registry.npmjs.org/fill-range/-/fill-range-7.1.1.tgz",
-			"integrity": "sha512-YsGpe3WHLK8ZYi4tWDg2Jy3ebRz2rXowDxnld4bkQB00cc/1Zw9AWnC0i9ztDJitivtQvaI9KaLyKrc+hBW0yg==",
-			"dev": true,
-			"requires": {
-				"to-regex-range": "^5.0.1"
-			}
-		},
-		"finalhandler": {
-			"version": "1.3.1",
-			"resolved": "https://registry.npmjs.org/finalhandler/-/finalhandler-1.3.1.tgz",
-			"integrity": "sha512-6BN9trH7bp3qvnrRyzsBz+g3lZxTNZTbVO2EV1CS0WIcDbawYVdYvGflME/9QP0h0pYlCDBCTjYa9nZzMDpyxQ==",
-			"requires": {
-				"debug": "2.6.9",
-				"encodeurl": "~2.0.0",
-				"escape-html": "~1.0.3",
-				"on-finished": "2.4.1",
-				"parseurl": "~1.3.3",
-				"statuses": "2.0.1",
-				"unpipe": "~1.0.0"
-			}
-		},
-		"forwarded": {
-			"version": "0.2.0",
-			"resolved": "https://registry.npmjs.org/forwarded/-/forwarded-0.2.0.tgz",
-			"integrity": "sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow=="
-		},
-		"fresh": {
-			"version": "0.5.2",
-			"resolved": "https://registry.npmjs.org/fresh/-/fresh-0.5.2.tgz",
-			"integrity": "sha512-zJ2mQYM18rEFOudeV4GShTGIQ7RbzA7ozbU9I/XBpm7kqgMywgmylMwXHxZJmkVoYkna9d2pVXVXPdYTP9ej8Q=="
-		},
-		"fs-minipass": {
-			"version": "2.1.0",
-			"resolved": "https://registry.npmjs.org/fs-minipass/-/fs-minipass-2.1.0.tgz",
-			"integrity": "sha512-V/JgOLFCS+R6Vcq0slCuaeWEdNC3ouDlJMNIsacH2VtALiu9mV4LPrHc5cDl8k5aw6J8jwgWWpiTo5RYhmIzvg==",
-			"requires": {
-				"minipass": "^3.0.0"
-			}
-		},
-		"fs.realpath": {
-			"version": "1.0.0",
-			"resolved": "https://registry.npmjs.org/fs.realpath/-/fs.realpath-1.0.0.tgz",
-			"integrity": "sha512-OO0pH2lK6a0hZnAdau5ItzHPI6pUlvI7jMVnxUQRtw4owF2wk8lOSabtGDCTP4Ggrg2MbGnWO9X8K1t4+fGMDw=="
-		},
-		"fsevents": {
-			"version": "2.3.2",
-			"resolved": "https://registry.npmjs.org/fsevents/-/fsevents-2.3.2.tgz",
-			"integrity": "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==",
-			"dev": true,
-			"optional": true
-		},
-		"function-bind": {
-			"version": "1.1.2",
-			"resolved": "https://registry.npmjs.org/function-bind/-/function-bind-1.1.2.tgz",
-			"integrity": "sha512-7XHNxH7qX9xG5mIwxkhumTox/MIRNcOgDrxWsMt2pAr23WHp6MrRlN7FBSFpCpr+oVO0F744iUgR82nJMfG2SA=="
-		},
-		"gauge": {
-			"version": "3.0.2",
-			"resolved": "https://registry.npmjs.org/gauge/-/gauge-3.0.2.tgz",
-			"integrity": "sha512-+5J6MS/5XksCuXq++uFRsnUd7Ovu1XenbeuIuNRJxYWjgQbPuFhT14lAvsWfqfAmnwluf1OwMjz39HjfLPci0Q==",
-			"requires": {
-				"aproba": "^1.0.3 || ^2.0.0",
-				"color-support": "^1.1.2",
-				"console-control-strings": "^1.0.0",
-				"has-unicode": "^2.0.1",
-				"object-assign": "^4.1.1",
-				"signal-exit": "^3.0.0",
-				"string-width": "^4.2.3",
-				"strip-ansi": "^6.0.1",
-				"wide-align": "^1.1.2"
-			}
-		},
-		"get-intrinsic": {
-			"version": "1.3.0",
-			"resolved": "https://registry.npmjs.org/get-intrinsic/-/get-intrinsic-1.3.0.tgz",
-			"integrity": "sha512-9fSjSaos/fRIVIp+xSJlE6lfwhES7LNtKaCBIamHsjr2na1BiABJPo0mOjjz8GJDURarmCPGqaiVg5mfjb98CQ==",
-			"requires": {
-				"call-bind-apply-helpers": "^1.0.2",
-				"es-define-property": "^1.0.1",
-				"es-errors": "^1.3.0",
-				"es-object-atoms": "^1.1.1",
-				"function-bind": "^1.1.2",
-				"get-proto": "^1.0.1",
-				"gopd": "^1.2.0",
-				"has-symbols": "^1.1.0",
-				"hasown": "^2.0.2",
-				"math-intrinsics": "^1.1.0"
-			}
-		},
-		"get-proto": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/get-proto/-/get-proto-1.0.1.tgz",
-			"integrity": "sha512-sTSfBjoXBp89JvIKIefqw7U2CCebsc74kiY6awiGogKtoSGbgjYE/G/+l9sF3MWFPNc9IcoOC4ODfKHfxFmp0g==",
-			"requires": {
-				"dunder-proto": "^1.0.1",
-				"es-object-atoms": "^1.0.0"
-			}
-		},
-		"glob": {
-			"version": "7.2.3",
-			"resolved": "https://registry.npmjs.org/glob/-/glob-7.2.3.tgz",
-			"integrity": "sha512-nFR0zLpU2YCaRxwoCJvL6UvCH2JFyFVIvwTLsIf21AuHlMskA1hhTdk+LlYJtOlYt9v6dvszD2BGRqBL+iQK9Q==",
-			"requires": {
-				"fs.realpath": "^1.0.0",
-				"inflight": "^1.0.4",
-				"inherits": "2",
-				"minimatch": "^3.1.1",
-				"once": "^1.3.0",
-				"path-is-absolute": "^1.0.0"
-			}
-		},
-		"glob-parent": {
-			"version": "5.1.2",
-			"resolved": "https://registry.npmjs.org/glob-parent/-/glob-parent-5.1.2.tgz",
-			"integrity": "sha512-AOIgSQCepiJYwP3ARnGx+5VnTu2HBYdzbGP45eLw1vr3zB3vZLeyed1sC9hnbcOc9/SrMyM5RPQrkGz4aS9Zow==",
-			"dev": true,
-			"requires": {
-				"is-glob": "^4.0.1"
-			}
-		},
-		"gopd": {
-			"version": "1.2.0",
-			"resolved": "https://registry.npmjs.org/gopd/-/gopd-1.2.0.tgz",
-			"integrity": "sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg=="
-		},
-		"has-flag": {
-			"version": "3.0.0",
-			"resolved": "https://registry.npmjs.org/has-flag/-/has-flag-3.0.0.tgz",
-			"integrity": "sha512-sKJf1+ceQBr4SMkvQnBDNDtf4TXpVhVGateu0t918bl30FnbE2m4vNLX+VWe/dpjlb+HugGYzW7uQXH98HPEYw==",
-			"dev": true
-		},
-		"has-symbols": {
-			"version": "1.1.0",
-			"resolved": "https://registry.npmjs.org/has-symbols/-/has-symbols-1.1.0.tgz",
-			"integrity": "sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ=="
-		},
-		"has-unicode": {
-			"version": "2.0.1",
-			"resolved": "https://registry.npmjs.org/has-unicode/-/has-unicode-2.0.1.tgz",
-			"integrity": "sha512-8Rf9Y83NBReMnx0gFzA8JImQACstCYWUplepDa9xprwwtmgEZUF0h/i5xSA625zB/I37EtrswSST6OXxwaaIJQ=="
-		},
-		"hasown": {
-			"version": "2.0.2",
-			"resolved": "https://registry.npmjs.org/hasown/-/hasown-2.0.2.tgz",
-			"integrity": "sha512-0hJU9SCPvmMzIBdZFqNPXWa6dqh7WdH0cII9y+CyS8rG3nL48Bclra9HmKhVVUHyPWNH5Y7xDwAB7bfgSjkUMQ==",
-			"requires": {
-				"function-bind": "^1.1.2"
-			}
-		},
-		"http-errors": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/http-errors/-/http-errors-2.0.0.tgz",
-			"integrity": "sha512-FtwrG/euBzaEjYeRqOgly7G0qviiXoJWnvEH2Z1plBdXgbyjv34pHTSb9zoeHMyDy33+DWy5Wt9Wo+TURtOYSQ==",
-			"requires": {
-				"depd": "2.0.0",
-				"inherits": "2.0.4",
-				"setprototypeof": "1.2.0",
-				"statuses": "2.0.1",
-				"toidentifier": "1.0.1"
-			}
-		},
-		"https-proxy-agent": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/https-proxy-agent/-/https-proxy-agent-5.0.1.tgz",
-			"integrity": "sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA==",
-			"requires": {
-				"agent-base": "6",
-				"debug": "4"
-			},
-			"dependencies": {
-				"debug": {
-					"version": "4.3.4",
-					"resolved": "https://registry.npmjs.org/debug/-/debug-4.3.4.tgz",
-					"integrity": "sha512-PRWFHuSU3eDtQJPvnNY7Jcket1j0t5OuOsFzPPzsekD52Zl8qUfFIPEiswXqIvHWGVHOgX+7G/vCNNhehwxfkQ==",
-					"requires": {
-						"ms": "2.1.2"
-					}
-				},
-				"ms": {
-					"version": "2.1.2",
-					"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.2.tgz",
-					"integrity": "sha512-sGkPx+VjMtmA6MX27oA4FBFELFCZZ4S4XqeGOXCv68tT+jb3vk/RyaKWP0PTKyWtmLSM0b+adUTEvbs1PEaH2w=="
-				}
-			}
-		},
-		"iconv-lite": {
-			"version": "0.4.24",
-			"resolved": "https://registry.npmjs.org/iconv-lite/-/iconv-lite-0.4.24.tgz",
-			"integrity": "sha512-v3MXnZAcvnywkTUEZomIActle7RXXeedOR31wwl7VlyoXO4Qi9arvSenNQWne1TcRwhCL1HwLI21bEqdpj8/rA==",
-			"requires": {
-				"safer-buffer": ">= 2.1.2 < 3"
-			}
-		},
-		"ieee754": {
-			"version": "1.2.1",
-			"resolved": "https://registry.npmjs.org/ieee754/-/ieee754-1.2.1.tgz",
-			"integrity": "sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA=="
-		},
-		"ignore-by-default": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/ignore-by-default/-/ignore-by-default-1.0.1.tgz",
-			"integrity": "sha512-Ius2VYcGNk7T90CppJqcIkS5ooHUZyIQK+ClZfMfMNFEF9VSE73Fq+906u/CWu92x4gzZMWOwfFYckPObzdEbA==",
-			"dev": true
-		},
-		"inflight": {
-			"version": "1.0.6",
-			"resolved": "https://registry.npmjs.org/inflight/-/inflight-1.0.6.tgz",
-			"integrity": "sha512-k92I/b08q4wvFscXCLvqfsHCrjrF7yiXsQuIVvVE7N82W3+aqpzuUdBbfhWcy/FZR3/4IgflMgKLOsvPDrGCJA==",
-			"requires": {
-				"once": "^1.3.0",
-				"wrappy": "1"
-			}
-		},
-		"inherits": {
-			"version": "2.0.4",
-			"resolved": "https://registry.npmjs.org/inherits/-/inherits-2.0.4.tgz",
-			"integrity": "sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ=="
-		},
-		"ip-address": {
-			"version": "9.0.5",
-			"resolved": "https://registry.npmjs.org/ip-address/-/ip-address-9.0.5.tgz",
-			"integrity": "sha512-zHtQzGojZXTwZTHQqra+ETKd4Sn3vgi7uBmlPoXVWZqYvuKmtI0l/VZTjqGmJY9x88GGOaZ9+G9ES8hC4T4X8g==",
-			"requires": {
-				"jsbn": "1.1.0",
-				"sprintf-js": "^1.1.3"
-			}
-		},
-		"ipaddr.js": {
-			"version": "1.9.1",
-			"resolved": "https://registry.npmjs.org/ipaddr.js/-/ipaddr.js-1.9.1.tgz",
-			"integrity": "sha512-0KI/607xoxSToH7GjN1FfSbLoU0+btTicjsQSWQlh/hZykN8KpmMf7uYwPW3R+akZ6R/w18ZlXSHBYXiYUPO3g=="
-		},
-		"is-binary-path": {
-			"version": "2.1.0",
-			"resolved": "https://registry.npmjs.org/is-binary-path/-/is-binary-path-2.1.0.tgz",
-			"integrity": "sha512-ZMERYes6pDydyuGidse7OsHxtbI7WVeUEozgR/g7rd0xUimYNlvZRE/K2MgZTjWy725IfelLeVcEM97mmtRGXw==",
-			"dev": true,
-			"requires": {
-				"binary-extensions": "^2.0.0"
-			}
-		},
-		"is-extglob": {
-			"version": "2.1.1",
-			"resolved": "https://registry.npmjs.org/is-extglob/-/is-extglob-2.1.1.tgz",
-			"integrity": "sha512-SbKbANkN603Vi4jEZv49LeVJMn4yGwsbzZworEoyEiutsN3nJYdbO36zfhGJ6QEDpOZIFkDtnq5JRxmvl3jsoQ==",
-			"dev": true
-		},
-		"is-fullwidth-code-point": {
-			"version": "3.0.0",
-			"resolved": "https://registry.npmjs.org/is-fullwidth-code-point/-/is-fullwidth-code-point-3.0.0.tgz",
-			"integrity": "sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg=="
-		},
-		"is-glob": {
-			"version": "4.0.3",
-			"resolved": "https://registry.npmjs.org/is-glob/-/is-glob-4.0.3.tgz",
-			"integrity": "sha512-xelSayHH36ZgE7ZWhli7pW34hNbNl8Ojv5KVmkJD4hBdD3th8Tfk9vYasLM+mXWOZhFkgZfxhLSnrwRr4elSSg==",
-			"dev": true,
-			"requires": {
-				"is-extglob": "^2.1.1"
-			}
-		},
-		"is-number": {
-			"version": "7.0.0",
-			"resolved": "https://registry.npmjs.org/is-number/-/is-number-7.0.0.tgz",
-			"integrity": "sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==",
-			"dev": true
-		},
-		"jsbn": {
-			"version": "1.1.0",
-			"resolved": "https://registry.npmjs.org/jsbn/-/jsbn-1.1.0.tgz",
-			"integrity": "sha512-4bYVV3aAMtDTTu4+xsDYa6sy9GyJ69/amsu9sYF2zqjiEoZA5xJi3BrfX3uY+/IekIu7MwdObdbDWpoZdBv3/A=="
-		},
-		"jsonwebtoken": {
-			"version": "9.0.2",
-			"resolved": "https://registry.npmjs.org/jsonwebtoken/-/jsonwebtoken-9.0.2.tgz",
-			"integrity": "sha512-PRp66vJ865SSqOlgqS8hujT5U4AOgMfhrwYIuIhfKaoSCZcirrmASQr8CX7cUg+RMih+hgznrjp99o+W4pJLHQ==",
-			"requires": {
-				"jws": "^3.2.2",
-				"lodash.includes": "^4.3.0",
-				"lodash.isboolean": "^3.0.3",
-				"lodash.isinteger": "^4.0.4",
-				"lodash.isnumber": "^3.0.3",
-				"lodash.isplainobject": "^4.0.6",
-				"lodash.isstring": "^4.0.1",
-				"lodash.once": "^4.0.0",
-				"ms": "^2.1.1",
-				"semver": "^7.5.4"
-			},
-			"dependencies": {
-				"ms": {
-					"version": "2.1.3",
-					"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
-					"integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="
-				}
-			}
-		},
-		"jwa": {
-			"version": "1.4.1",
-			"resolved": "https://registry.npmjs.org/jwa/-/jwa-1.4.1.tgz",
-			"integrity": "sha512-qiLX/xhEEFKUAJ6FiBMbes3w9ATzyk5W7Hvzpa/SLYdxNtng+gcurvrI7TbACjIXlsJyr05/S1oUhZrc63evQA==",
-			"requires": {
-				"buffer-equal-constant-time": "1.0.1",
-				"ecdsa-sig-formatter": "1.0.11",
-				"safe-buffer": "^5.0.1"
-			}
-		},
-		"jws": {
-			"version": "3.2.2",
-			"resolved": "https://registry.npmjs.org/jws/-/jws-3.2.2.tgz",
-			"integrity": "sha512-YHlZCB6lMTllWDtSPHz/ZXTsi8S00usEV6v1tjq8tOUZzw7DpSDWVXjXDre6ed1w/pd495ODpHZYSdkRTsa0HA==",
-			"requires": {
-				"jwa": "^1.4.1",
-				"safe-buffer": "^5.0.1"
-			}
-		},
-		"lodash.includes": {
-			"version": "4.3.0",
-			"resolved": "https://registry.npmjs.org/lodash.includes/-/lodash.includes-4.3.0.tgz",
-			"integrity": "sha512-W3Bx6mdkRTGtlJISOvVD/lbqjTlPPUDTMnlXZFnVwi9NKJ6tiAk6LVdlhZMm17VZisqhKcgzpO5Wz91PCt5b0w=="
-		},
-		"lodash.isboolean": {
-			"version": "3.0.3",
-			"resolved": "https://registry.npmjs.org/lodash.isboolean/-/lodash.isboolean-3.0.3.tgz",
-			"integrity": "sha512-Bz5mupy2SVbPHURB98VAcw+aHh4vRV5IPNhILUCsOzRmsTmSQ17jIuqopAentWoehktxGd9e/hbIXq980/1QJg=="
-		},
-		"lodash.isinteger": {
-			"version": "4.0.4",
-			"resolved": "https://registry.npmjs.org/lodash.isinteger/-/lodash.isinteger-4.0.4.tgz",
-			"integrity": "sha512-DBwtEWN2caHQ9/imiNeEA5ys1JoRtRfY3d7V9wkqtbycnAmTvRRmbHKDV4a0EYc678/dia0jrte4tjYwVBaZUA=="
-		},
-		"lodash.isnumber": {
-			"version": "3.0.3",
-			"resolved": "https://registry.npmjs.org/lodash.isnumber/-/lodash.isnumber-3.0.3.tgz",
-			"integrity": "sha512-QYqzpfwO3/CWf3XP+Z+tkQsfaLL/EnUlXWVkIk5FUPc4sBdTehEqZONuyRt2P67PXAk+NXmTBcc97zw9t1FQrw=="
-		},
-		"lodash.isplainobject": {
-			"version": "4.0.6",
-			"resolved": "https://registry.npmjs.org/lodash.isplainobject/-/lodash.isplainobject-4.0.6.tgz",
-			"integrity": "sha512-oSXzaWypCMHkPC3NvBEaPHf0KsA5mvPrOPgQWDsbg8n7orZ290M0BmC/jgRZ4vcJ6DTAhjrsSYgdsW/F+MFOBA=="
-		},
-		"lodash.isstring": {
-			"version": "4.0.1",
-			"resolved": "https://registry.npmjs.org/lodash.isstring/-/lodash.isstring-4.0.1.tgz",
-			"integrity": "sha512-0wJxfxH1wgO3GrbuP+dTTk7op+6L41QCXbGINEmD+ny/G/eCqGzxyCsh7159S+mgDDcoarnBw6PC1PS5+wUGgw=="
-		},
-		"lodash.once": {
-			"version": "4.1.1",
-			"resolved": "https://registry.npmjs.org/lodash.once/-/lodash.once-4.1.1.tgz",
-			"integrity": "sha512-Sb487aTOCr9drQVL8pIxOzVhafOjZN9UU54hiN8PU3uAiSV7lx1yYNpbNmex2PK6dSJoNTSJUUswT651yww3Mg=="
-		},
-		"make-dir": {
-			"version": "3.1.0",
-			"resolved": "https://registry.npmjs.org/make-dir/-/make-dir-3.1.0.tgz",
-			"integrity": "sha512-g3FeP20LNwhALb/6Cz6Dd4F2ngze0jz7tbzrD2wAV+o9FeNHe4rL+yK2md0J/fiSf1sa1ADhXqi5+oVwOM/eGw==",
-			"requires": {
-				"semver": "^6.0.0"
-			},
-			"dependencies": {
-				"semver": {
-					"version": "6.3.1",
-					"resolved": "https://registry.npmjs.org/semver/-/semver-6.3.1.tgz",
-					"integrity": "sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA=="
-				}
-			}
-		},
-		"math-intrinsics": {
-			"version": "1.1.0",
-			"resolved": "https://registry.npmjs.org/math-intrinsics/-/math-intrinsics-1.1.0.tgz",
-			"integrity": "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="
-		},
-		"media-typer": {
-			"version": "0.3.0",
-			"resolved": "https://registry.npmjs.org/media-typer/-/media-typer-0.3.0.tgz",
-			"integrity": "sha512-dq+qelQ9akHpcOl/gUVRTxVIOkAJ1wR3QAvb4RsVjS8oVoFjDGTc679wJYmUmknUF5HwMLOgb5O+a3KxfWapPQ=="
-		},
-		"memory-pager": {
-			"version": "1.5.0",
-			"resolved": "https://registry.npmjs.org/memory-pager/-/memory-pager-1.5.0.tgz",
-			"integrity": "sha512-ZS4Bp4r/Zoeq6+NLJpP+0Zzm0pR8whtGPf1XExKLJBAczGMnSi3It14OiNCStjQjM6NU1okjQGSxgEZN8eBYKg==",
-			"optional": true
-		},
-		"merge-descriptors": {
-			"version": "1.0.3",
-			"resolved": "https://registry.npmjs.org/merge-descriptors/-/merge-descriptors-1.0.3.tgz",
-			"integrity": "sha512-gaNvAS7TZ897/rVaZ0nMtAyxNyi/pdbjbAwUpFQpN70GqnVfOiXpeUUMKRBmzXaSQ8DdTX4/0ms62r2K+hE6mQ=="
-		},
-		"methods": {
-			"version": "1.1.2",
-			"resolved": "https://registry.npmjs.org/methods/-/methods-1.1.2.tgz",
-			"integrity": "sha512-iclAHeNqNm68zFtnZ0e+1L2yUIdvzNoauKU4WBA3VvH/vPFieF7qfRlwUZU+DA9P9bPXIS90ulxoUoCH23sV2w=="
-		},
-		"mime": {
-			"version": "1.6.0",
-			"resolved": "https://registry.npmjs.org/mime/-/mime-1.6.0.tgz",
-			"integrity": "sha512-x0Vn8spI+wuJ1O6S7gnbaQg8Pxh4NNHb7KSINmEWKiPE4RKOplvijn+NkmYmmRgP68mc70j2EbeTFRsrswaQeg=="
-		},
-		"mime-db": {
-			"version": "1.52.0",
-			"resolved": "https://registry.npmjs.org/mime-db/-/mime-db-1.52.0.tgz",
-			"integrity": "sha512-sPU4uV7dYlvtWJxwwxHD0PuihVNiE7TyAbQ5SWxDCB9mUYvOgroQOwYQQOKPJ8CIbE+1ETVlOoK1UC2nU3gYvg=="
-		},
-		"mime-types": {
-			"version": "2.1.35",
-			"resolved": "https://registry.npmjs.org/mime-types/-/mime-types-2.1.35.tgz",
-			"integrity": "sha512-ZDY+bPm5zTTF+YpCrAU9nK0UgICYPT0QtT1NZWFv4s++TNkcgVaT0g6+4R2uI4MjQjzysHB1zxuWL50hzaeXiw==",
-			"requires": {
-				"mime-db": "1.52.0"
-			}
-		},
-		"minimatch": {
-			"version": "3.1.2",
-			"resolved": "https://registry.npmjs.org/minimatch/-/minimatch-3.1.2.tgz",
-			"integrity": "sha512-J7p63hRiAjw1NDEww1W7i37+ByIrOWO5XQQAzZ3VOcL0PNybwpfmV/N05zFAzwQ9USyEcX6t3UO+K5aqBQOIHw==",
-			"requires": {
-				"brace-expansion": "^1.1.7"
-			}
-		},
-		"minipass": {
-			"version": "3.1.6",
-			"resolved": "https://registry.npmjs.org/minipass/-/minipass-3.1.6.tgz",
-			"integrity": "sha512-rty5kpw9/z8SX9dmxblFA6edItUmwJgMeYDZRrwlIVN27i8gysGbznJwUggw2V/FVqFSDdWy040ZPS811DYAqQ==",
-			"requires": {
-				"yallist": "^4.0.0"
-			}
-		},
-		"minizlib": {
-			"version": "2.1.2",
-			"resolved": "https://registry.npmjs.org/minizlib/-/minizlib-2.1.2.tgz",
-			"integrity": "sha512-bAxsR8BVfj60DWXHE3u30oHzfl4G7khkSuPW+qvpd7jFRHm7dLxOjUk1EHACJ/hxLY8phGJ0YhYHZo7jil7Qdg==",
-			"requires": {
-				"minipass": "^3.0.0",
-				"yallist": "^4.0.0"
-			}
-		},
-		"mkdirp": {
-			"version": "1.0.4",
-			"resolved": "https://registry.npmjs.org/mkdirp/-/mkdirp-1.0.4.tgz",
-			"integrity": "sha512-vVqVZQyf3WLx2Shd0qJ9xuvqgAyKPLAiqITEtqW0oIUjzo3PePDd6fW9iFz30ef7Ysp/oiWqbhszeGWW2T6Gzw=="
-		},
-		"mongodb": {
-			"version": "4.17.2",
-			"resolved": "https://registry.npmjs.org/mongodb/-/mongodb-4.17.2.tgz",
-			"integrity": "sha512-mLV7SEiov2LHleRJPMPrK2PMyhXFZt2UQLC4VD4pnth3jMjYKHhtqfwwkkvS/NXuo/Fp3vbhaNcXrIDaLRb9Tg==",
-			"requires": {
-				"@aws-sdk/credential-providers": "^3.186.0",
-				"@mongodb-js/saslprep": "^1.1.0",
-				"bson": "^4.7.2",
-				"mongodb-connection-string-url": "^2.6.0",
-				"socks": "^2.7.1"
-			}
-		},
-		"mongodb-connection-string-url": {
-			"version": "2.6.0",
-			"resolved": "https://registry.npmjs.org/mongodb-connection-string-url/-/mongodb-connection-string-url-2.6.0.tgz",
-			"integrity": "sha512-WvTZlI9ab0QYtTYnuMLgobULWhokRjtC7db9LtcVfJ+Hsnyr5eo6ZtNAt3Ly24XZScGMelOcGtm7lSn0332tPQ==",
-			"requires": {
-				"@types/whatwg-url": "^8.2.1",
-				"whatwg-url": "^11.0.0"
-			}
-		},
-		"ms": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/ms/-/ms-2.0.0.tgz",
-			"integrity": "sha512-Tpp60P6IUJDTuOq/5Z8cdskzJujfwqfOTkrwIwj7IRISpnkJnT6SyJ4PCPnGMoFjC9ddhal5KVIYtAt97ix05A=="
-		},
-		"negotiator": {
-			"version": "0.6.3",
-			"resolved": "https://registry.npmjs.org/negotiator/-/negotiator-0.6.3.tgz",
-			"integrity": "sha512-+EUsqGPLsM+j/zdChZjsnX51g4XrHFOIXwfnCVPGlQk/k5giakcKsuxCObBRu6DSm9opw/O6slWbJdghQM4bBg=="
-		},
-		"node-addon-api": {
-			"version": "3.2.1",
-			"resolved": "https://registry.npmjs.org/node-addon-api/-/node-addon-api-3.2.1.tgz",
-			"integrity": "sha512-mmcei9JghVNDYydghQmeDX8KoAm0FAiYyIcUt/N4nhyAipB17pllZQDOJD2fotxABnt4Mdz+dKTO7eftLg4d0A=="
-		},
-		"node-fetch": {
-			"version": "2.6.7",
-			"resolved": "https://registry.npmjs.org/node-fetch/-/node-fetch-2.6.7.tgz",
-			"integrity": "sha512-ZjMPFEfVx5j+y2yF35Kzx5sF7kDzxuDj6ziH4FFbOp87zKDZNx8yExJIb05OGF4Nlt9IHFIMBkRl41VdvcNdbQ==",
-			"requires": {
-				"whatwg-url": "^5.0.0"
-			},
-			"dependencies": {
-				"tr46": {
-					"version": "0.0.3",
-					"resolved": "https://registry.npmjs.org/tr46/-/tr46-0.0.3.tgz",
-					"integrity": "sha1-gYT9NH2snNwYWZLzpmIuFLnZq2o="
-				},
-				"webidl-conversions": {
-					"version": "3.0.1",
-					"resolved": "https://registry.npmjs.org/webidl-conversions/-/webidl-conversions-3.0.1.tgz",
-					"integrity": "sha1-JFNCdeKnvGvnvIZhHMFq4KVlSHE="
-				},
-				"whatwg-url": {
-					"version": "5.0.0",
-					"resolved": "https://registry.npmjs.org/whatwg-url/-/whatwg-url-5.0.0.tgz",
-					"integrity": "sha1-lmRU6HZUYuN2RNNib2dCzotwll0=",
-					"requires": {
-						"tr46": "~0.0.3",
-						"webidl-conversions": "^3.0.0"
-					}
-				}
-			}
-		},
-		"nodemon": {
-			"version": "3.1.9",
-			"resolved": "https://registry.npmjs.org/nodemon/-/nodemon-3.1.9.tgz",
-			"integrity": "sha512-hdr1oIb2p6ZSxu3PB2JWWYS7ZQ0qvaZsc3hK8DR8f02kRzc8rjYmxAIvdz+aYC+8F2IjNaB7HMcSDg8nQpJxyg==",
-			"dev": true,
-			"requires": {
-				"chokidar": "^3.5.2",
-				"debug": "^4",
-				"ignore-by-default": "^1.0.1",
-				"minimatch": "^3.1.2",
-				"pstree.remy": "^1.1.8",
-				"semver": "^7.5.3",
-				"simple-update-notifier": "^2.0.0",
-				"supports-color": "^5.5.0",
-				"touch": "^3.1.0",
-				"undefsafe": "^2.0.5"
-			},
-			"dependencies": {
-				"debug": {
-					"version": "4.4.0",
-					"resolved": "https://registry.npmjs.org/debug/-/debug-4.4.0.tgz",
-					"integrity": "sha512-6WTZ/IxCY/T6BALoZHaE4ctp9xm+Z5kY/pzYaCHRFeyVhojxlrm+46y68HA6hr0TcwEssoxNiDEUJQjfPZ/RYA==",
-					"dev": true,
-					"requires": {
-						"ms": "^2.1.3"
-					}
-				},
-				"ms": {
-					"version": "2.1.3",
-					"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
-					"integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
-					"dev": true
-				}
-			}
-		},
-		"nopt": {
-			"version": "5.0.0",
-			"resolved": "https://registry.npmjs.org/nopt/-/nopt-5.0.0.tgz",
-			"integrity": "sha512-Tbj67rffqceeLpcRXrT7vKAN8CwfPeIBgM7E6iBkmKLV7bEMwpGgYLGv0jACUsECaa/vuxP0IjEont6umdMgtQ==",
-			"requires": {
-				"abbrev": "1"
-			}
-		},
-		"normalize-path": {
-			"version": "3.0.0",
-			"resolved": "https://registry.npmjs.org/normalize-path/-/normalize-path-3.0.0.tgz",
-			"integrity": "sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA==",
-			"dev": true
-		},
-		"npmlog": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/npmlog/-/npmlog-5.0.1.tgz",
-			"integrity": "sha512-AqZtDUWOMKs1G/8lwylVjrdYgqA4d9nu8hc+0gzRxlDb1I10+FHBGMXs6aiQHFdCUUlqH99MUMuLfzWDNDtfxw==",
-			"requires": {
-				"are-we-there-yet": "^2.0.0",
-				"console-control-strings": "^1.1.0",
-				"gauge": "^3.0.0",
-				"set-blocking": "^2.0.0"
-			}
-		},
-		"object-assign": {
-			"version": "4.1.1",
-			"resolved": "https://registry.npmjs.org/object-assign/-/object-assign-4.1.1.tgz",
-			"integrity": "sha512-rJgTQnkUnH1sFw8yT6VSU3zD3sWmu6sZhIseY8VX+GRu3P6F7Fu+JNDoXfklElbLJSnc3FUQHVe4cU5hj+BcUg=="
-		},
-		"object-inspect": {
-			"version": "1.13.4",
-			"resolved": "https://registry.npmjs.org/object-inspect/-/object-inspect-1.13.4.tgz",
-			"integrity": "sha512-W67iLl4J2EXEGTbfeHCffrjDfitvLANg0UlX3wFUUSTx92KXRFegMHUVgSqE+wvhAbi4WqjGg9czysTV2Epbew=="
-		},
-		"on-finished": {
-			"version": "2.4.1",
-			"resolved": "https://registry.npmjs.org/on-finished/-/on-finished-2.4.1.tgz",
-			"integrity": "sha512-oVlzkg3ENAhCk2zdv7IJwd/QUD4z2RxRwpkcGY8psCVcCYZNq4wYnVWALHM+brtuJjePWiYF/ClmuDr8Ch5+kg==",
-			"requires": {
-				"ee-first": "1.1.1"
-			}
-		},
-		"once": {
-			"version": "1.4.0",
-			"resolved": "https://registry.npmjs.org/once/-/once-1.4.0.tgz",
-			"integrity": "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==",
-			"requires": {
-				"wrappy": "1"
-			}
-		},
-		"parseurl": {
-			"version": "1.3.3",
-			"resolved": "https://registry.npmjs.org/parseurl/-/parseurl-1.3.3.tgz",
-			"integrity": "sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ=="
-		},
-		"path-is-absolute": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/path-is-absolute/-/path-is-absolute-1.0.1.tgz",
-			"integrity": "sha512-AVbw3UJ2e9bq64vSaS9Am0fje1Pa8pbGqTTsmXfaIiMpnr5DlDhfJOuLj9Sf95ZPVDAUerDfEk88MPmPe7UCQg=="
-		},
-		"path-to-regexp": {
-			"version": "0.1.12",
-			"resolved": "https://registry.npmjs.org/path-to-regexp/-/path-to-regexp-0.1.12.tgz",
-			"integrity": "sha512-RA1GjUVMnvYFxuqovrEqZoxxW5NUZqbwKtYz/Tt7nXerk0LbLblQmrsgdeOxV5SFHf0UDggjS/bSeOZwt1pmEQ=="
-		},
-		"picomatch": {
-			"version": "2.3.1",
-			"resolved": "https://registry.npmjs.org/picomatch/-/picomatch-2.3.1.tgz",
-			"integrity": "sha512-JU3teHTNjmE2VCGFzuY8EXzCDVwEqB2a8fsIvwaStHhAWJEeVd1o1QD80CU6+ZdEXXSLbSsuLwJjkCBWqRQUVA==",
-			"dev": true
-		},
-		"proxy-addr": {
-			"version": "2.0.7",
-			"resolved": "https://registry.npmjs.org/proxy-addr/-/proxy-addr-2.0.7.tgz",
-			"integrity": "sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg==",
-			"requires": {
-				"forwarded": "0.2.0",
-				"ipaddr.js": "1.9.1"
-			}
-		},
-		"pstree.remy": {
-			"version": "1.1.8",
-			"resolved": "https://registry.npmjs.org/pstree.remy/-/pstree.remy-1.1.8.tgz",
-			"integrity": "sha512-77DZwxQmxKnu3aR542U+X8FypNzbfJ+C5XQDk3uWjWxn6151aIMGthWYRXTqT1E5oJvg+ljaa2OJi+VfvCOQ8w==",
-			"dev": true
-		},
-		"punycode": {
-			"version": "2.3.1",
-			"resolved": "https://registry.npmjs.org/punycode/-/punycode-2.3.1.tgz",
-			"integrity": "sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg=="
-		},
-		"qs": {
-			"version": "6.13.0",
-			"resolved": "https://registry.npmjs.org/qs/-/qs-6.13.0.tgz",
-			"integrity": "sha512-+38qI9SOr8tfZ4QmJNplMUxqjbe7LKvvZgWdExBOmd+egZTtjLB67Gu0HRX3u/XOq7UU2Nx6nsjvS16Z9uwfpg==",
-			"requires": {
-				"side-channel": "^1.0.6"
-			}
-		},
-		"range-parser": {
-			"version": "1.2.1",
-			"resolved": "https://registry.npmjs.org/range-parser/-/range-parser-1.2.1.tgz",
-			"integrity": "sha512-Hrgsx+orqoygnmhFbKaHE6c296J+HTAQXoxEF6gNupROmmGJRoyzfG3ccAveqCBrwr/2yxQ5BVd/GTl5agOwSg=="
-		},
-		"raw-body": {
-			"version": "2.5.2",
-			"resolved": "https://registry.npmjs.org/raw-body/-/raw-body-2.5.2.tgz",
-			"integrity": "sha512-8zGqypfENjCIqGhgXToC8aB2r7YrBX+AQAfIPs/Mlk+BtPTztOvTS01NRW/3Eh60J+a48lt8qsCzirQ6loCVfA==",
-			"requires": {
-				"bytes": "3.1.2",
-				"http-errors": "2.0.0",
-				"iconv-lite": "0.4.24",
-				"unpipe": "1.0.0"
-			}
-		},
-		"readable-stream": {
-			"version": "3.6.0",
-			"resolved": "https://registry.npmjs.org/readable-stream/-/readable-stream-3.6.0.tgz",
-			"integrity": "sha512-BViHy7LKeTz4oNnkcLJ+lVSL6vpiFeX6/d3oSH8zCW7UxP2onchk+vTGB143xuFjHS3deTgkKoXXymXqymiIdA==",
-			"requires": {
-				"inherits": "^2.0.3",
-				"string_decoder": "^1.1.1",
-				"util-deprecate": "^1.0.1"
-			}
-		},
-		"readdirp": {
-			"version": "3.6.0",
-			"resolved": "https://registry.npmjs.org/readdirp/-/readdirp-3.6.0.tgz",
-			"integrity": "sha512-hOS089on8RduqdbhvQ5Z37A0ESjsqz6qnRcffsMU3495FuTdqSm+7bhJ29JvIOsBDEEnan5DPu9t3To9VRlMzA==",
-			"dev": true,
-			"requires": {
-				"picomatch": "^2.2.1"
-			}
-		},
-		"rimraf": {
-			"version": "3.0.2",
-			"resolved": "https://registry.npmjs.org/rimraf/-/rimraf-3.0.2.tgz",
-			"integrity": "sha512-JZkJMZkAGFFPP2YqXZXPbMlMBgsxzE8ILs4lMIX/2o0L9UBw9O/Y3o6wFw/i9YLapcUJWwqbi3kdxIPdC62TIA==",
-			"requires": {
-				"glob": "^7.1.3"
-			}
-		},
-		"safe-buffer": {
-			"version": "5.2.1",
-			"resolved": "https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.2.1.tgz",
-			"integrity": "sha512-rp3So07KcdmmKbGvgaNxQSJr7bGVSVk5S9Eq1F+ppbRo70+YeaDxkw5Dd8NPN+GD6bjnYm2VuPuCXmpuYvmCXQ=="
-		},
-		"safer-buffer": {
-			"version": "2.1.2",
-			"resolved": "https://registry.npmjs.org/safer-buffer/-/safer-buffer-2.1.2.tgz",
-			"integrity": "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg=="
-		},
-		"semver": {
-			"version": "7.7.1",
-			"resolved": "https://registry.npmjs.org/semver/-/semver-7.7.1.tgz",
-			"integrity": "sha512-hlq8tAfn0m/61p4BVRcPzIGr6LKiMwo4VM6dGi6pt4qcRkmNzTcWq6eCEjEh+qXjkMDvPlOFFSGwQjoEa6gyMA=="
-		},
-		"send": {
-			"version": "0.19.0",
-			"resolved": "https://registry.npmjs.org/send/-/send-0.19.0.tgz",
-			"integrity": "sha512-dW41u5VfLXu8SJh5bwRmyYUbAoSB3c9uQh6L8h/KtsFREPWpbX1lrljJo186Jc4nmci/sGUZ9a0a0J2zgfq2hw==",
-			"requires": {
-				"debug": "2.6.9",
-				"depd": "2.0.0",
-				"destroy": "1.2.0",
-				"encodeurl": "~1.0.2",
-				"escape-html": "~1.0.3",
-				"etag": "~1.8.1",
-				"fresh": "0.5.2",
-				"http-errors": "2.0.0",
-				"mime": "1.6.0",
-				"ms": "2.1.3",
-				"on-finished": "2.4.1",
-				"range-parser": "~1.2.1",
-				"statuses": "2.0.1"
-			},
-			"dependencies": {
-				"encodeurl": {
-					"version": "1.0.2",
-					"resolved": "https://registry.npmjs.org/encodeurl/-/encodeurl-1.0.2.tgz",
-					"integrity": "sha512-TPJXq8JqFaVYm2CWmPvnP2Iyo4ZSM7/QKcSmuMLDObfpH5fi7RUGmd/rTDf+rut/saiDiQEeVTNgAmJEdAOx0w=="
-				},
-				"ms": {
-					"version": "2.1.3",
-					"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
-					"integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="
-				}
-			}
-		},
-		"serve-static": {
-			"version": "1.16.2",
-			"resolved": "https://registry.npmjs.org/serve-static/-/serve-static-1.16.2.tgz",
-			"integrity": "sha512-VqpjJZKadQB/PEbEwvFdO43Ax5dFBZ2UECszz8bQ7pi7wt//PWe1P6MN7eCnjsatYtBT6EuiClbjSWP2WrIoTw==",
-			"requires": {
-				"encodeurl": "~2.0.0",
-				"escape-html": "~1.0.3",
-				"parseurl": "~1.3.3",
-				"send": "0.19.0"
-			}
-		},
-		"set-blocking": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/set-blocking/-/set-blocking-2.0.0.tgz",
-			"integrity": "sha1-BF+XgtARrppoA93TgrJDkrPYkPc="
-		},
-		"setprototypeof": {
-			"version": "1.2.0",
-			"resolved": "https://registry.npmjs.org/setprototypeof/-/setprototypeof-1.2.0.tgz",
-			"integrity": "sha512-E5LDX7Wrp85Kil5bhZv46j8jOeboKq5JMmYM3gVGdGH8xFpPWXUMsNrlODCrkoxMEeNi/XZIwuRvY4XNwYMJpw=="
-		},
-		"side-channel": {
-			"version": "1.1.0",
-			"resolved": "https://registry.npmjs.org/side-channel/-/side-channel-1.1.0.tgz",
-			"integrity": "sha512-ZX99e6tRweoUXqR+VBrslhda51Nh5MTQwou5tnUDgbtyM0dBgmhEDtWGP/xbKn6hqfPRHujUNwz5fy/wbbhnpw==",
-			"requires": {
-				"es-errors": "^1.3.0",
-				"object-inspect": "^1.13.3",
-				"side-channel-list": "^1.0.0",
-				"side-channel-map": "^1.0.1",
-				"side-channel-weakmap": "^1.0.2"
-			}
-		},
-		"side-channel-list": {
-			"version": "1.0.0",
-			"resolved": "https://registry.npmjs.org/side-channel-list/-/side-channel-list-1.0.0.tgz",
-			"integrity": "sha512-FCLHtRD/gnpCiCHEiJLOwdmFP+wzCmDEkc9y7NsYxeF4u7Btsn1ZuwgwJGxImImHicJArLP4R0yX4c2KCrMrTA==",
-			"requires": {
-				"es-errors": "^1.3.0",
-				"object-inspect": "^1.13.3"
-			}
-		},
-		"side-channel-map": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/side-channel-map/-/side-channel-map-1.0.1.tgz",
-			"integrity": "sha512-VCjCNfgMsby3tTdo02nbjtM/ewra6jPHmpThenkTYh8pG9ucZ/1P8So4u4FGBek/BjpOVsDCMoLA/iuBKIFXRA==",
-			"requires": {
-				"call-bound": "^1.0.2",
-				"es-errors": "^1.3.0",
-				"get-intrinsic": "^1.2.5",
-				"object-inspect": "^1.13.3"
-			}
-		},
-		"side-channel-weakmap": {
-			"version": "1.0.2",
-			"resolved": "https://registry.npmjs.org/side-channel-weakmap/-/side-channel-weakmap-1.0.2.tgz",
-			"integrity": "sha512-WPS/HvHQTYnHisLo9McqBHOJk2FkHO/tlpvldyrnem4aeQp4hai3gythswg6p01oSoTl58rcpiFAjF2br2Ak2A==",
-			"requires": {
-				"call-bound": "^1.0.2",
-				"es-errors": "^1.3.0",
-				"get-intrinsic": "^1.2.5",
-				"object-inspect": "^1.13.3",
-				"side-channel-map": "^1.0.1"
-			}
-		},
-		"signal-exit": {
-			"version": "3.0.7",
-			"resolved": "https://registry.npmjs.org/signal-exit/-/signal-exit-3.0.7.tgz",
-			"integrity": "sha512-wnD2ZE+l+SPC/uoS0vXeE9L1+0wuaMqKlfz9AMUo38JsyLSBWSFcHR1Rri62LZc12vLr1gb3jl7iwQhgwpAbGQ=="
-		},
-		"simple-update-notifier": {
-			"version": "2.0.0",
-			"resolved": "https://registry.npmjs.org/simple-update-notifier/-/simple-update-notifier-2.0.0.tgz",
-			"integrity": "sha512-a2B9Y0KlNXl9u/vsW6sTIu9vGEpfKu2wRV6l1H3XEas/0gUIzGzBoP/IouTcUQbm9JWZLH3COxyn03TYlFax6w==",
-			"dev": true,
-			"requires": {
-				"semver": "^7.5.3"
-			}
-		},
-		"smart-buffer": {
-			"version": "4.2.0",
-			"resolved": "https://registry.npmjs.org/smart-buffer/-/smart-buffer-4.2.0.tgz",
-			"integrity": "sha512-94hK0Hh8rPqQl2xXc3HsaBoOXKV20MToPkcXvwbISWLEs+64sBq5kFgn2kJDHb1Pry9yrP0dxrCI9RRci7RXKg=="
-		},
-		"socket.io": {
-			"version": "4.8.1",
-			"resolved": "https://registry.npmjs.org/socket.io/-/socket.io-4.8.1.tgz",
-			"integrity": "sha512-oZ7iUCxph8WYRHHcjBEc9unw3adt5CmSNlppj/5Q4k2RIrhl8Z5yY2Xr4j9zj0+wzVZ0bxmYoGSzKJnRl6A4yg==",
-			"requires": {
-				"accepts": "~1.3.4",
-				"base64id": "~2.0.0",
-				"cors": "~2.8.5",
-				"debug": "~4.3.2",
-				"engine.io": "~6.6.0",
-				"socket.io-adapter": "~2.5.2",
-				"socket.io-parser": "~4.2.4"
-			},
-			"dependencies": {
-				"debug": {
-					"version": "4.3.4",
-					"resolved": "https://registry.npmjs.org/debug/-/debug-4.3.4.tgz",
-					"integrity": "sha512-PRWFHuSU3eDtQJPvnNY7Jcket1j0t5OuOsFzPPzsekD52Zl8qUfFIPEiswXqIvHWGVHOgX+7G/vCNNhehwxfkQ==",
-					"requires": {
-						"ms": "2.1.2"
-					}
-				},
-				"ms": {
-					"version": "2.1.2",
-					"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.2.tgz",
-					"integrity": "sha512-sGkPx+VjMtmA6MX27oA4FBFELFCZZ4S4XqeGOXCv68tT+jb3vk/RyaKWP0PTKyWtmLSM0b+adUTEvbs1PEaH2w=="
-				}
-			}
-		},
-		"socket.io-adapter": {
-			"version": "2.5.5",
-			"resolved": "https://registry.npmjs.org/socket.io-adapter/-/socket.io-adapter-2.5.5.tgz",
-			"integrity": "sha512-eLDQas5dzPgOWCk9GuuJC2lBqItuhKI4uxGgo9aIV7MYbk2h9Q6uULEh8WBzThoI7l+qU9Ast9fVUmkqPP9wYg==",
-			"requires": {
-				"debug": "~4.3.4",
-				"ws": "~8.17.1"
-			},
-			"dependencies": {
-				"debug": {
-					"version": "4.3.7",
-					"resolved": "https://registry.npmjs.org/debug/-/debug-4.3.7.tgz",
-					"integrity": "sha512-Er2nc/H7RrMXZBFCEim6TCmMk02Z8vLC2Rbi1KEBggpo0fS6l0S1nnapwmIi3yW/+GOJap1Krg4w0Hg80oCqgQ==",
-					"requires": {
-						"ms": "^2.1.3"
-					}
-				},
-				"ms": {
-					"version": "2.1.3",
-					"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
-					"integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="
-				}
-			}
-		},
-		"socket.io-parser": {
-			"version": "4.2.4",
-			"resolved": "https://registry.npmjs.org/socket.io-parser/-/socket.io-parser-4.2.4.tgz",
-			"integrity": "sha512-/GbIKmo8ioc+NIWIhwdecY0ge+qVBSMdgxGygevmdHj24bsfgtCmcUUcQ5ZzcylGFHsN3k4HB4Cgkl96KVnuew==",
-			"requires": {
-				"@socket.io/component-emitter": "~3.1.0",
-				"debug": "~4.3.1"
-			},
-			"dependencies": {
-				"debug": {
-					"version": "4.3.7",
-					"resolved": "https://registry.npmjs.org/debug/-/debug-4.3.7.tgz",
-					"integrity": "sha512-Er2nc/H7RrMXZBFCEim6TCmMk02Z8vLC2Rbi1KEBggpo0fS6l0S1nnapwmIi3yW/+GOJap1Krg4w0Hg80oCqgQ==",
-					"requires": {
-						"ms": "^2.1.3"
-					}
-				},
-				"ms": {
-					"version": "2.1.3",
-					"resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",
-					"integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="
-				}
-			}
-		},
-		"socks": {
-			"version": "2.8.4",
-			"resolved": "https://registry.npmjs.org/socks/-/socks-2.8.4.tgz",
-			"integrity": "sha512-D3YaD0aRxR3mEcqnidIs7ReYJFVzWdd6fXJYUM8ixcQcJRGTka/b3saV0KflYhyVJXKhb947GndU35SxYNResQ==",
-			"requires": {
-				"ip-address": "^9.0.5",
-				"smart-buffer": "^4.2.0"
-			}
-		},
-		"sparse-bitfield": {
-			"version": "3.0.3",
-			"resolved": "https://registry.npmjs.org/sparse-bitfield/-/sparse-bitfield-3.0.3.tgz",
-			"integrity": "sha512-kvzhi7vqKTfkh0PZU+2D2PIllw2ymqJKujUcyPMd9Y75Nv4nPbGJZXNhxsgdQab2BmlDct1YnfQCguEvHr7VsQ==",
-			"optional": true,
-			"requires": {
-				"memory-pager": "^1.0.2"
-			}
-		},
-		"sprintf-js": {
-			"version": "1.1.3",
-			"resolved": "https://registry.npmjs.org/sprintf-js/-/sprintf-js-1.1.3.tgz",
-			"integrity": "sha512-Oo+0REFV59/rz3gfJNKQiBlwfHaSESl1pcGyABQsnnIfWOFt6JNj5gCog2U6MLZ//IGYD+nA8nI+mTShREReaA=="
-		},
-		"statuses": {
-			"version": "2.0.1",
-			"resolved": "https://registry.npmjs.org/statuses/-/statuses-2.0.1.tgz",
-			"integrity": "sha512-RwNA9Z/7PrK06rYLIzFMlaF+l73iwpzsqRIFgbMLbTcLD6cOao82TaWefPXQvB2fOC4AjuYSEndS7N/mTCbkdQ=="
-		},
-		"string_decoder": {
-			"version": "1.3.0",
-			"resolved": "https://registry.npmjs.org/string_decoder/-/string_decoder-1.3.0.tgz",
-			"integrity": "sha512-hkRX8U1WjJFd8LsDJ2yQ/wWWxaopEsABU1XfkM8A+j0+85JAGppt16cr1Whg6KIbb4okU6Mql6BOj+uup/wKeA==",
-			"requires": {
-				"safe-buffer": "~5.2.0"
-			}
-		},
-		"string-width": {
-			"version": "4.2.3",
-			"resolved": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
-			"integrity": "sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g==",
-			"requires": {
-				"emoji-regex": "^8.0.0",
-				"is-fullwidth-code-point": "^3.0.0",
-				"strip-ansi": "^6.0.1"
-			}
-		},
-		"strip-ansi": {
-			"version": "6.0.1",
-			"resolved": "https://registry.npmjs.org/strip-ansi/-/strip-ansi-6.0.1.tgz",
-			"integrity": "sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==",
-			"requires": {
-				"ansi-regex": "^5.0.1"
-			}
-		},
-		"strnum": {
-			"version": "1.1.2",
-			"resolved": "https://registry.npmjs.org/strnum/-/strnum-1.1.2.tgz",
-			"integrity": "sha512-vrN+B7DBIoTTZjnPNewwhx6cBA/H+IS7rfW68n7XxC1y7uoiGQBxaKzqucGUgavX15dJgiGztLJ8vxuEzwqBdA==",
-			"optional": true
-		},
-		"supports-color": {
-			"version": "5.5.0",
-			"resolved": "https://registry.npmjs.org/supports-color/-/supports-color-5.5.0.tgz",
-			"integrity": "sha512-QjVjwdXIt408MIiAqCX4oUKsgU2EqAGzs2Ppkm4aQYbjm+ZEWEcW4SfFNTr4uMNZma0ey4f5lgLrkB0aX0QMow==",
-			"dev": true,
-			"requires": {
-				"has-flag": "^3.0.0"
-			}
-		},
-		"tar": {
-			"version": "6.2.1",
-			"resolved": "https://registry.npmjs.org/tar/-/tar-6.2.1.tgz",
-			"integrity": "sha512-DZ4yORTwrbTj/7MZYq2w+/ZFdI6OZ/f9SFHR+71gIVUZhOQPHzVCLpvRnPgyaMpfWxxk/4ONva3GQSyNIKRv6A==",
-			"requires": {
-				"chownr": "^2.0.0",
-				"fs-minipass": "^2.0.0",
-				"minipass": "^5.0.0",
-				"minizlib": "^2.1.1",
-				"mkdirp": "^1.0.3",
-				"yallist": "^4.0.0"
-			},
-			"dependencies": {
-				"minipass": {
-					"version": "5.0.0",
-					"resolved": "https://registry.npmjs.org/minipass/-/minipass-5.0.0.tgz",
-					"integrity": "sha512-3FnjYuehv9k6ovOEbyOswadCDPX1piCfhV8ncmYtHOjuPwylVWsghTLo7rabjC3Rx5xD4HDx8Wm1xnMF7S5qFQ=="
-				}
-			}
-		},
-		"to-regex-range": {
-			"version": "5.0.1",
-			"resolved": "https://registry.npmjs.org/to-regex-range/-/to-regex-range-5.0.1.tgz",
-			"integrity": "sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ==",
-			"dev": true,
-			"requires": {
-				"is-number": "^7.0.0"
-			}
-		},
-		"toidentifier": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/toidentifier/-/toidentifier-1.0.1.tgz",
-			"integrity": "sha512-o5sSPKEkg/DIQNmH43V0/uerLrpzVedkUh8tGNvaeXpfpuwjKenlSox/2O/BTlZUtEe+JG7s5YhEz608PlAHRA=="
-		},
-		"touch": {
-			"version": "3.1.0",
-			"resolved": "https://registry.npmjs.org/touch/-/touch-3.1.0.tgz",
-			"integrity": "sha512-WBx8Uy5TLtOSRtIq+M03/sKDrXCLHxwDcquSP2c43Le03/9serjQBIztjRz6FkJez9D/hleyAXTBGLwwZUw9lA==",
-			"dev": true,
-			"requires": {
-				"nopt": "~1.0.10"
-			},
-			"dependencies": {
-				"nopt": {
-					"version": "1.0.10",
-					"resolved": "https://registry.npmjs.org/nopt/-/nopt-1.0.10.tgz",
-					"integrity": "sha512-NWmpvLSqUrgrAC9HCuxEvb+PSloHpqVu+FqcO4eeF2h5qYRhA7ev6KvelyQAKtegUbC6RypJnlEOhd8vloNKYg==",
-					"dev": true,
-					"requires": {
-						"abbrev": "1"
-					}
-				}
-			}
-		},
-		"tr46": {
-			"version": "3.0.0",
-			"resolved": "https://registry.npmjs.org/tr46/-/tr46-3.0.0.tgz",
-			"integrity": "sha512-l7FvfAHlcmulp8kr+flpQZmVwtu7nfRV7NZujtN0OqES8EL4O4e0qqzL0DC5gAvx/ZC/9lk6rhcUwYvkBnBnYA==",
-			"requires": {
-				"punycode": "^2.1.1"
-			}
-		},
-		"tslib": {
-			"version": "2.8.1",
-			"resolved": "https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz",
-			"integrity": "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==",
-			"optional": true
-		},
-		"type-is": {
-			"version": "1.6.18",
-			"resolved": "https://registry.npmjs.org/type-is/-/type-is-1.6.18.tgz",
-			"integrity": "sha512-TkRKr9sUTxEH8MdfuCSP7VizJyzRNMjj2J2do2Jr3Kym598JVdEksuzPQCnlFPW4ky9Q+iA+ma9BGm06XQBy8g==",
-			"requires": {
-				"media-typer": "0.3.0",
-				"mime-types": "~2.1.24"
-			}
-		},
-		"undefsafe": {
-			"version": "2.0.5",
-			"resolved": "https://registry.npmjs.org/undefsafe/-/undefsafe-2.0.5.tgz",
-			"integrity": "sha512-WxONCrssBM8TSPRqN5EmsjVrsv4A8X12J4ArBiiayv3DyyG3ZlIg6yysuuSYdZsVz3TKcTg2fd//Ujd4CHV1iA==",
-			"dev": true
-		},
-		"unpipe": {
-			"version": "1.0.0",
-			"resolved": "https://registry.npmjs.org/unpipe/-/unpipe-1.0.0.tgz",
-			"integrity": "sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ=="
-		},
-		"util-deprecate": {
-			"version": "1.0.2",
-			"resolved": "https://registry.npmjs.org/util-deprecate/-/util-deprecate-1.0.2.tgz",
-			"integrity": "sha1-RQ1Nyfpw3nMnYvvS1KKJgUGaDM8="
-		},
-		"utils-merge": {
-			"version": "1.0.1",
-			"resolved": "https://registry.npmjs.org/utils-merge/-/utils-merge-1.0.1.tgz",
-			"integrity": "sha1-n5VxD1CiZ5R7LMwSR0HBAoQn5xM="
-		},
-		"uuid": {
-			"version": "8.3.2",
-			"resolved": "https://registry.npmjs.org/uuid/-/uuid-8.3.2.tgz",
-			"integrity": "sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg=="
-		},
-		"vary": {
-			"version": "1.1.2",
-			"resolved": "https://registry.npmjs.org/vary/-/vary-1.1.2.tgz",
-			"integrity": "sha1-IpnwLG3tMNSllhsLn3RSShj2NPw="
-		},
-		"webidl-conversions": {
-			"version": "7.0.0",
-			"resolved": "https://registry.npmjs.org/webidl-conversions/-/webidl-conversions-7.0.0.tgz",
-			"integrity": "sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g=="
-		},
-		"whatwg-url": {
-			"version": "11.0.0",
-			"resolved": "https://registry.npmjs.org/whatwg-url/-/whatwg-url-11.0.0.tgz",
-			"integrity": "sha512-RKT8HExMpoYx4igMiVMY83lN6UeITKJlBQ+vR/8ZJ8OCdSiN3RwCq+9gH0+Xzj0+5IrM6i4j/6LuvzbZIQgEcQ==",
-			"requires": {
-				"tr46": "^3.0.0",
-				"webidl-conversions": "^7.0.0"
-			}
-		},
-		"wide-align": {
-			"version": "1.1.5",
-			"resolved": "https://registry.npmjs.org/wide-align/-/wide-align-1.1.5.tgz",
-			"integrity": "sha512-eDMORYaPNZ4sQIuuYPDHdQvf4gyCF9rEEV/yPxGfwPkRodwEgiMUUXTx/dex+Me0wxx53S+NgUHaP7y3MGlDmg==",
-			"requires": {
-				"string-width": "^1.0.2 || 2 || 3 || 4"
-			}
-		},
-		"wrappy": {
-			"version": "1.0.2",
-			"resolved": "https://registry.npmjs.org/wrappy/-/wrappy-1.0.2.tgz",
-			"integrity": "sha1-tSQ9jz7BqjXxNkYFvA0QNuMKtp8="
-		},
-		"ws": {
-			"version": "8.17.1",
-			"resolved": "https://registry.npmjs.org/ws/-/ws-8.17.1.tgz",
-			"integrity": "sha512-6XQFvXTkbfUOZOKKILFG1PDK2NDQs4azKQl26T0YS5CxqWLgXajbPZ+h4gZekJyRqFU8pvnbAbbs/3TgRPy+GQ==",
-			"requires": {}
-		},
-		"yallist": {
-			"version": "4.0.0",
-			"resolved": "https://registry.npmjs.org/yallist/-/yallist-4.0.0.tgz",
-			"integrity": "sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A=="
-		}
-	}
-}
-
-
-
-================================================
-File: backend/package.json
-================================================
-{
-	"name": "back-end",
-	"version": "1.0.0",
-	"description": "",
-	"main": "src/server.js",
-	"scripts": {
-		"start": "tsc && ts-node ./dist/server.js",
-		"nod": "nodemon --exec npx ts-node -r dotenv/config src/server.ts"
-	},
-	"author": "Jesse Burström",
-	"dependencies": {
-		"bcrypt": "^5.0.1",
-		"cors": "^2.8.5",
-		"dotenv": "^16.0.1",
-		"express": "^4.18.1",
-		"jsonwebtoken": "^9.0.2",
-		"mongodb": "^4.6.0",
-		"socket.io": "^4.5.1",
-		"uuid": "^8.3.2"
-	},
-	"devDependencies": {
-		"@types/bcrypt": "^5.0.0",
-		"@types/body-parser": "^1.19.2",
-		"@types/cors": "^2.8.12",
-		"@types/express": "^4.17.13",
-		"@types/jsonwebtoken": "^8.5.8",
-		"@types/node": "^17.0.38",
-		"@types/nodemon": "^1.19.1",
-		"@types/uuid": "^8.3.4",
-		"nodemon": "^3.1.9"
-	}
-}
-
-
-
-================================================
-File: backend/tsconfig.json
-================================================
-{
-  "compilerOptions": {
-    "outDir": "./dist",
-    "moduleResolution": "node",
-    "module": "commonjs",
-    "allowJs": true,
-    "target": "es6",
-    "esModuleInterop": true
-  },
-  "include": ["./src/**/*"],
-  "exclude": ["src/build", "src/web"]
-}
-
-
-
-================================================
-File: backend/.gitignore
-================================================
-# Dependency directories
-node_modules/
-jspm_packages/
-
-# Build outputs
-dist/
-build/
-
-# Environment variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# IDE and editor folders
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS specific
-.DS_Store
-Thumbs.db
-
-
-
-================================================
-File: backend/src/db.ts
-================================================
-import { MongoClient, Db } from "mongodb"; // Import Db type
-
-let client: MongoClient; // Add type for client
-
-export const initializeDbConnection = async () => {
-  try {
-    console.log("📊 [DB] Connecting to MongoDB at mongodb://127.0.0.1:27017...");
-    client = await MongoClient.connect("mongodb://127.0.0.1:27017", {
-      // useNewUrlParser and useUnifiedTopology are deprecated and default to true
-      // Remove them or keep if using an older driver version where they are needed
-    });
-    console.log("✅ [DB] Successfully connected to MongoDB");
-    
-    // Create a test entry to verify write access
-    const testDb = client.db('yatzy-game-log-db');
-    const testCollection = testDb.collection('db_test');
-    const result = await testCollection.insertOne({
-      message: "Database connection test",
-      timestamp: new Date()
-    });
-    
-    console.log(`✅ [DB] Test document inserted with ID: ${result.insertedId}`);
-    
-    // Also check if game_moves collection exists
-    const movesCollection = testDb.collection('game_moves');
-    const count = await movesCollection.countDocuments();
-    console.log(`📊 [DB] game_moves collection has ${count} documents`);
-    
-  } catch (error) {
-    console.error("❌ [DB] Error connecting to MongoDB:", error);
-    throw error; // Rethrow to make sure app doesn't start with broken DB
-  }
-};
-
-// Add types for parameter and return value
-export const getDbConnection = (dbName: string): Db => {
-  if (!client) {
-    console.error("❌ [DB] MongoDB client is not initialized when trying to get DB:", dbName);
-    throw new Error("MongoDB client is not initialized");
-  }
-  
-  try {
-    const db = client.db(dbName);
-    return db;
-  } catch (error) {
-    console.error(`❌ [DB] Error getting database connection for "${dbName}":`, error);
-    throw error;
-  }
-};
-
-
-================================================
-File: backend/src/license.txt
-================================================
-flutter_unity_widget
-
-BSD 3-Clause License
-
-Copyright (c) 2022-present, Rex Isaac Raphael.
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice, this
-   list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright notice,
-   this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution.
-
-3. Neither the name of the copyright holder nor the names of its
-   contributors may be used to endorse or promote products derived from
-   this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-
-================================================
-File: backend/src/server.ts
-================================================
-import express from "express";
-import { routes } from "./routes/index";
-import { initializeDbConnection } from "./db";
-import * as path from "path";
-import cors from "cors";
-import { Server } from "socket.io";
-import { createServer } from "http";
-
-// Import services
-import { GameService } from "./services/GameService";
-import { GameLogService } from "./services/GameLogService"; // <-- Import GameLogService
-import { TopScoreService } from "./services/TopScoreService";
-
-// Import controllers
-import { GameController } from "./controllers/GameController";
-import { PlayerController } from "./controllers/PlayerController";
-import { ChatController } from "./controllers/ChatController";
-import { spectateGameRoute, initializeSpectateRoute } from "./routes/spectateGameRoute"; // <-- Import spectate route and initializer
-
-const PORT: number = 8000;
-
-const app = express();
-
-// Important client has local ip (like 192.168.0.168) not 127.0.0.1 or localhost in browser to work on local developement across different computers
-// Local client connect should look like : http://192.168.0.168:8080 , or your local network ip instead of 192.168.0.168
-// Also with port number this should not be there ssl online since all is taken care of with nginx or similar routing port 80 to prefeerably 8080
-// for Https, socket.io and WebSocket. Requirement of Google Platform app engine flex only one port and is possible! but also convinient!
-app.use(cors({
-  origin: '*', // This allows all origins
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
-const httpServer = createServer(app);
-
-// All 4 systems NodeJS, Flutter, Unity and React has this flag to differ from local developement and online publish
-// One improvement could be global system flag all systems look at so avoid funny errors missing to reset flag... :)
-// Got idea from meetup to signal in running code visually if offline/online good idea!
-let isOnline: boolean = false;
-
-const localFlutterDir: string = "C:/Users/J/StudioProjects/flutter_system";
-const localReactDir: string = "C:/Users/J/Desktop/proj";
-
-if (isOnline) {
-  //app.use(express.static(path.join(__dirname, "/build")));
-  app.use(express.static(path.join(__dirname, "/web")));
-} else {
-  //app.use(express.static(localReactDir + "/build"));
-  app.use(express.static(localFlutterDir + "/build/web"));
-}
-
-app.use(express.json());
-
-// Add all the routes to our Express server
-// exported from routes/index.js
-routes().forEach((route) => {
-  // Ensure correct method mapping for Express
-  const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete' | 'patch' | 'options' | 'head';
-  if (app[method]) {
-      app[method](route.path, route.handler);
-  } else {
-      console.error(`Invalid method ${route.method} for route ${route.path}`);
-  }
-});
-// Add the new spectate route explicitly after other routes
-app.get(spectateGameRoute.path, spectateGameRoute.handler); // <-- Add spectate route handler
-
-////////////////////////////////// YATZY //////////////////////////////////
-
-// Initialize Socket.IO server with proper CORS settings
-const io = new Server(httpServer, {
-  cors: {
-    origin: "*", // Allow all origins
-    methods: ["GET", "POST"],
-    credentials: false,
-    allowedHeaders: ["Content-Type", "Authorization"]
-  },
-  // Important: Configure for both websocket and polling transport
-  transports: ["websocket", "polling"],
-  // Add ping timeout and interval settings
-  pingTimeout: 60000,
-  pingInterval: 25000,
-  // Disable compression for debugging
-  perMessageDeflate: false,
-  // Path option if needed
-  path: "/socket.io/",
-  // Allow reconnection
-  allowEIO3: true
-});
-
-// Log middleware for debugging
-io.use((socket, next) => {
-  console.log("Socket middleware - connection attempt:", socket.id);
-  next();
-});
-
-// Create service instances
-const gameLogService = new GameLogService(); // <-- Create GameLogService instance
-// Pass the io instance to TopScoreService
-const topScoreService = new TopScoreService(io); // <-- Create TopScoreService instance, passing io
-const gameService = new GameService(io, gameLogService, topScoreService); // <-- Pass both services
-
-// Create controller instances
-const gameController = new GameController(gameService, gameLogService); // <-- Pass log service
-const playerController = new PlayerController(gameService, gameLogService); // <-- Pass log service
-const chatController = new ChatController(io, gameService);
-
-// Initialize the spectate route with service instances <-- ADD THIS
-initializeSpectateRoute(gameService, gameLogService);
-
-// Handle Socket.IO connections
-io.on("connect", (socket) => {
-  console.log("Client connected...", socket.id);
-
-  // Send welcome message for connection confirmation
-  socket.emit("welcome", { message: "Connection successful", id: socket.id });
-  
-  // Echo event for testing connection
-  socket.on("echo", (data) => {
-    console.log("Echo event received:", data);
-    socket.emit("echo", { message: "Echo reply", ...data });
-  });
-
-  // Register socket handlers from our controllers
-  gameController.registerSocketHandlers(socket);
-  playerController.registerSocketHandlers(socket);
-  chatController.registerSocketHandlers(socket);  // Register chat handlers
-
-  // Listen for client to server messages
-  socket.on("sendToServer", (data) => {
-    console.log(`Message to server from ${socket.id}:`, data?.action || data);
-
-    // **** Handle requestTopScores FIRST ****
-    if (data?.action === 'requestTopScores') {
-      // **** Get specific gameType from request ****
-      const requestedGameType = data?.gameType;
-      if (typeof requestedGameType !== 'string') {
-        console.error(`❌ Invalid requestTopScores from ${socket.id}: Missing or invalid gameType.`);
-        socket.emit('errorMsg', { message: 'Invalid request for top scores: gameType missing.' }); 
-        return; // Stop processing invalid request
-      }
-
-      console.log(`🏆 Received requestTopScores from ${socket.id} for game type: ${requestedGameType}`);
-      // **** Fetch scores for the SPECIFIC type (NO LIMIT) ****
-      topScoreService.getTopScores(requestedGameType) // Call without limit argument
-        .then(scores => {
-          // **** Emit the specific list back using 'onServerMsg' ****
-          socket.emit('onServerMsg', { 
-              action: 'onTopScoresUpdate',
-              gameType: requestedGameType, // Include gameType for context
-              scores: scores 
-            });
-          console.log(`🏆 Sent top scores for ${requestedGameType} back to ${socket.id} via onServerMsg`);
-        })
-        .catch(error => {
-          console.error(`❌ Error fetching scores for requestTopScores (${requestedGameType}) from ${socket.id}:`, error);
-          socket.emit('errorMsg', { message: `Failed to retrieve top scores for ${requestedGameType}` }); 
-        });
-      return; // Stop further processing for this action
-    }
-    // ***********************************************
-    
-    // Handle chat messages (example)
-    if (data?.action === 'chatMessage') {
-      console.log(`💬 Chat message from ${socket.id}:`, data);
-    }
-
-    // Other general message routing/handling could go here
-
-  });
-
-  // Listen for client to client messages
-  socket.on("sendToClients", (data) => {
-    console.log(`Message to clients from ${socket.id}:`, data?.action || data);
-    
-    // Handle chat messages specifically
-    if (data?.action === 'chatMessage') {
-      console.log(`💬 Chat message broadcast from ${socket.id}:`, data);
-    }
-  });
-
-  // Handle disconnection
-  socket.on("disconnect", () => {
-    console.log("Client disconnected...", socket.id);
-    gameService.handlePlayerDisconnect(socket.id);
-  });
-});
-
-app.get("/flutter", (req, res) => {
-  if (isOnline) {
-    res.sendFile(path.join(__dirname + "/web/index.html"));
-  } else {
-    res.sendFile(localFlutterDir + "/build/web/index.html");
-  }
-});
-
-app.get("*", (req, res) => {
-  if (isOnline) {
-    //res.sendFile(path.join(__dirname + "/build/index.html"));
-    res.sendFile(path.join(__dirname + "/web/index.html"));
-  } else {
-    res.sendFile(localReactDir + "/build/index.html");
-  }
-});
-
-// Initialize database connection and start server
-initializeDbConnection()
-  .then(() => {
-    console.log("✅ [SERVER] Database connection initialized successfully");
-    
-    // Verify database connection with GameLogService
-    try {
-      const testCollection = gameLogService.getCollection();
-      console.log("✅ [SERVER] Successfully accessed game_moves collection");
-    } catch (e) {
-      console.error("❌ [SERVER] Error accessing game_moves collection:", e);
-    }
-    
-    // Start the server
-    httpServer.listen(PORT, () => {
-      console.log(`✅ [SERVER] Server running on port ${PORT}`);
-      console.log(`✅ [SERVER] Socket.IO server ready for connections`);
-      isOnline 
-        ? console.log("🌐 [SERVER] SERVER MODE: ONLINE") 
-        : console.log("🖥️ [SERVER] SERVER MODE: OFFLINE");
-      
-      // Log MongoDB connection details
-      console.log(`📊 [SERVER] MongoDB connected to database '${gameLogService.getDatabaseName()}'`);
-      console.log(`📊 [SERVER] Using collection '${gameLogService.getCollectionName()}'`);
-    });
-  })
-  .catch((error) => {
-    console.error("❌ [SERVER] Error initializing database connection:", error);
-    console.error("❌ [SERVER] Server startup failed due to database connection error");
-    process.exit(1); // Exit with error code
-  });
-
-
-================================================
-File: backend/src/controllers/ChatController.ts
-================================================
+FILE: backend/src/db.ts
+FUNCTION: initializeDbConnection(): Promise<void>
+  DEPENDS_ON:
+    - mongodb.MongoClient
+  CALLS: MongoClient.connect [EXTERNAL: mongodb]
+  CALLS: client.db [EXTERNAL: mongodb]
+  DB_ACCESS: collection.insertOne({ message, timestamp }) [COLLECTION: db_test, DB: yatzy-game-log-db]
+  DB_ACCESS: collection.countDocuments() [COLLECTION: game_moves, DB: yatzy-game-log-db]
+  CALLS: console.log, console.error [EXTERNAL: Node.js]
+FUNCTION: getDbConnection(dbName: string): Db
+  DEPENDS_ON:
+    - mongodb.Db
+  USES: client (module variable)
+  CALLS: client.db(dbName) [EXTERNAL: mongodb]
+  CALLS: console.error [EXTERNAL: Node.js]
+IMPORTS:
+  - MongoClient, Db FROM mongodb
+EXPORTS:
+  - initializeDbConnection
+  - getDbConnection
+
+---
+FILE: backend/src/models/BoardCell.ts
+CLASS: BoardCell
+  PROPERTIES: index, label, value, fixed, isNonScoreCell
+  METHODS:
+    - toJSON(): any
+    - fromJson(data: any, defaultLabel?: string): BoardCell (static)
+      INSTANTIATES: BoardCell [INTERNAL]
+EXPORTS:
+  - BoardCell
+
+---
+FILE: backend/src/models/Dice.ts
+CLASS: Dice
+  PROPERTIES: values, diceCount
+  METHODS:
+    - roll(): number[]
+    - rollSelected(keptDice: boolean[]): number[]
+    - getValues(): number[]
+    - setValues(values: number[]): void
+    - reset(): void
+EXPORTS:
+  - Dice
+
+---
+FILE: backend/src/models/Game.ts
+CLASS: Game
+  DEPENDS_ON:
+    - backend/src/models/Player.Player
+    - backend/src/models/Player.PlayerFactory
+    - backend/src/utils/yatzyMapping.getSelectionIndex
+    - uuid
+  PROPERTIES: id, gameType, players, maxPlayers, connectedPlayers, gameStarted, gameFinished, playerToMove, diceValues, userNames, gameId, playerIds, abortedPlayers, rollCount, turnNumber
+  METHODS:
+    - addPlayer(player: Player, position?: number): boolean
+    - removePlayer(playerId: string): boolean
+      CALLS: this.advanceToNextActivePlayer()
+    - markPlayerAborted(playerId: string): boolean
+      CALLS: this.advanceToNextActivePlayer()
+    - findPlayerIndex(playerId: string): number
+    - findEmptySlot(): number (private)
+    - isGameFull(): boolean
+    - getCurrentTurnNumber(): number
+    - incrementRollCount(): void
+    - advanceToNextActivePlayer(): void
+    - applySelection(playerIndex: number, selectionLabel: string, score: number): void
+      CALLS: getSelectionIndex(this.gameType, selectionLabel) [FILE: backend/src/utils/yatzyMapping.ts]
+      USES_CLASS: Player.cells, Player.calculateScores [FILE: backend/src/models/Player.ts]
+    - isGameFinished(): boolean
+      USES_CLASS: Player.isActive, Player.hasCompletedGame [FILE: backend/src/models/Player.ts]
+    - setDiceValues(values: number[]): void
+    - toJSON(): any
+      USES_CLASS: Player.toJSON [FILE: backend/src/models/Player.ts]
+      CALLS: this.isGameFinished()
+    - fromJSON(data: any): Game (static)
+      INSTANTIATES: Game [INTERNAL]
+      INSTANTIATES: Player [FILE: backend/src/models/Player.ts] (via Player.fromJSON, PlayerFactory.createEmptyPlayer, PlayerFactory.createPlayer)
+  IMPORTS:
+    - Player, PlayerFactory FROM ./Player
+    - v4 as uuidv4 FROM uuid
+    - getSelectionIndex FROM ../utils/yatzyMapping
+  EXPORTS:
+    - Game
+
+---
+FILE: backend/src/models/Player.ts
+CLASS: Player
+  DEPENDS_ON:
+    - backend/src/models/BoardCell.BoardCell
+    - backend/src/utils/gameConfig.GameConfig
+    - backend/src/utils/gameConfig.getBaseGameType
+  PROPERTIES: id, username, isActive, cells, score, upperSum, bonusAchieved, gameType
+  METHODS:
+    - calculateScores(): void
+      USES: GameConfig, getBaseGameType [FILE: backend/src/utils/gameConfig.ts]
+      USES_CLASS: BoardCell.fixed, BoardCell.value, BoardCell.label [FILE: backend/src/models/BoardCell.ts]
+    - hasCompletedGame(): boolean
+      USES_CLASS: BoardCell.fixed, BoardCell.isNonScoreCell [FILE: backend/src/models/BoardCell.ts]
+    - getScore(): number
+    - toJSON(): any
+      USES_CLASS: BoardCell.toJSON [FILE: backend/src/models/BoardCell.ts]
+    - fromJSON(data: any, gameType?: string): Player (static)
+      USES: GameConfig, getBaseGameType [FILE: backend/src/utils/gameConfig.ts]
+      INSTANTIATES: BoardCell [FILE: backend/src/models/BoardCell.ts] (via BoardCell.fromJson)
+      INSTANTIATES: Player [INTERNAL]
+CLASS: PlayerFactory
+  DEPENDS_ON:
+    - backend/src/models/Player.Player
+    - backend/src/utils/gameConfig.getBaseGameType
+    - backend/src/utils/gameConfig.GameConfig
+    - backend/src/models/BoardCell.BoardCell
+  METHODS:
+    - createPlayer(id: string, username: string, gameType?: string): Player (static)
+      INSTANTIATES: Player [FILE: backend/src/models/Player.ts]
+      CALLS: getBaseGameType [FILE: backend/src/utils/gameConfig.ts]
+    - createEmptyPlayer(gameType?: string): Player (static)
+      INSTANTIATES: Player [FILE: backend/src/models/Player.ts]
+      INSTANTIATES: BoardCell [FILE: backend/src/models/BoardCell.ts]
+      CALLS: getBaseGameType [FILE: backend/src/utils/gameConfig.ts]
+      USES: GameConfig [FILE: backend/src/utils/gameConfig.ts]
+  IMPORTS:
+    - BoardCell FROM ./BoardCell
+    - GameConfig, getBaseGameType FROM ../utils/gameConfig
+  EXPORTS:
+    - Player
+    - PlayerFactory
+
+---
+FILE: backend/src/routes/getLogRoute.ts
+API_ROUTE: GET /api/getLog/:userId
+  HANDLER: getLogRoute.handler
+  DEPENDS_ON:
+    - jsonwebtoken.verify
+    - backend/src/db.getDbConnection
+  DB_ACCESS: find [COLLECTION: logs, DB: react-auth-db]
+EXPORTS:
+  - getLogRoute
+
+---
+FILE: backend/src/routes/getTopScores.ts
+API_ROUTE: GET /GetTopScores
+  HANDLER: getTopScores.handler
+  DEPENDS_ON:
+    - backend/src/db.getDbConnection
+  DB_ACCESS: find, sort, toArray [COLLECTION: ordinary | maxi, DB: top-scores]
+EXPORTS:
+  - getTopScores
+
+---
+FILE: backend/src/routes/index.ts
+FUNCTION: routes(): Array<RouteObject>
+  RETURNS: Array [logRoute, getLogRoute, logInRoute, signUpRoute, getTopScores, updateTopScore]
+  DEPENDS_ON: Exports from other route files.
+EXPORTS:
+  - routes
+
+---
+FILE: backend/src/routes/logInRoute.ts
+API_ROUTE: POST /api/login
+  HANDLER: logInRoute.handler
+  DEPENDS_ON:
+    - bcrypt.compare
+    - jsonwebtoken.sign
+    - backend/src/db.getDbConnection
+  DB_ACCESS: findOne [COLLECTION: users, DB: react-auth-db]
+EXPORTS:
+  - logInRoute
+
+---
+FILE: backend/src/routes/logRoute.ts
+API_ROUTE: POST /api/log/:userId
+  HANDLER: logRoute.handler
+  DEPENDS_ON:
+    - jsonwebtoken.verify
+    - backend/src/db.getDbConnection
+  DB_ACCESS: findOneAndUpdate [COLLECTION: logs, DB: react-auth-db]
+EXPORTS:
+  - logRoute
+
+---
+FILE: backend/src/routes/signUpRoute.ts
+API_ROUTE: POST /api/signup
+  HANDLER: signUpRoute.handler
+  DEPENDS_ON:
+    - bcrypt.hash
+    - jsonwebtoken.sign
+    - backend/src/db.getDbConnection
+  DB_ACCESS: findOne [COLLECTION: users, DB: react-auth-db]
+  DB_ACCESS: insertOne [COLLECTION: users, DB: react-auth-db]
+  DB_ACCESS: insertOne [COLLECTION: logs, DB: react-auth-db]
+EXPORTS:
+  - signUpRoute
+
+---
+FILE: backend/src/routes/spectateGameRoute.ts
+FUNCTION: initializeSpectateRoute(gs: GameService, gls: GameLogService): void
+  SETS: gameServiceInstance, gameLogServiceInstance (module variables)
+API_ROUTE: GET /api/spectate/:gameId
+  HANDLER: spectateGameRoute.handler
+  DEPENDS_ON:
+    - backend/src/services/GameService.GameService (via gameServiceInstance)
+    - backend/src/services/GameLogService.GameLogService (via gameLogServiceInstance)
+  CALLS: gameServiceInstance.getGame(gameId) [FILE: backend/src/services/GameService.ts]
+  CALLS: gameLogServiceInstance.getGameLog(gameId) [FILE: backend/src/services/GameLogService.ts]
+  USES_CLASS: Player.calculateScores [FILE: backend/src/models/Player.ts]
+  USES_CLASS: Game.toJSON [FILE: backend/src/models/Game.ts]
+EXPORTS:
+  - initializeSpectateRoute
+  - spectateGameRoute
+
+---
+FILE: backend/src/routes/updateTopScore.ts
+API_ROUTE: POST /UpdateTopScore
+  HANDLER: updateTopScore.handler
+  DEPENDS_ON:
+    - backend/src/db.getDbConnection
+  DB_ACCESS: insertOne [COLLECTION: ordinary | maxi, DB: top-scores]
+  DB_ACCESS: find, sort, toArray [COLLECTION: ordinary | maxi, DB: top-scores]
+EXPORTS:
+  - updateTopScore
+
+---
+FILE: backend/src/server.ts
+SETUP: Express application, HTTP server, Socket.IO server
+MIDDLEWARE: cors, express.json, express.static, custom Socket.IO logger
+SERVICES_INIT:
+  INSTANTIATES: GameLogService [FILE: backend/src/services/GameLogService.ts]
+  INSTANTIATES: TopScoreService(io) [FILE: backend/src/services/TopScoreService.ts]
+  INSTANTIATES: GameService(io, gameLogService, topScoreService) [FILE: backend/src/services/GameService.ts]
+CONTROLLERS_INIT:
+  INSTANTIATES: GameController(gameService, gameLogService) [FILE: backend/src/controllers/GameController.ts]
+  INSTANTIATES: PlayerController(gameService, gameLogService) [FILE: backend/src/controllers/PlayerController.ts]
+  INSTANTIATES: ChatController(io, gameService) [FILE: backend/src/controllers/ChatController.ts]
+ROUTES_SETUP:
+  CALLS: routes() [FILE: backend/src/routes/index.ts] -> Registers API routes
+  REGISTERS_HANDLER: spectateGameRoute.handler [FILE: backend/src/routes/spectateGameRoute.ts] for GET /api/spectate/:gameId
+  REGISTERS_HANDLER: Serves frontend files for /flutter and *
+SOCKET_HANDLING: io.on('connect')
+  EMITS_SOCKET: welcome [TARGET: CLIENT]
+  HANDLES_SOCKET: echo -> EMITS_SOCKET: echo [TARGET: CLIENT]
+  CALLS: gameController.registerSocketHandlers(socket) [FILE: backend/src/controllers/GameController.ts]
+  CALLS: playerController.registerSocketHandlers(socket) [FILE: backend/src/controllers/PlayerController.ts]
+  CALLS: chatController.registerSocketHandlers(socket) [FILE: backend/src/controllers/ChatController.ts]
+  HANDLES_SOCKET: sendToServer [SOURCE: CLIENT]
+    ACTION: requestTopScores -> CALLS: topScoreService.getTopScores [FILE: backend/src/services/TopScoreService.ts] -> EMITS_SOCKET: onServerMsg (onTopScoresUpdate) [TARGET: CLIENT]
+    ACTION: chatMessage (Logs only)
+  HANDLES_SOCKET: sendToClients [SOURCE: CLIENT] (Logs only)
+  HANDLES_SOCKET: disconnect -> CALLS: gameService.handlePlayerDisconnect [FILE: backend/src/services/GameService.ts]
+INITIALIZATION:
+  CALLS: initializeSpectateRoute(gameService, gameLogService) [FILE: backend/src/routes/spectateGameRoute.ts]
+  CALLS: initializeDbConnection() [FILE: backend/src/db.ts]
+  CALLS: httpServer.listen(PORT) [EXTERNAL: http]
+  CALLS: console.log, console.error [EXTERNAL: Node.js]
+
+---
+FILE: backend/src/services/GameLogService.ts
+CLASS: GameLogService
+  INTERFACES: GameMove, GameLog (Exported)
+  METHODS:
+    - getCollection(): Collection<GameLog>
+      CALLS: getDbConnection(DB_NAME) [FILE: backend/src/db.ts]
+      DB_ACCESS: db.collection(COLLECTION_NAME)
+    - getDatabaseName(): string
+    - getCollectionName(): string
+    - logGameStart(game: Game): Promise<void>
+      DB_ACCESS: collection.replaceOne [DB: yatzy-game-log-db, COLLECTION: game_moves]
+    - logMove(gameId: number, move: GameMove): Promise<void>
+      DB_ACCESS: collection.findOne [DB: yatzy-game-log-db, COLLECTION: game_moves]
+      DB_ACCESS: collection.insertOne [DB: yatzy-game-log-db, COLLECTION: game_moves] (Fallback)
+      DB_ACCESS: collection.updateOne ($push) [DB: yatzy-game-log-db, COLLECTION: game_moves]
+    - logGameEnd(gameId: number, finalScores: Array): Promise<void>
+      DB_ACCESS: collection.updateOne ($set) [DB: yatzy-game-log-db, COLLECTION: game_moves]
+    - getGameLog(gameId: number): Promise<GameLog | null>
+      DB_ACCESS: collection.findOne [DB: yatzy-game-log-db, COLLECTION: game_moves]
+    - logSpectate(gameId: number, spectatorId: string, spectatorName: string): Promise<void>
+      CALLS: this.getGameLog(gameId)
+      DB_ACCESS: collection.updateOne ($push) [DB: yatzy-game-log-db, COLLECTION: game_moves]
+  IMPORTS:
+    - Collection FROM mongodb
+    - getDbConnection FROM ../db
+    - Game FROM ../models/Game
+  EXPORTS:
+    - GameMove, GameLog, GameLogService
+
+---
+FILE: backend/src/services/GameService.ts
+CLASS: GameService
+  DEPENDS_ON:
+    - backend/src/models/Game.Game
+    - backend/src/models/Player.Player
+    - backend/src/models/Player.PlayerFactory
+    - socket.io.Server
+    - socket.io.Socket
+    - backend/src/services/GameLogService.GameLogService
+    - backend/src/services/GameLogService.GameMove
+    - backend/src/services/TopScoreService.TopScoreService
+    - backend/src/utils/yatzyMapping.getSelectionLabel
+  PROPERTIES: games (Map), spectators (Map), gameIdCounter, io, gameLogService, topScoreService
+  CONSTRUCTOR:
+    PARAMS: io: Server, gameLogService: GameLogService, topScoreService: TopScoreService
+  METHODS:
+    - addSpectator(gameId: number, spectatorId: string): boolean
+      USES: games, spectators
+      USES_CLASS: Game.toJSON [FILE: backend/src/models/Game.ts]
+      EMITS_SOCKET: onServerMsg [TARGET: CLIENT: spectatorId] [DATA: action, gameData]
+    - removeSpectator(spectatorId: string): void
+      USES: spectators
+    - createGame(gameType: string, maxPlayers: number): Game
+      INSTANTIATES: Game [FILE: backend/src/models/Game.ts]
+      CALLS: gameLogService.logGameStart(game) [FILE: backend/src/services/GameLogService.ts]
+    - findAvailableGame(gameType: string, maxPlayers: number): Game | null
+      USES: games
+    - getGame(gameId: number): Game | undefined
+      USES: games
+    - getAllGames(): Game[]
+      USES: games
+    - removeGame(gameId: number): boolean
+      USES: games
+      USES_CLASS: Player.getScore [FILE: backend/src/models/Player.ts]
+      CALLS: gameLogService.logGameEnd(gameId, finalScores) [FILE: backend/src/services/GameLogService.ts]
+    - joinGame(gameId: number, player: Player): Game | null
+      USES: games
+      USES_CLASS: Game.isGameFull, Game.gameStarted, Game.addPlayer [FILE: backend/src/models/Game.ts]
+      CALLS: gameLogService.logGameStart(game) [FILE: backend/src/services/GameLogService.ts]
+    - handlePlayerDisconnect(playerId: string): void
+      USES: games
+      USES_CLASS: Game.findPlayerIndex, Game.getCurrentTurnNumber, Game.markPlayerAborted, Game.gameFinished [FILE: backend/src/models/Game.ts]
+      CALLS: gameLogService.logMove(gameId, disconnectMove) [FILE: backend/src/services/GameLogService.ts]
+      CALLS: this.handleGameFinished(game)
+      CALLS: this.notifyGameUpdate(game)
+      CALLS: this.broadcastGameList()
+      CALLS: this.removeSpectator(playerId)
+    - broadcastGameList(): void
+      USES: games
+      USES_CLASS: Game.toJSON [FILE: backend/src/models/Game.ts]
+      EMITS_SOCKET: onServerMsg [TARGET: ALL_CLIENTS] [DATA: action, Games]
+    - broadcastGameListToPlayer(playerId: string): void
+      USES: games
+      USES_CLASS: Game.toJSON [FILE: backend/src/models/Game.ts]
+      EMITS_SOCKET: onServerMsg [TARGET: CLIENT: playerId] [DATA: action, Games]
+    - notifyGameUpdate(game: Game): void
+      USES_CLASS: Game.toJSON [FILE: backend/src/models/Game.ts]
+      USES: spectators
+      EMITS_SOCKET: onServerMsg [TARGET: PLAYERS | SPECTATORS in game] [DATA: action, gameData]
+    - handlePlayerStartingNewGame(playerId: string): void
+      CALLS: this.handlePlayerDisconnect(playerId)
+    - handlePlayerAbort(playerId: string): void
+      CALLS: this.handlePlayerDisconnect(playerId)
+    - handleGameFinished(game: Game): void
+      USES_CLASS: Player.getScore [FILE: backend/src/models/Player.ts]
+      CALLS: gameLogService.logGameEnd(game.id, finalScores) [FILE: backend/src/services/GameLogService.ts]
+      CALLS: topScoreService.updateTopScore(game.gameType, name, score) [FILE: backend/src/services/TopScoreService.ts]
+      CALLS: this.notifyGameFinished(game)
+      USES: games, spectators
+      CALLS: this.broadcastGameList()
+    - notifyGameFinished(game: Game): void
+      USES_CLASS: Game.toJSON [FILE: backend/src/models/Game.ts]
+      USES: spectators
+      EMITS_SOCKET: onServerMsg [TARGET: PLAYERS | SPECTATORS in game] [DATA: action, gameData]
+    - processDiceRoll(gameId: number, playerId: string, diceValues: number[], keptDice: boolean[], ...): Promise<boolean>
+      USES: games
+      USES_CLASS: Game.findPlayerIndex, Game.playerToMove, Game.getCurrentTurnNumber, Game.setDiceValues, Game.incrementRollCount [FILE: backend/src/models/Game.ts]
+      CALLS: gameLogService.logMove(gameId, rollMove) [FILE: backend/src/services/GameLogService.ts]
+      EMITS_SOCKET: onClientMsg [TARGET: OTHER_CLIENTS | SPECTATORS in game] [DATA: action, gameId, diceValue, rollCount]
+      CALLS: this.notifyGameUpdate(game)
+    - processSelection(gameId: number, playerId: string, selectionLabel: string, score: number): Promise<boolean>
+      USES: games
+      USES_CLASS: Game.findPlayerIndex, Game.playerToMove, Game.getCurrentTurnNumber, Game.diceValues, Game.applySelection, Game.isGameFinished, Game.setDiceValues, Game.advanceToNextActivePlayer, Game.toJSON [FILE: backend/src/models/Game.ts]
+      CALLS: gameLogService.logMove(gameId, selectMove) [FILE: backend/src/services/GameLogService.ts]
+      CALLS: this.handleGameFinished(game)
+      CALLS: this.notifyGameUpdate(game)
+      USES: spectators
+      EMITS_SOCKET: onServerMsg [TARGET: PLAYERS | SPECTATORS in game] [DATA: action, gameData]
+    - forwardSelectionToPlayers(gameId: number, senderId: string, selectionData: any): boolean
+      USES: games
+      CALLS: getSelectionLabel [FILE: backend/src/utils/yatzyMapping.ts]
+      USES_CLASS: Game.findPlayerIndex [FILE: backend/src/models/Game.ts]
+      EMITS_SOCKET: onClientMsg [TARGET: OTHER_CLIENTS in game] [DATA: action, gameId, player, selectionLabel, diceValue, score]
+    - createOrJoinGame(gameType: string, maxPlayers: number, player: Player): Game
+      CALLS: this.handlePlayerStartingNewGame(player.id)
+      CALLS: this.findAvailableGame(gameType, maxPlayers)
+      CALLS: this.createGame(gameType, maxPlayers)
+      USES_CLASS: Game.addPlayer, Game.isGameFull, Game.gameStarted, Game.players, Game.toJSON [FILE: backend/src/models/Game.ts]
+      CALLS: gameLogService.logGameStart(game) [FILE: backend/src/services/GameLogService.ts]
+      EMITS_SOCKET: onServerMsg [TARGET: PLAYERS in game] [DATA: action, gameData] (Game start)
+      CALLS: this.notifyGameUpdate(game)
+      CALLS: this.broadcastGameList()
+  IMPORTS: Game, Player, PlayerFactory, Server, Socket, GameLogService, GameMove, TopScoreService, getSelectionLabel
+  EXPORTS: GameService
+
+---
+FILE: backend/src/services/TopScoreService.ts
+CLASS: TopScoreService
+  DEPENDS_ON:
+    - mongodb.Collection, mongodb.Db
+    - backend/src/db.getDbConnection
+    - socket.io.Server
+  CONSTRUCTOR:
+    PARAMS: io: Server
+  METHODS:
+    - getDb(): Db (private)
+      CALLS: getDbConnection [FILE: backend/src/db.ts]
+    - getCollection(gameType: string): Collection<TopScoreEntry> | null (private)
+      CALLS: this.getDb()
+      DB_ACCESS: db.collection
+    - getTopScores(gameType: string, limit?: number): Promise<TopScoreEntry[]>
+      CALLS: this.getCollection(gameType)
+      DB_ACCESS: collection.find, sort, limit, toArray [DB: top-scores]
+    - getAllTopScores(): Promise<{ [gameType: string]: TopScoreEntry[] }>
+      CALLS: this.getTopScores(gameType) for each supported type
+    - broadcastTopScores(): Promise<void>
+      CALLS: this.getAllTopScores()
+      EMITS_SOCKET: onTopScoresUpdate [TARGET: ALL_CLIENTS] [DATA: allScores]
+    - updateTopScore(gameType: string, name: string, score: number): Promise<boolean>
+      CALLS: this.getCollection(gameType)
+      DB_ACCESS: collection.insertOne [DB: top-scores]
+  IMPORTS: Collection, Db FROM mongodb; getDbConnection FROM ../db; Server FROM socket.io
+  EXPORTS: TopScoreService
+
+---
+FILE: backend/src/utils/gameConfig.ts
+INTERFACE: GameTypeConfig
+CONSTANT: GameConfig
+FUNCTION: getBaseGameType(gameType: string): keyof typeof GameConfig
+EXPORTS: GameConfig, getBaseGameType
+
+---
+FILE: backend/src/utils/index.ts
+FUNCTION: randomInt(min: number, max: number): number
+FUNCTION: delay(ms: number): Promise<void>
+FUNCTION: isDefined<T>(value: T | undefined | null): value is T
+FUNCTION: deepCopy<T>(obj: T): T
+EXPORTS: randomInt, delay, isDefined, deepCopy
+
+---
+FILE: backend/src/utils/yatzyMapping.ts
+CONSTANT: gameTypeMappings
+FUNCTION: getBaseGameType(gameType: string): keyof typeof gameTypeMappings
+FUNCTION: getSelectionLabel(gameType: string, index: number): string | null
+FUNCTION: getSelectionIndex(gameType: string, label: string): number
+EXPORTS: getSelectionLabel, getSelectionIndex
+
+---
+FILE: lib/application/animations_application.dart
+CLASS: AnimationsApplication
+  PROPERTIES: animationControllers, animationDurations, cellAnimationControllers, cellAnimation, players, boardXAnimationPos, boardYAnimationPos
+  METHODS:
+    - animateBoard(): void
+      CALLS: AnimationController.forward() [EXTERNAL: Flutter]
+    - setupAnimation(TickerProvider, nrPlayers, maxNrPlayers, maxTotalFields): void
+      INSTANTIATES: AnimationController, CurveTween [EXTERNAL: Flutter]
+      CALLS: AnimationController.addStatusListener, AnimationController.addListener [EXTERNAL: Flutter]
+
+---
+FILE: lib/application/application_functions_internal_calc_dice_values.dart
+EXTENSION: ApplicationCalcDiceValues on Application
+  METHODS:
+    - zero(): int
+    - calcOnes(): int
+    - calcTwos(): int
+    - calcThrees(): int
+    - calcFours(): int
+    - calcFives(): int
+    - calcSixes(): int
+    - calcDiceNr(): List
+    - calcPair(): int
+    - calcTwoPairs(): int
+    - calcThreePairs(): int
+    - calcThreeOfKind(): int
+    - calcFourOfKind(): int
+    - calcFiveOfKind(): int
+    - calcYatzy(): int
+    - calcHouse(): int
+    - calcTower(): int
+    - calcVilla(): int
+    - calcSmallLadder(): int
+    - calcLargeLadder(): int
+    - calcFullLadder(): int
+    - calcChance(): int
+    USES: Application.gameDices [FILE: lib/dices/dices.dart]
+
+---
+FILE: lib/application/application_functions_internal.dart
+EXTENSION: ApplicationFunctionsInternal on Application
+  METHODS:
+    - clearFocus(): void
+      USES: Application.focusStatus, Application.nrPlayers, Application.totalFields
+    - cellClick(player: int, cell: int): void
+      USES: Application.playerToMove, Application.myPlayerId, Application.fixedCell, Application.cellValue, Application.gameType, Application.gameDices.diceValue, Application.gameId, Application.socketService
+      CALLS: getSelectionLabel(gameType, cell) [FILE: lib/utils/yatzy_mapping_client.dart]
+      CALLS: Application.socketService.sendToClients(msg) [FILE: lib/services/socket_service.dart] [ACTION: sendSelection]
+      CALLS: this.applyLocalSelection(player, cell, cellValue)
+      CALLS: print [EXTERNAL: Dart]
+    - applyLocalSelection(player: int, cell: int, score: int): void
+      USES: Application.gameDices, Application.appColors, Application.fixedCell, Application.cellValue, Application.appText, Application.bonusSum, Application.bonusAmount, Application.totalFields, Application.boardAnimation, Application.animation, Application.context
+      CALLS: Application.gameDices.sendResetToUnity() [FILE: lib/dices/unity_communication.dart]
+      CALLS: this.clearFocus()
+      CALLS: this.colorBoard()
+      CALLS: Application.gameDices.clearDices() [FILE: lib/dices/dices.dart]
+      CALLS: Application.animation.animateBoard() [FILE: lib/application/animations_application.dart]
+      CALLS: context.read<SetStateCubit>().setState() [FILE: lib/states/cubit/state/state_cubit.dart]
+      CALLS: print [EXTERNAL: Dart]
+    - colorBoard(): void
+      USES: Application.nrPlayers, Application.playerToMove, Application.playerActive, Application.totalFields, Application.appColors, Application.fixedCell
+
+---
+FILE: lib/application/application.dart
+CLASS: Application
+  MIXIN: LanguagesApplication [FILE: lib/application/languages_application.dart]
+  DEPENDS_ON:
+    - flutter/material.BuildContext
+    - lib/dices/dices.Dices
+    - lib/input_items/input_items.InputItems
+    - lib/services/socket_service.SocketService
+    - lib/application/animations_application.AnimationsApplication
+    - lib/top_score/top_score.TopScore (via startup.dart)
+    - lib/states/cubit/state/state_cubit.SetStateCubit
+    - lib/application/application_functions_internal_calc_dice_values.dart (via extension methods)
+  PROPERTIES: context, inputItems, gameDices, socketService, tabController, textEditingController, focusNode, animation, games, presentations, boardAnimation, gameType, nrPlayers, maxNrPlayers, maxTotalFields, gameData, gameId, playerIds, playerActive, totalFields, bonusSum, bonusAmount, myPlayerId, playerToMove, winnerId, gameStarted, gameFinished, UI state (boardXPos, etc.), listenerKey, yatzyFunctions, serverId, cellKeys
+  CONSTRUCTOR:
+    PARAMS: context, gameDices, inputItems
+    CALLS: gameDices.setCallbacks(this.callbackUpdateDiceValues, this.callbackUnityCreated, this.callbackCheckPlayerToMove) [FILE: lib/dices/dices.dart]
+    CALLS: this.languagesSetup(this.getChosenLanguage(), this.getStandardLanguage()) [FILE: lib/application/languages_application.dart]
+  METHODS:
+    - getChosenLanguage(): Function -> String
+    - getStandardLanguage(): String
+    - callbackCheckPlayerToMove(): bool
+    - callbackUnityCreated(): void
+      CALLS: gameDices.sendStartToUnity() [FILE: lib/dices/unity_communication.dart]
+    - callbackUpdateDiceValues(): void
+      CALLS: this.updateDiceValues()
+      CALLS: socketService.sendToClients(msg) [FILE: lib/services/socket_service.dart] [ACTION: sendDices]
+      CALLS: print [EXTERNAL: Dart]
+    - updateDiceValues(): void
+      CALLS: this.clearFocus() [FILE: lib/application/application_functions_internal.dart]
+      CALLS: yatzyFunctions[i]() (Calculators from ApplicationCalcDiceValues)
+      CALLS: context.read<SetStateCubit>().setState() [FILE: lib/states/cubit/state/state_cubit.dart]
+    - setAppText(): void
+      USES: this.gameType, translation properties from LanguagesApplication
+    - setup(): void
+      CALLS: topScore.loadTopScoreFromServer(gameType, context.read<SetStateCubit>()) [FILE: lib/top_score/top_score.dart]
+      CALLS: gameDices.initDices(nrDices) [FILE: lib/dices/dices.dart]
+      Assigns: this.yatzyFunctions
+      Initializes: UI state arrays (appText, boardXPos, etc.)
+      CALLS: gameDices.sendResetToUnity() [FILE: lib/dices/unity_communication.dart]
+      CALLS: gameDices.sendStartToUnity() [FILE: lib/dices/unity_communication.dart]
+    - setSocketService(service: SocketService): void
+      STORES: socketService
+
+---
+FILE: lib/application/communication_application.dart
+EXTENSION: CommunicationApplication on Application
+  METHODS:
+    - resetDices(): void
+      CALLS: gameDices.clearDices() [FILE: lib/dices/dices.dart]
+      CALLS: this.clearFocus() [FILE: lib/application/application_functions_internal.dart]
+    - handlePlayerAbort(abortedPlayerIndex: int): void
+      USES: Application.playerActive, Application.appColors, Application.playerToMove, Application.totalFields
+      CALLS: this.advanceToNextActivePlayer()
+      CALLS: this.colorBoard() [FILE: lib/application/application_functions_internal.dart]
+      CALLS: print [EXTERNAL: Dart]
+    - advanceToNextActivePlayer(): void
+      USES: Application.playerActive, Application.playerToMove, Application.nrPlayers, Application.myPlayerId, Application.gameDices
+      CALLS: this.colorBoard() [FILE: lib/application/application_functions_internal.dart]
+      CALLS: this.resetDices()
+      CALLS: gameDices.sendResetToUnity(), gameDices.sendStartToUnity() [FILE: lib/dices/unity_communication.dart]
+      CALLS: print [EXTERNAL: Dart]
+    - callbackOnServerMsg(data: dynamic): Future<void>
+      USES: getIt<AppRouter>, ServiceProvider, SharedPrefProvider, Application state (gameId, gameStarted, etc.), topScore
+      HANDLES_SERVER_MSG: onGetId -> Updates socketId, loads settings
+      HANDLES_SERVER_MSG: onGameStart -> Sets up game state, navigates to ApplicationView
+      HANDLES_SERVER_MSG: onRequestGames -> Updates games list, calls _checkIfPlayerAborted
+      HANDLES_SERVER_MSG: onGameUpdate -> CALLS: _processGameUpdate
+      HANDLES_SERVER_MSG: onGameAborted -> Resets state, navigates to SettingsView
+      HANDLES_SERVER_MSG: onGameFinished -> Sets flag, requests top scores
+      HANDLES_SERVER_MSG: onTopScoresUpdate -> CALLS: topScore.updateScoresFromData
+      CALLS: print, context.read<SetStateCubit>().setState, router navigation methods
+    - _checkIfPlayerAborted(): void
+      USES: Application state (isSpectating, gameData, gameId, games, playerActive, playerIds, nrPlayers, playerToMove)
+      CALLS: this.handlePlayerAbort()
+      CALLS: this._advanceToNextActivePlayer() (private helper)
+      CALLS: this.colorBoard() [FILE: lib/application/application_functions_internal.dart]
+      CALLS: print, context.read<SetStateCubit>().setState()
+    - _advanceToNextActivePlayer(): void (private helper, seems redundant with public advanceToNextActivePlayer)
+    - _processGameUpdate(data: dynamic): Future<void>
+      Handles game state updates from server, including spectator logic.
+      Updates Application state.
+      CALLS: this.colorBoard, this.resetDices, gameDices.sendResetToUnity, gameDices.sendStartToUnity, this.setup
+      CALLS: print, context.read<SetStateCubit>().setState, router navigation methods
+    - chatCallbackOnSubmitted(text: String): void
+      USES: Application.gameId, Application.userName, Application.playerIds, Application.socketService, chat
+      CALLS: socketService.sendToClients(msg) [FILE: lib/services/socket_service.dart] [ACTION: chatMessage]
+      CALLS: chat.scrollController.animateTo [FILE: lib/chat/chat.dart]
+      CALLS: print [EXTERNAL: Dart]
+    - updateChat(text: String): Future<void>
+      USES: chat
+      CALLS: chat.messages.add, chat.scrollController.animateTo
+    - callbackOnClientMsg(data: dynamic): Future<void>
+      USES: getIt<AppRouter>, Application state (myPlayerId, playerActive, etc.)
+      HANDLES_CLIENT_MSG: sendSelection -> Updates UI for other player's move
+      HANDLES_CLIENT_MSG: sendDices -> Updates dice UI for other player's roll
+      HANDLES_CLIENT_MSG: chatMessage -> CALLS: this.updateChat
+      HANDLES_CLIENT_MSG: onGameAborted -> Navigates to SettingsView
+      CALLS: print, context.read<SetStateCubit>().setState, this.applyLocalSelection, this.updateDiceValues, gameDices methods, router navigation methods
+
+---
+FILE: lib/application/languages_application.dart
+MIXIN: LanguagesApplication
+  METHODS:
+    - languagesSetup(getChosenLanguage, standardLanguage)
+    - getText(textVariable)
+  PROVIDES: Translation getters (ones_, twos_, ..., settings_, etc.)
+
+---
+FILE: lib/application/widget_application_scaffold.dart
+EXTENSION: WidgetApplicationScaffold on Application
+  METHODS:
+    - widgetScaffold(context, state): Widget
+      BUILDS: Main application layout (Scaffold with positioned widgets)
+      INSTANTIATES: WidgetDices, WidgetTopScore, WidgetSetupGameBoard, WidgetDisplayGameStatus, WidgetChat, WidgetAnimationsScroll
+      CALLS: tutorial.widgetArrow [FILE: lib/tutorial/tutorial.dart]
+      USES: Application state (screenWidth, screenHeight, gameDices, mainPageLoaded, isTutorial, gameFinished, etc.)
+
+---
+FILE: lib/application/widget_application_settings.dart
+EXTENSION: WidgetApplicationSettings on Application
+  METHODS:
+    - widgetWaitingGame(context): List<Widget>
+      BUILDS: List of game buttons (Join/Spectate)
+      USES: Application.games, inputItems, ServiceProvider
+      CALLS: inputItems.widgetButton, this.onAttemptJoinGame, this.onSpectateGame
+    - onSpectateGame(context, gameId): Future<void>
+      USES: ServiceProvider, Application.userName
+      MODIFIES: Application state (isSpectating, spectatedGameId, gameData)
+      CALLS: serviceProvider.socketService.sendToServer [FILE: lib/services/socket_service.dart] [ACTION: spectateGame]
+      CALLS: context.read<SetStateCubit>().setState, ScaffoldMessenger.showSnackBar
+    - onAttemptJoinGame(context, i): void
+      USES: Application.games, Application.userName, ServiceProvider
+      CALLS: serviceProvider.socketService.sendToServer [FILE: lib/services/socket_service.dart] [ACTION: requestJoinGame]
+    - _buildGameTypeSelection(state): Widget (private)
+      BUILDS: Game type radio buttons
+      USES: inputItems, Application.gameType
+    - onStartGameButton(context, state): Future<void>
+      USES: ServiceProvider, Application state (nrPlayers, userName, gameType, etc.), SharedPrefProvider
+      CALLS: serviceProvider.socketService.sendToServer [FILE: lib/services/socket_service.dart] [ACTION: requestGame]
+      CALLS: SharedPrefProvider.setPrefObject [FILE: lib/shared_preferences.dart]
+      HANDLES: Offline game start
+      CALLS: Application.setup [FILE: lib/application/application.dart]
+      CALLS: gameDices.sendResetToUnity, gameDices.sendStartToUnity [FILE: lib/dices/unity_communication.dart]
+      CALLS: context.read<SetStateCubit>().setState, AutoRouter navigation methods
+    - onChangeUserName(value): void
+      USES: Application.textEditingController
+      MODIFIES: Application.userName
+    - widgetScaffoldSettings(context, state): Widget
+      BUILDS: Settings screen UI with TabBar
+      CALLS: this._buildGameTypeSelection, inputItems methods, this.widgetWaitingGame, gameDices.widgetUnitySettings
+      INSTANTIATES: SpectatorGameBoard [FILE: lib/widgets/spectator_game_board.dart]
+      CALLS: context.read<LanguageBloc>().add(LanguageChanged) [FILE: lib/states/bloc/language/language_bloc.dart]
+      CALLS: context.read<SetStateCubit>().setState
+
+---
+FILE: lib/application/widget_application.dart
+WIDGET: WidgetSetupGameBoard (StatefulWidget)
+  BUILDS: Main game board grid using Positioned widgets
+  USES: app global variable, LanguagesApplication mixin
+  CALLS: app.setup, app.setAppText, app.cellClick, app.clearFocus
+  HANDLES: onVerticalDragUpdate, onTap
+WIDGET: WidgetDisplayGameStatus (StatefulWidget)
+  BUILDS: Status display (Player turn, rolls left, game over)
+  USES: app global variable, LanguagesApplication mixin
+  CALLS: app.gameDices.sendResetToUnity
+
+---
+FILE: lib/chat/chat.dart
+CLASS: ChatMessage (Data)
+CLASS: Chat
+  PROPERTIES: callbacks, state, inputItems, UI controllers, messages list
+  METHODS:
+    - onSubmitted(value, context): Future<void>
+      CALLS: callbackOnSubmitted (app.chatCallbackOnSubmitted)
+
+---
+FILE: lib/chat/languages_chat.dart
+MIXIN: LanguagesChat
+  PROVIDES: Translation getter (sendMessage_)
+
+---
+FILE: lib/chat/widget_chat.dart
+WIDGET: WidgetChat (StatefulWidget)
+  BUILDS: Chat UI with message list and input field
+  USES: chat global variable, LanguagesChat mixin
+  CALLS: chat.onSubmitted
+
+---
+FILE: lib/core/app_widget.dart
+WIDGET: AppWidget (StatelessWidget)
+  BUILDS: Root application widget (ServiceProvider, MaterialApp.router)
+  INITIALIZES: Global instances (topScore, animationsScroll, tutorial, dices, app, chat)
+  INITIALIZES: ServiceProvider with SocketService, GameService
+  CALLS: getIt<AppRouter> [FILE: lib/injection.dart]
+  CALLS: ServiceProvider.of(context).socketService.connect() [FILE: lib/services/socket_service.dart] (in builder)
+  CALLS: app.setSocketService() [FILE: lib/application/application.dart] (in builder)
+
+---
+FILE: lib/core/injectable_modules.dart
+MODULE: InjectableModule (abstract)
+  PROVIDES: AppRouter (@lazySingleton)
+
+---
+FILE: lib/dices/dices.dart
+CLASS: Dices extends LanguagesDices
+  METHODS:
+    - setCallbacks(cbUpdateDiceValues, cbUnityCreated, cbCheckPlayerToMove)
+    - clearDices()
+    - initDices(nrdices)
+      CALLS: this.sendResetToUnity [FILE: lib/dices/unity_communication.dart]
+    - holdDice(dice)
+    - updateDiceImages()
+    - rollDices(context)
+      CALLS: app.gameFinished, this.callbackCheckPlayerToMove
+      CALLS: this.callbackUpdateDiceValues (app.callbackUpdateDiceValues)
+    - widgetUnitySettings(state)
+      CALLS: inputItems.widgetCheckbox
+      CALLS: this.sendLightMotionChangedToUnity, this.sendFunChangedToUnity, this.sendSnowEffectChangedToUnity [FILE: lib/dices/unity_communication.dart]
+  USES: LanguagesDices [FILE: lib/dices/languages_dices.dart]
+  DEPENDS_ON: InputItems, UnityCommunication, flutter_unity_widget
+
+---
+FILE: lib/dices/languages_dices.dart
+CLASS: LanguagesDices
+  PROVIDES: Translation getters for dice-related terms
+
+---
+FILE: lib/dices/unity_communication.dart
+EXTENSION: UnityCommunication on Dices
+  METHODS:
+    - sendResetToUnity() -> unityWidgetController.postMessage [EXTERNAL: flutter_unity_widget]
+    - sendStartToUnity() -> unityWidgetController.postMessage
+    - sendDicesToUnity() -> unityWidgetController.postMessage
+    - sendColorsToUnity() -> unityWidgetController.postMessage
+    - sendTransparencyChangedToUnity() -> unityWidgetController.postMessage
+    - sendLightMotionChangedToUnity() -> unityWidgetController.postMessage
+    - sendFunChangedToUnity() -> unityWidgetController.postMessage
+    - sendSnowEffectChangedToUnity() -> unityWidgetController.postMessage
+    - onUnityMessage(message)
+      HANDLES_UNITY_MSG: results -> CALLS: this.callbackUpdateDiceValues
+      HANDLES_UNITY_MSG: unityIdentifier -> CALLS: this.send...ToUnity methods, this.callbackCheckPlayerToMove
+    - onUnityUnloaded()
+    - onUnityCreated(controller)
+      CALLS: this.sendResetToUnity, this.callbackUnityCreated
+    - onUnitySceneLoaded(sceneInfo)
+  DEPENDS_ON: UnityMessage, flutter_unity_widget, Dices
+
+---
+FILE: lib/dices/unity_message.dart
+CLASS: UnityMessage (Data)
+  METHODS: Constructors, fromJson, toJson
+
+---
+FILE: lib/dices/widget_dices.dart
+WIDGET: WidgetDices (StatefulWidget)
+  BUILDS: Either UnityWidget or 2D dice display
+  IF UNITY:
+    INSTANTIATES: UnityWidget [EXTERNAL: flutter_unity_widget]
+    CALLS: app.gameDices.onUnityCreated, onUnityMessage, etc. [FILE: lib/dices/unity_communication.dart]
+  IF 2D:
+    BUILDS: Image widgets for dice, roll button
+    HANDLES: onTap on dice -> CALLS: app.gameDices.holdDice [FILE: lib/dices/dices.dart]
+    HANDLES: onPointerDown on roll button -> CALLS: app.gameDices.rollDices [FILE: lib/dices/dices.dart]
+    USES: app global variable
+
+---
+FILE: lib/injection.config.dart
+AUTO_GENERATED: Dependency injection setup code.
+
+---
+FILE: lib/injection.dart
+CONFIGURES: Dependency injection using GetIt and Injectable.
+
+---
+FILE: lib/input_items/input_items.dart
+CLASS: InputItems
+  PROVIDES: Factory methods for common Flutter widgets (widgetImage, widgetInputText, widgetButton, etc.)
+
+---
+FILE: lib/main.dart
+FUNCTION: main(): void
+  INITIALIZES: Flutter, SharedPreferences, Dependency Injection (GetIt)
+  RUNS_APP: MultiBlocProvider -> AppWidget
+
+---
+FILE: lib/models/board_cell.dart
+CLASS: BoardCell (Model)
+  PROPERTIES: index, label, value, fixed, position, colors, focus state
+  METHODS: setPosition, displayText, isEmpty, clear, setValue, fix, setFocus, copyWith
+
+---
+FILE: lib/models/game.dart
+CLASS: Game (Model)
+  PROPERTIES: gameId, gameType, maxPlayers, players, state flags, playerToMove, diceValues, rollCount, config, cellLabels, myPlayerIndex, callbacks
+  METHODS: isMyTurn, canRoll, currentPlayer, myPlayer, calculateScores, advanceToNextPlayer, setDiceValues, resetDice, selectCell, checkGameFinished, fromJson, toJson
+  DEPENDS_ON: Player, BoardCell
+
+---
+FILE: lib/models/player.dart
+CLASS: Player (Model)
+  PROPERTIES: id, username, isActive, cells, _totalScore, _upperSectionSum
+  METHODS: calculateScores, clearUnfixedCells, hasCompletedGame, fromJson, toJson
+  DEPENDS_ON: BoardCell
+
+---
+FILE: lib/router/router.dart
+CLASS: AppRouter extends $AppRouter
+  DEFINES: Routes (SettingsView, ApplicationView) using AutoRouterConfig
+
+---
+FILE: lib/router/router.gr.dart
+AUTO_GENERATED: Route definitions from AutoRouter.
+
+---
+FILE: lib/scroll/animations_scroll.dart
+CLASS: AnimationsScroll
+  MIXIN: LanguagesAnimationsScroll
+  PROPERTIES: Animation controller and values for scrolling text
+
+---
+FILE: lib/scroll/languages_animations_scroll.dart
+MIXIN: LanguagesAnimationsScroll
+  PROVIDES: Translation getter (scrollText_)
+
+---
+FILE: lib/scroll/widget_scroll.dart
+WIDGET: WidgetAnimationsScroll (StatefulWidget)
+  BUILDS: Scrolling text animation using AnimatedTextKit
+  USES: animationsScroll global variable
+
+---
+FILE: lib/services/game_service.dart
+CLASS: GameService
+  DEPENDS_ON: SocketService, Game, BoardCell
+  PROPERTIES: socketService, _game, callbacks (onGameUpdated, onError)
+  METHODS:
+    - _handleGameUpdate(updatedGame): void -> Updates _game, calls callback
+    - createGame(...) -> CALLS: socketService.createGame
+    - joinGame(...) -> CALLS: socketService.joinGame
+    - rollDice(...) -> CALLS: socketService.rollDice
+    - calculateScoreForCell(cell, diceValues): int -> Client-side score calculation logic
+    - selectCell(cellIndex): void -> CALLS: socketService.selectCell
+    - _reportError(message): void -> Calls onError callback
+
+---
+FILE: lib/services/http_service.dart
+CLASS: HttpService
+  METHODS: Wrappers for http GET, POST, UPDATE, DELETE requests (getDB, postDB, updateDB, deleteDB, deleteUser, login, signup)
+  DEPENDS_ON: http package
+
+---
+FILE: lib/services/service_provider.dart
+CLASS: ServiceProvider extends InheritedWidget
+  PROVIDES: SocketService, GameService via context
+  STATIC_METHODS: of(context), initialize(...) -> Instantiates services
+
+---
+FILE: lib/services/socket_service.dart
+CLASS: SocketService
+  DEPENDS_ON: socket_io_client, Flutter, Application (via app global), Game
+  MANAGES: Socket.IO connection lifecycle and event handling
+  METHODS:
+    - connect(): void -> Initializes and connects socket, sets up handlers
+    - _clearEventHandlers(): void
+    - _setupEventHandlers(): void -> Registers listeners for server events
+    - _sendEcho(): void -> Emits 'echo'
+    - _requestId(): void -> Emits 'sendToServer' [ACTION: getId]
+    - _handleUserId(data): void -> Updates socketId
+    - _handleClientMessage(data): void -> CALLS: app.callbackOnClientMsg
+    - _handleServerMessage(data): void -> CALLS: app.callbackOnServerMsg
+    - _handleGameUpdate(data): void -> CALLS: _processGameUpdate
+    - _processGameUpdate(gameData): void -> Creates Game instance, calls onGameUpdate
+    - _handleChatMessage(data): void -> Calls onChatMessage
+    - createGame(...) -> Emits 'sendToServer' [ACTION: createGame]
+    - joinGame(...) -> Emits 'sendToServer' [ACTION: joinGame]
+    - rollDice(...) -> Emits 'sendToServer' [ACTION: rollDice]
+    - selectCell(...) -> Emits 'sendToServer' [ACTION: selectCell]
+    - sendChatMessage(...) -> Emits 'sendToServer' [ACTION: chatMessage]
+    - sendToClients(data): void -> Emits 'sendToClients'
+    - sendToServer(data): void -> Emits 'sendToServer'
+    - disconnect(): void -> Disconnects socket
+    - _updateState(): void -> Triggers UI update via SetStateCubit
+
+---
+FILE: lib/shared_preferences.dart
+CLASS: SharedPrefProvider (abstract)
+  PROVIDES: Static methods to load, get, and set values in SharedPreferences
+
+---
+FILE: lib/startup.dart
+DEFINES: Global configuration variables (isOnline, localhost, etc.)
+DEFINES: Global application state variables (userName, gameType, etc.)
+DEFINES: Global instances of key classes (inputItems, tutorial, topScore, app, chat, dices, etc.)
+
+---
+FILE: lib/states/bloc/language/language_bloc.dart
+CLASS: LanguageBloc extends Bloc<LanguageEvent, String>
+  HANDLES_EVENT: LanguageChanged -> Updates SharedPrefs, emits new language state
+
+---
+FILE: lib/states/bloc/language/language_event.dart
+DEFINES: LanguageEvent (abstract), LanguageChanged event class
+
+---
+FILE: lib/states/cubit/state/state_cubit.dart
+CLASS: SetStateCubit extends Cubit<int>
+  PROVIDES: setState() method to trigger generic UI updates
+
+---
+FILE: lib/top_score/languages_top_score.dart
+MIXIN: LanguagesTopScore
+  PROVIDES: Translation getter (topScores_)
+
+---
+FILE: lib/top_score/top_score.dart
+CLASS: TopScore
+  MIXIN: LanguagesTopScore
+  METHODS:
+    - updateScoresFromData(newScores, cubit): void -> Updates internal list from WebSocket data
+    - loadTopScoreFromServer(gameType, cubit): Future<void> -> Fetches scores via HttpService
+    - updateTopScore(name, score, gameType): Future -> Sends score via HttpService
+  DEPENDS_ON: HttpService, SetStateCubit
+
+---
+FILE: lib/top_score/widget_top_scores.dart
+WIDGET: WidgetTopScore (StatefulWidget)
+  BUILDS: Top scores list UI
+  USES: topScore global variable, animation controllers
+
+---
+FILE: lib/tutorial/tutorial.dart
+CLASS: Tutorial
+  PROPERTIES: Animation controllers and state for tutorial arrows
+  METHODS:
+    - setup(ticket): void -> Initializes animations
+    - widgetArrow(...): Widget -> Builds animated arrow pointing to a target key
+
+---
+FILE: lib/utils/yatzy_mapping_client.dart
+PROVIDES: Client-side mapping functions (getSelectionLabel, getSelectionIndex) between cell index and label string.
+
+---
+FILE: lib/views/application_view.dart
+WIDGET: ApplicationView (StatefulWidget, @RoutePage)
+  BUILDS: Main game screen using app.widgetScaffold
+  HANDLES: Post-frame callbacks, showing game finished dialog
+  DEPENDS_ON: app global variable, SetStateCubit, AutoRouter
+
+---
+FILE: lib/views/settings_view.dart
+WIDGET: SettingsView (StatefulWidget, @RoutePage)
+  BUILDS: Settings screen using app.widgetScaffoldSettings
+  DEPENDS_ON: app global variable, SetStateCubit
+
+---
+FILE: lib/widgets/spectator_game_board.dart
+WIDGET: SpectatorGameBoard (StatefulWidget)
+  BUILDS: Read-only view of the game board for spectators
+  USES: gameData property (passed in) to display scores, dice, status
+  HELPER_CLASS: ScoreCategory
+
+---
+FILE: unity/yatzy/Assets/FlutterUnityIntegration/Demo/GameManager.cs
+CLASS: GameManager (MonoBehaviour)
+  UNITY_COMPONENT: Attaches UnityMessageManager
+  METHODS: HandleWebFnCall(action) -> Handles pause/resume/unload/quit for WebGL
+
+---
+FILE: unity/yatzy/Assets/FlutterUnityIntegration/Demo/Rotate.cs
+CLASS: Rotate (MonoBehaviour)
+  UNITY_COMPONENT: Rotates GameObject, handles touch input
+  CALLS: UnityMessageManager.Instance.SendMessageToFlutter [FILE: unity/yatzy/Assets/FlutterUnityIntegration/UnityMessageManager.cs]
+  HANDLES_FLUTTER_CALL: SetRotationSpeed(message)
+
+---
+FILE: unity/yatzy/Assets/FlutterUnityIntegration/Demo/SceneLoader.cs
+CLASS: SceneLoader (MonoBehaviour)
+  METHODS:
+    - LoadScene(idx)
+    - MessengerFlutter() -> CALLS: UnityMessageManager.Instance.SendMessageToFlutter
+    - SwitchNative() -> CALLS: UnityMessageManager.Instance.ShowHostMainWindow
+    - UnloadNative() -> CALLS: UnityMessageManager.Instance.UnloadMainWindow
+    - QuitNative() -> CALLS: UnityMessageManager.Instance.QuitUnityWindow
+
+---
+FILE: unity/yatzy/Assets/FlutterUnityIntegration/Editor/Build.cs
+CLASS: Build (EditorWindow) - Build Script
+  METHODS: Build automation for Android, iOS, WebGL, Windows exports, modifying projects for Flutter integration.
+
+---
+FILE: unity/yatzy/Assets/FlutterUnityIntegration/Editor/SweetShellHelper.cs
+CLASS: SweetShellHelper (static) - Build Script Helper
+  METHODS: Bash() extension method for running shell commands.
+
+---
+FILE: unity/yatzy/Assets/FlutterUnityIntegration/Editor/XCodePostBuild.cs
+CLASS: XcodePostBuild (static) - Build Script
+  METHODS: Post-process build steps for iOS, modifying Xcode project settings and code.
+
+---
+FILE: unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs
+CLASS: NativeAPI
+  PROVIDES: Bridge to call native platform (Android/iOS/WebGL) functions from Unity.
+  METHODS: OnSceneLoaded, SendMessageToFlutter, ShowHostMainWindow, UnloadMainWindow, QuitUnityWindow
+
+---
+FILE: unity/yatzy/Assets/FlutterUnityIntegration/SingletonMonoBehaviour.cs
+CLASS: SingletonMonoBehaviour<T> (abstract)
+  IMPLEMENTS: Singleton pattern for MonoBehaviours.
+
+---
+FILE: unity/yatzy/Assets/FlutterUnityIntegration/UnityMessageManager.cs
+CLASS: MessageHandler (Helper)
+CLASS: UnityMessage (Data)
+CLASS: UnityMessageManager : SingletonMonoBehaviour<UnityMessageManager>
+  MANAGES: Communication between Unity and Flutter.
+  EVENTS: OnMessage, OnFlutterMessage
+  METHODS:
+    - ShowHostMainWindow() -> CALLS: NativeAPI.ShowHostMainWindow
+    - UnloadMainWindow() -> CALLS: NativeAPI.UnloadMainWindow
+    - QuitUnityWindow() -> CALLS: NativeAPI.QuitUnityWindow
+    - SendMessageToFlutter(string) -> CALLS: NativeAPI.SendMessageToFlutter
+    - SendMessageToFlutter(UnityMessage) -> Sends structured message
+    - onFlutterMessage(message) -> Parses message from Flutter, invokes OnFlutterMessage event
+
+---
+FILE: unity/yatzy/Assets/Scripts/CircularMotionScript.cs
+CLASS: CircularMotionScript (MonoBehaviour)
+  UNITY_COMPONENT: Controls light motion and applies color to plane materials.
+
+---
+FILE: unity/yatzy/Assets/Scripts/Connection.cs
+CLASS: Connection (MonoBehaviour)
+  USES: NativeWebSocket [FILE: unity/yatzy/Assets/WebSocket/WebSocket.cs]
+  ESTABLISHES: WebSocket connection.
+  HANDLES_WEBSOCKET: OnMessage -> Enqueues call to GameManagerScript.flutterMessage
+
+---
+FILE: unity/yatzy/Assets/Scripts/DiceCheckZoneScript.cs
+CLASS: DiceCheckZoneScript (MonoBehaviour)
+  UNITY_COMPONENT: Detects settled dice in trigger zone.
+  CALLS: DiceScript.SetDiceNumber [FILE: unity/yatzy/Assets/Scripts/DiceScript.cs]
+
+---
+FILE: unity/yatzy/Assets/Scripts/DiceScript.cs
+CLASS: DiceScript (MonoBehaviour)
+  UNITY_COMPONENT: Represents a single die.
+  PROPERTIES: diceNumber, positions, flags
+  METHODS: OnMouseDown (handles hold clicks), GetDiceNumber, SetDiceNumber
+
+---
+FILE: unity/yatzy/Assets/Scripts/GameManagerScript.cs
+CLASS: GameManagerScript (MonoBehaviour)
+  MANAGES: Core Unity game logic (dice throwing, state, communication).
+  INNER_CLASS: jsonCommunicator
+  METHODS:
+    - InitDices(initRotation)
+    - SetDices(dices)
+    - Update() -> Checks dice state, sends results to Flutter
+      CALLS: UnityMessageManager.Instance.SendMessageToFlutter [FILE: unity/yatzy/Assets/FlutterUnityIntegration/UnityMessageManager.cs]
+    - SetNrDices(strNrDices)
+    - flutterMessage(json) -> Handles messages from Flutter
+      HANDLES_FLUTTER_MSG: unityIdentifier, throwDices, start, reset, setProperty (Color, Transparency, LightMotion, Dices, SnowEffect)
+      CALLS: this.InitDices, this.SetDices
+      USES: CircularMotionScript component
+  DEPENDS_ON: DiceScript, UnityMessageManager, CircularMotionScript, Newtonsoft.Json
+
+---
+FILE: unity/yatzy/Assets/Scripts/ThrowDices.cs
+CLASS: ThrowDices (MonoBehaviour)
+  UNITY_COMPONENT: Button script to initiate dice throw.
+  METHODS: OnMouseDown() -> SETS: GameManagerScript.throwDices = true
+  DEPENDS_ON: GameManagerScript
+
+---
+FILE: unity/yatzy/Assets/WebSocket/WebSocket.cs
+NAMESPACE: NativeWebSocket
+  PROVIDES: Cross-platform WebSocket implementation (using JSLIB for WebGL, System.Net.WebSockets for others).
+  CLASSES: WebSocket, WebSocketFactory, MainThreadUtil, WaitForUpdate, WaitForBackgroundThread, Exceptions, Enums.
+```
+
+This file is a merged representation of a subset of the codebase, containing specifically included files and files not matching ignore patterns, combined into a single document by Repomix.
+
+<directory_structure>
+backend/src/controllers/ChatController.ts
+backend/src/controllers/GameController.ts
+backend/src/controllers/PlayerController.ts
+backend/src/db.ts
+backend/src/models/BoardCell.ts
+backend/src/models/Dice.ts
+backend/src/models/Game.ts
+backend/src/models/Player.ts
+backend/src/routes/getLogRoute.ts
+backend/src/routes/getTopScores.ts
+backend/src/routes/index.ts
+backend/src/routes/logInRoute.ts
+backend/src/routes/logRoute.ts
+backend/src/routes/signUpRoute.ts
+backend/src/routes/spectateGameRoute.ts
+backend/src/routes/updateTopScore.ts
+backend/src/server.ts
+backend/src/services/GameLogService.ts
+backend/src/services/GameService.ts
+backend/src/services/TopScoreService.ts
+backend/src/utils/gameConfig.ts
+backend/src/utils/index.ts
+backend/src/utils/yatzyMapping.ts
+lib/application/animations_application.dart
+lib/application/application_functions_internal_calc_dice_values.dart
+lib/application/application_functions_internal.dart
+lib/application/application.dart
+lib/application/communication_application.dart
+lib/application/languages_application.dart
+lib/application/widget_application_scaffold.dart
+lib/application/widget_application_settings.dart
+lib/application/widget_application.dart
+lib/chat/chat.dart
+lib/chat/languages_chat.dart
+lib/chat/widget_chat.dart
+lib/core/app_widget.dart
+lib/core/injectable_modules.dart
+lib/dices/dices.dart
+lib/dices/languages_dices.dart
+lib/dices/unity_communication.dart
+lib/dices/unity_message.dart
+lib/dices/widget_dices.dart
+lib/injection.config.dart
+lib/injection.dart
+lib/input_items/input_items.dart
+lib/main.dart
+lib/models/board_cell.dart
+lib/models/game.dart
+lib/models/player.dart
+lib/router/router.dart
+lib/router/router.gr.dart
+lib/scroll/animations_scroll.dart
+lib/scroll/languages_animations_scroll.dart
+lib/scroll/widget_scroll.dart
+lib/services/game_service.dart
+lib/services/http_service.dart
+lib/services/service_provider.dart
+lib/services/socket_service.dart
+lib/shared_preferences.dart
+lib/startup.dart
+lib/states/bloc/language/language_bloc.dart
+lib/states/bloc/language/language_event.dart
+lib/states/cubit/state/state_cubit.dart
+lib/top_score/languages_top_score.dart
+lib/top_score/top_score.dart
+lib/top_score/widget_top_scores.dart
+lib/tutorial/tutorial.dart
+lib/utils/yatzy_mapping_client.dart
+lib/views/application_view.dart
+lib/views/settings_view.dart
+lib/widgets/spectator_game_board.dart
+unity/yatzy/Assets/FlutterUnityIntegration/Demo/GameManager.cs
+unity/yatzy/Assets/FlutterUnityIntegration/Demo/Rotate.cs
+unity/yatzy/Assets/FlutterUnityIntegration/Demo/SceneLoader.cs
+unity/yatzy/Assets/FlutterUnityIntegration/Editor/Build.cs
+unity/yatzy/Assets/FlutterUnityIntegration/Editor/SweetShellHelper.cs
+unity/yatzy/Assets/FlutterUnityIntegration/Editor/XCodePostBuild.cs
+unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs
+unity/yatzy/Assets/FlutterUnityIntegration/SingletonMonoBehaviour.cs
+unity/yatzy/Assets/FlutterUnityIntegration/UnityMessageManager.cs
+unity/yatzy/Assets/Scripts/CircularMotionScript.cs
+unity/yatzy/Assets/Scripts/Connection.cs
+unity/yatzy/Assets/Scripts/DiceCheckZoneScript.cs
+unity/yatzy/Assets/Scripts/DiceScript.cs
+unity/yatzy/Assets/Scripts/GameManagerScript.cs
+unity/yatzy/Assets/Scripts/ThrowDices.cs
+unity/yatzy/Assets/WebSocket/WebSocket.cs
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="backend/src/controllers/ChatController.ts">
 import { Socket, Server } from 'socket.io';
 import { GameService } from '../services/GameService';
 
@@ -7705,12 +1716,9 @@ export class ChatController {
     }
   }
 }
+</file>
 
-
-
-================================================
-File: backend/src/controllers/GameController.ts
-================================================
+<file path="backend/src/controllers/GameController.ts">
 // backend/src/controllers/GameController.ts
 import { Socket } from 'socket.io';
 import { GameService } from '../services/GameService';
@@ -7779,15 +1787,12 @@ export class GameController {
   // ... (handleRequestGame, handleRequestJoinGame, handleRemoveGame remain similar, ensure they use GameService correctly)
   handleRequestGame(socket: Socket, data: any): void {
     const { gameType, nrPlayers, userName } = data;
-    // --- Simplification: Validate gameType ---
-    if (!['Ordinary', 'Mini', 'Maxi'].includes(gameType)) {
-         console.warn(`[GameController] Invalid gameType requested: ${gameType}. Defaulting to Ordinary? Or reject.`);
-         // Decide how to handle invalid type - reject or default
-         // For now, reject:
-         socket.emit('onServerMsg', { action: 'error', message: `Invalid game type: ${gameType}` });
-         return;
-    }
-    // --- End Simplification ---
+    const allowedTypes = ['Ordinary', 'Maxi']; // Only allow these
+        if (!allowedTypes.includes(gameType)) {
+             console.warn(`[GameController] Invalid gameType requested: ${gameType}. Rejecting.`);
+             socket.emit('onServerMsg', { action: 'error', message: `Invalid game type: ${gameType}. Allowed types are Ordinary, Maxi.` });
+             return;
+        }
     const player = PlayerFactory.createPlayer(socket.id, userName, gameType); // Pass gameType
 
     const game = this.gameService.createOrJoinGame(gameType, nrPlayers, player);
@@ -8062,11 +2067,9 @@ export class GameController {
     this.gameService.addSpectator(gameId, socket.id);
   }
 }
+</file>
 
-
-================================================
-File: backend/src/controllers/PlayerController.ts
-================================================
+<file path="backend/src/controllers/PlayerController.ts">
 // backend/src/controllers/PlayerController.ts
 import { Socket } from "socket.io";
 import { GameService } from "../services/GameService";
@@ -8156,12 +2159,61 @@ export class PlayerController {
 
   // Removed handleDisconnect as GameService handles it globally now.
 }
+</file>
 
+<file path="backend/src/db.ts">
+import { MongoClient, Db } from "mongodb"; // Import Db type
 
+let client: MongoClient; // Add type for client
 
-================================================
-File: backend/src/models/BoardCell.ts
-================================================
+export const initializeDbConnection = async () => {
+  try {
+    console.log("📊 [DB] Connecting to MongoDB at mongodb://127.0.0.1:27017...");
+    client = await MongoClient.connect("mongodb://127.0.0.1:27017", {
+      // useNewUrlParser and useUnifiedTopology are deprecated and default to true
+      // Remove them or keep if using an older driver version where they are needed
+    });
+    console.log("✅ [DB] Successfully connected to MongoDB");
+    
+    // Create a test entry to verify write access
+    const testDb = client.db('yatzy-game-log-db');
+    const testCollection = testDb.collection('db_test');
+    const result = await testCollection.insertOne({
+      message: "Database connection test",
+      timestamp: new Date()
+    });
+    
+    console.log(`✅ [DB] Test document inserted with ID: ${result.insertedId}`);
+    
+    // Also check if game_moves collection exists
+    const movesCollection = testDb.collection('game_moves');
+    const count = await movesCollection.countDocuments();
+    console.log(`📊 [DB] game_moves collection has ${count} documents`);
+    
+  } catch (error) {
+    console.error("❌ [DB] Error connecting to MongoDB:", error);
+    throw error; // Rethrow to make sure app doesn't start with broken DB
+  }
+};
+
+// Add types for parameter and return value
+export const getDbConnection = (dbName: string): Db => {
+  if (!client) {
+    console.error("❌ [DB] MongoDB client is not initialized when trying to get DB:", dbName);
+    throw new Error("MongoDB client is not initialized");
+  }
+  
+  try {
+    const db = client.db(dbName);
+    return db;
+  } catch (error) {
+    console.error(`❌ [DB] Error getting database connection for "${dbName}":`, error);
+    throw error;
+  }
+};
+</file>
+
+<file path="backend/src/models/BoardCell.ts">
 // backend/src/models/BoardCell.ts
 
 export class BoardCell {
@@ -8202,11 +2254,9 @@ export class BoardCell {
        return cell;
    }
 }
+</file>
 
-
-================================================
-File: backend/src/models/Dice.ts
-================================================
+<file path="backend/src/models/Dice.ts">
 /**
  * Model for dice operations in Yatzy
  */
@@ -8267,12 +2317,9 @@ export class Dice {
     this.values = new Array(this.diceCount).fill(0);
   }
 }
+</file>
 
-
-
-================================================
-File: backend/src/models/Game.ts
-================================================
+<file path="backend/src/models/Game.ts">
 // backend/src/models/Game.ts
 import { Player, PlayerFactory } from './Player';
 import { v4 as uuidv4 } from 'uuid';
@@ -8633,12 +2680,9 @@ declare module './Game' {
 //         hasCompletedGame(): boolean;
 //     }
 // }
+</file>
 
-
-
-================================================
-File: backend/src/models/Player.ts
-================================================
+<file path="backend/src/models/Player.ts">
 // backend/src/models/Player.ts
 
 import { BoardCell } from './BoardCell';
@@ -8827,12 +2871,9 @@ export class PlayerFactory {
     return new Player("", "", gameType, false, cells);
   }
 }
+</file>
 
-
-
-================================================
-File: backend/src/routes/getLogRoute.ts
-================================================
+<file path="backend/src/routes/getLogRoute.ts">
 import * as jwt from "jsonwebtoken";
 import { getDbConnection } from "../db";
 
@@ -8874,12 +2915,9 @@ export const getLogRoute = {
     });
   },
 };
+</file>
 
-
-
-================================================
-File: backend/src/routes/getTopScores.ts
-================================================
+<file path="backend/src/routes/getTopScores.ts">
 //import jwt from "jsonwebtoken";
 import { getDbConnection } from "../db";
 
@@ -8887,64 +2925,44 @@ export const getTopScores = {
   path: "/GetTopScores",
   method: "get",
   handler: async (req, res) => {
-    //console.log(req.query.count);
-
     const db = getDbConnection("top-scores");
-
     var results;
     try {
+        // --- MODIFIED: Validate game type ---
+        const requestedType = req.query.type as string;
+        const allowedTypes = ['Ordinary', 'Maxi']; // Only allow these
+        if (!allowedTypes.includes(requestedType)) {
+            console.warn(`[getTopScores Route] Invalid game type requested: ${requestedType}`);
+            return res.status(400).json({ message: `Invalid game type: ${requestedType}` });
+        }
+        // --- End Modification ---
 
-      // --- Simplification: Validate game type ---
-    const requestedType = req.query.type as string;
-    if (!['Ordinary', 'Mini', 'Maxi'].includes(requestedType)) {
-        console.warn(`[getTopScores Route] Invalid game type requested: ${requestedType}`);
-        return res.status(400).json({ message: `Invalid game type: ${requestedType}` });
-    }
-    // --- End Simplification ---
-      switch (req.query.type) {
-        case "Ordinary": {
-          console.log("getting ordinary game topscores");
-          results = await db
-            .collection("ordinary")
+        // Simplified switch or use if/else
+        let collectionName = '';
+        if (requestedType === 'Ordinary') {
+            collectionName = 'ordinary';
+        } else if (requestedType === 'Maxi') {
+            collectionName = 'maxi';
+        }
+        // No else needed due to validation above
+
+        console.log(`getting ${collectionName} game topscores`);
+        results = await db
+            .collection(collectionName)
             .find({}, { projection: { _id: 0 } })
             .sort({ score: -1 })
             .toArray();
-          break;
-        }
 
-        case "Mini": {
-          results = await db
-            .collection("mini")
-            .find({}, { projection: { _id: 0 } })
-            .sort({ score: -1 })
-            .toArray();
-          break;
-        }
-
-        case "Maxi": {
-          results = await db
-            .collection("maxi")
-            .find({}, { projection: { _id: 0 } })
-            .sort({ score: -1 })
-            .toArray();
-          break;
-        }
-      }
-
-      //console.log("result ", results);
-      res.status(200).json(results);
+        res.status(200).json(results);
     } catch (e) {
       console.log(e);
       res.sendStatus(500);
     }
   },
 };
+</file>
 
-
-
-================================================
-File: backend/src/routes/index.ts
-================================================
+<file path="backend/src/routes/index.ts">
 import { logInRoute } from "./logInRoute";
 import { logRoute } from "./logRoute";
 import { getLogRoute } from "./getLogRoute";
@@ -8962,12 +2980,9 @@ export const routes = () => {
     updateTopScore,
   ];
 };
+</file>
 
-
-
-================================================
-File: backend/src/routes/logInRoute.ts
-================================================
+<file path="backend/src/routes/logInRoute.ts">
 import * as bcrypt from "bcrypt";
 import * as jwt from "jsonwebtoken";
 import { getDbConnection } from "../db";
@@ -9005,12 +3020,9 @@ export const logInRoute = {
     }
   },
 };
+</file>
 
-
-
-================================================
-File: backend/src/routes/logRoute.ts
-================================================
+<file path="backend/src/routes/logRoute.ts">
 import * as jwt from "jsonwebtoken";
 import { getDbConnection } from "../db";
 
@@ -9058,12 +3070,9 @@ export const logRoute = {
     });
   },
 };
+</file>
 
-
-
-================================================
-File: backend/src/routes/signUpRoute.ts
-================================================
+<file path="backend/src/routes/signUpRoute.ts">
 import * as bcrypt from "bcrypt";
 import * as jwt from "jsonwebtoken";
 import { getDbConnection } from "../db";
@@ -9123,12 +3132,9 @@ export const signUpRoute = {
     );
   },
 };
+</file>
 
-
-
-================================================
-File: backend/src/routes/spectateGameRoute.ts
-================================================
+<file path="backend/src/routes/spectateGameRoute.ts">
 // backend/src/routes/spectateGameRoute.ts
 import { Request, Response } from 'express'; // Import Request and Response types
 import { GameService } from '../services/GameService'; // Adjust path as needed
@@ -9250,11 +3256,9 @@ export const spectateGameRoute = {
 };
 
 // Ensure initializeSpectateRoute is called in server.ts *after* services are created
+</file>
 
-
-================================================
-File: backend/src/routes/updateTopScore.ts
-================================================
+<file path="backend/src/routes/updateTopScore.ts">
 //import jwt from "jsonwebtoken";
 import { getDbConnection } from "../db";
 // --- Simplification: Import TopScoreService to trigger broadcast ---
@@ -9272,15 +3276,24 @@ export const updateTopScore = {
     var results = [];
     try {
 
-      // --- Simplification: Validate game type ---
-    const requestedType = req.body.type as string;
-    if (!['Ordinary', 'Mini', 'Maxi'].includes(requestedType)) {
-        console.warn(`[updateTopScore Route] Invalid game type requested: ${requestedType}`);
-        return res.status(400).json({ message: `Invalid game type: ${requestedType}` });
-    }
-    // --- End Simplification ---
+      // --- MODIFIED: Validate game type ---
+      const requestedType = req.body.type as string;
+      const allowedTypes = ['Ordinary', 'Maxi']; // Only allow these
+      if (!allowedTypes.includes(requestedType)) {
+          console.warn(`[updateTopScore Route] Invalid game type requested: ${requestedType}`);
+          return res.status(400).json({ message: `Invalid game type: ${requestedType}` });
+      }
+      // --- End Modification ---
 
-    const collectionName = requestedType.charAt(0).toLowerCase() + requestedType.slice(1);
+    // Simplified logic
+    let collectionName = '';
+    if (requestedType === 'Ordinary') {
+        collectionName = 'ordinary';
+    } else if (requestedType === 'Maxi') {
+        collectionName = 'maxi';
+    }
+    // No else needed due to validation above
+
     const collection = db.collection(collectionName);
 
     await collection.insertOne({ name: req.body.name, score: req.body.score });
@@ -9289,11 +3302,7 @@ export const updateTopScore = {
         .sort({ score: -1 })
         .toArray();
 
-      // --- Simplification: Broadcasting should ideally happen via the Service ---
-        // If topScoreServiceInstance is available:
-        // await topScoreServiceInstance.broadcastTopScores();
-        // Otherwise, the broadcast won't happen via this HTTP route. Clients relying
-        // on the WebSocket update ('onTopScoresUpdate') are preferred.
+      // Broadcasting handled by TopScoreService ideally
       res.status(200).json(results);
     } catch (e) {
       console.log(e);
@@ -9301,12 +3310,248 @@ export const updateTopScore = {
     }
   },
 };
+</file>
 
+<file path="backend/src/server.ts">
+import express from "express";
+import { routes } from "./routes/index";
+import { initializeDbConnection } from "./db";
+import * as path from "path";
+import cors from "cors";
+import { Server } from "socket.io";
+import { createServer } from "http";
 
+// Import services
+import { GameService } from "./services/GameService";
+import { GameLogService } from "./services/GameLogService"; // <-- Import GameLogService
+import { TopScoreService } from "./services/TopScoreService";
 
-================================================
-File: backend/src/services/GameLogService.ts
-================================================
+// Import controllers
+import { GameController } from "./controllers/GameController";
+import { PlayerController } from "./controllers/PlayerController";
+import { ChatController } from "./controllers/ChatController";
+import { spectateGameRoute, initializeSpectateRoute } from "./routes/spectateGameRoute"; // <-- Import spectate route and initializer
+
+const PORT: number = 8000;
+
+const app = express();
+
+// Important client has local ip (like 192.168.0.168) not 127.0.0.1 or localhost in browser to work on local developement across different computers
+// Local client connect should look like : http://192.168.0.168:8080 , or your local network ip instead of 192.168.0.168
+// Also with port number this should not be there ssl online since all is taken care of with nginx or similar routing port 80 to prefeerably 8080
+// for Https, socket.io and WebSocket. Requirement of Google Platform app engine flex only one port and is possible! but also convinient!
+app.use(cors({
+  origin: '*', // This allows all origins
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+const httpServer = createServer(app);
+
+// All 4 systems NodeJS, Flutter, Unity and React has this flag to differ from local developement and online publish
+// One improvement could be global system flag all systems look at so avoid funny errors missing to reset flag... :)
+// Got idea from meetup to signal in running code visually if offline/online good idea!
+let isOnline: boolean = false;
+
+const localFlutterDir: string = "C:/Users/J/StudioProjects/flutter_system";
+const localReactDir: string = "C:/Users/J/Desktop/proj";
+
+if (isOnline) {
+  //app.use(express.static(path.join(__dirname, "/build")));
+  app.use(express.static(path.join(__dirname, "/web")));
+} else {
+  //app.use(express.static(localReactDir + "/build"));
+  app.use(express.static(localFlutterDir + "/build/web"));
+}
+
+app.use(express.json());
+
+// Add all the routes to our Express server
+// exported from routes/index.js
+routes().forEach((route) => {
+  // Ensure correct method mapping for Express
+  const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete' | 'patch' | 'options' | 'head';
+  if (app[method]) {
+      app[method](route.path, route.handler);
+  } else {
+      console.error(`Invalid method ${route.method} for route ${route.path}`);
+  }
+});
+// Add the new spectate route explicitly after other routes
+app.get(spectateGameRoute.path, spectateGameRoute.handler); // <-- Add spectate route handler
+
+////////////////////////////////// YATZY //////////////////////////////////
+
+// Initialize Socket.IO server with proper CORS settings
+const io = new Server(httpServer, {
+  cors: {
+    origin: "*", // Allow all origins
+    methods: ["GET", "POST"],
+    credentials: false,
+    allowedHeaders: ["Content-Type", "Authorization"]
+  },
+  // Important: Configure for both websocket and polling transport
+  transports: ["websocket", "polling"],
+  // Add ping timeout and interval settings
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  // Disable compression for debugging
+  perMessageDeflate: false,
+  // Path option if needed
+  path: "/socket.io/",
+  // Allow reconnection
+  allowEIO3: true
+});
+
+// Log middleware for debugging
+io.use((socket, next) => {
+  console.log("Socket middleware - connection attempt:", socket.id);
+  next();
+});
+
+// Create service instances
+const gameLogService = new GameLogService(); // <-- Create GameLogService instance
+// Pass the io instance to TopScoreService
+const topScoreService = new TopScoreService(io); // <-- Create TopScoreService instance, passing io
+const gameService = new GameService(io, gameLogService, topScoreService); // <-- Pass both services
+
+// Create controller instances
+const gameController = new GameController(gameService, gameLogService); // <-- Pass log service
+const playerController = new PlayerController(gameService, gameLogService); // <-- Pass log service
+const chatController = new ChatController(io, gameService);
+
+// Initialize the spectate route with service instances <-- ADD THIS
+initializeSpectateRoute(gameService, gameLogService);
+
+// Handle Socket.IO connections
+io.on("connect", (socket) => {
+  console.log("Client connected...", socket.id);
+
+  // Send welcome message for connection confirmation
+  socket.emit("welcome", { message: "Connection successful", id: socket.id });
+  
+  // Echo event for testing connection
+  socket.on("echo", (data) => {
+    console.log("Echo event received:", data);
+    socket.emit("echo", { message: "Echo reply", ...data });
+  });
+
+  // Register socket handlers from our controllers
+  gameController.registerSocketHandlers(socket);
+  playerController.registerSocketHandlers(socket);
+  chatController.registerSocketHandlers(socket);  // Register chat handlers
+
+  // Listen for client to server messages
+  socket.on("sendToServer", (data) => {
+    console.log(`Message to server from ${socket.id}:`, data?.action || data);
+
+    // **** Handle requestTopScores FIRST ****
+    if (data?.action === 'requestTopScores') {
+      // **** Get specific gameType from request ****
+      const requestedGameType = data?.gameType;
+      if (typeof requestedGameType !== 'string') {
+        console.error(`❌ Invalid requestTopScores from ${socket.id}: Missing or invalid gameType.`);
+        socket.emit('errorMsg', { message: 'Invalid request for top scores: gameType missing.' }); 
+        return; // Stop processing invalid request
+      }
+
+      console.log(`🏆 Received requestTopScores from ${socket.id} for game type: ${requestedGameType}`);
+      // **** Fetch scores for the SPECIFIC type (NO LIMIT) ****
+      topScoreService.getTopScores(requestedGameType) // Call without limit argument
+        .then(scores => {
+          // **** Emit the specific list back using 'onServerMsg' ****
+          socket.emit('onServerMsg', { 
+              action: 'onTopScoresUpdate',
+              gameType: requestedGameType, // Include gameType for context
+              scores: scores 
+            });
+          console.log(`🏆 Sent top scores for ${requestedGameType} back to ${socket.id} via onServerMsg`);
+        })
+        .catch(error => {
+          console.error(`❌ Error fetching scores for requestTopScores (${requestedGameType}) from ${socket.id}:`, error);
+          socket.emit('errorMsg', { message: `Failed to retrieve top scores for ${requestedGameType}` }); 
+        });
+      return; // Stop further processing for this action
+    }
+    // ***********************************************
+    
+    // Handle chat messages (example)
+    if (data?.action === 'chatMessage') {
+      console.log(`💬 Chat message from ${socket.id}:`, data);
+    }
+
+    // Other general message routing/handling could go here
+
+  });
+
+  // Listen for client to client messages
+  socket.on("sendToClients", (data) => {
+    console.log(`Message to clients from ${socket.id}:`, data?.action || data);
+    
+    // Handle chat messages specifically
+    if (data?.action === 'chatMessage') {
+      console.log(`💬 Chat message broadcast from ${socket.id}:`, data);
+    }
+  });
+
+  // Handle disconnection
+  socket.on("disconnect", () => {
+    console.log("Client disconnected...", socket.id);
+    gameService.handlePlayerDisconnect(socket.id);
+  });
+});
+
+app.get("/flutter", (req, res) => {
+  if (isOnline) {
+    res.sendFile(path.join(__dirname + "/web/index.html"));
+  } else {
+    res.sendFile(localFlutterDir + "/build/web/index.html");
+  }
+});
+
+app.get("*", (req, res) => {
+  if (isOnline) {
+    //res.sendFile(path.join(__dirname + "/build/index.html"));
+    res.sendFile(path.join(__dirname + "/web/index.html"));
+  } else {
+    res.sendFile(localReactDir + "/build/index.html");
+  }
+});
+
+// Initialize database connection and start server
+initializeDbConnection()
+  .then(() => {
+    console.log("✅ [SERVER] Database connection initialized successfully");
+    
+    // Verify database connection with GameLogService
+    try {
+      const testCollection = gameLogService.getCollection();
+      console.log("✅ [SERVER] Successfully accessed game_moves collection");
+    } catch (e) {
+      console.error("❌ [SERVER] Error accessing game_moves collection:", e);
+    }
+    
+    // Start the server
+    httpServer.listen(PORT, () => {
+      console.log(`✅ [SERVER] Server running on port ${PORT}`);
+      console.log(`✅ [SERVER] Socket.IO server ready for connections`);
+      isOnline 
+        ? console.log("🌐 [SERVER] SERVER MODE: ONLINE") 
+        : console.log("🖥️ [SERVER] SERVER MODE: OFFLINE");
+      
+      // Log MongoDB connection details
+      console.log(`📊 [SERVER] MongoDB connected to database '${gameLogService.getDatabaseName()}'`);
+      console.log(`📊 [SERVER] Using collection '${gameLogService.getCollectionName()}'`);
+    });
+  })
+  .catch((error) => {
+    console.error("❌ [SERVER] Error initializing database connection:", error);
+    console.error("❌ [SERVER] Server startup failed due to database connection error");
+    process.exit(1); // Exit with error code
+  });
+</file>
+
+<file path="backend/src/services/GameLogService.ts">
 // backend/src/services/GameLogService.ts
 
 import { Collection } from 'mongodb';
@@ -9580,11 +3825,9 @@ export class GameLogService {
     }
   }
 }
+</file>
 
-
-================================================
-File: backend/src/services/GameService.ts
-================================================
+<file path="backend/src/services/GameService.ts">
 // backend/src/services/GameService.ts
 
 import { Game } from '../models/Game';
@@ -10183,6 +4426,16 @@ export class GameService {
 
   // Modified createOrJoinGame to handle logging
   createOrJoinGame(gameType: string, maxPlayers: number, player: Player): Game {
+    // --- ADDED Validation ---
+    const allowedTypes = ['Ordinary', 'Maxi'];
+    if (!allowedTypes.includes(gameType)) {
+        console.error(`[GameService] Attempt to create/join invalid game type: ${gameType}`);
+        // How to handle? Throw error? Return null? For now, log and default.
+        // Ideally, the controller should prevent this. Let's default to Ordinary.
+        gameType = 'Ordinary';
+        console.warn(`[GameService] Defaulting to 'Ordinary' game type.`);
+    }
+    // --- End Validation ---
     this.handlePlayerStartingNewGame(player.id); // Handle leaving old games
 
     let game = this.findAvailableGame(gameType, maxPlayers);
@@ -10280,11 +4533,9 @@ declare module '../models/Player' {
     getScore(): number;
   }
 }
+</file>
 
-
-================================================
-File: backend/src/services/TopScoreService.ts
-================================================
+<file path="backend/src/services/TopScoreService.ts">
 // backend/src/services/TopScoreService.ts
 import { Collection, Db } from 'mongodb';
 import { getDbConnection } from '../db';
@@ -10293,7 +4544,7 @@ import { Server } from 'socket.io';
 const DB_NAME = 'top-scores';
 
 // Define the supported game types explicitly
-const SUPPORTED_GAME_TYPES = ["Mini", "Ordinary", "Maxi"];
+const SUPPORTED_GAME_TYPES = ["Ordinary", "Maxi"];
 
 interface TopScoreEntry {
   name: string;
@@ -10311,7 +4562,7 @@ export class TopScoreService {
     return getDbConnection(DB_NAME);
   }
 
-  private getCollection(gameType: string): Collection<TopScoreEntry> {
+  private getCollection(gameType: string): Collection<TopScoreEntry> | null { // Added null return possibility
 
     // --- Simplification: Check if type is supported ---
     if (!SUPPORTED_GAME_TYPES.includes(gameType)) {
@@ -10428,12 +4679,9 @@ export class TopScoreService {
      }
   }
 }
+</file>
 
-
-
-================================================
-File: backend/src/utils/gameConfig.ts
-================================================
+<file path="backend/src/utils/gameConfig.ts">
 // backend/src/utils/gameConfig.ts
 
 interface GameTypeConfig {
@@ -10462,21 +4710,6 @@ export const GameConfig: { [key: string]: GameTypeConfig } = {
         diceCount: 5,
         maxRolls: 3,
     },
-    Mini: {
-        cellLabels: [
-            'Ones', 'Twos', 'Threes', 'Fours', 'Fives', 'Sixes',
-            'Sum', 'Bonus',
-            'Pair', 'Two Pairs', 'Three of Kind',
-            'Small Straight', 'Middle Straight', 'Large Straight',
-            'Chance', 'Yatzy', 'Total'
-        ],
-        nonNumericCells: ['Sum', 'Bonus', 'Total'],
-        upperSectionEndIndex: 5,
-        bonusThreshold: 50, // Value from frontend code
-        bonusAmount: 25,    // Value from frontend code
-        diceCount: 4,       // Value from frontend code
-        maxRolls: 3,
-    },
     Maxi: {
         cellLabels: [
             'Ones', 'Twos', 'Threes', 'Fours', 'Fives', 'Sixes',
@@ -10500,14 +4733,11 @@ export const GameConfig: { [key: string]: GameTypeConfig } = {
 // Function to get base type (could be moved here)
 export function getBaseGameType(gameType: string): keyof typeof GameConfig {
   if (gameType.startsWith('Maxi')) return 'Maxi';
-  if (gameType === 'Mini') return 'Mini';
   return 'Ordinary';
 }
+</file>
 
-
-================================================
-File: backend/src/utils/index.ts
-================================================
+<file path="backend/src/utils/index.ts">
 /**
  * Utility functions for Yatzy server
  */
@@ -10539,12 +4769,9 @@ export function isDefined<T>(value: T | undefined | null): value is T {
 export function deepCopy<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj));
 }
+</file>
 
-
-
-================================================
-File: backend/src/utils/yatzyMapping.ts
-================================================
+<file path="backend/src/utils/yatzyMapping.ts">
 // backend/src/utils/yatzyMapping.ts
 
 // Based on the frontend `application/application.dart` structure
@@ -10556,14 +4783,7 @@ const gameTypeMappings = {
     'House', 'Small Straight', 'Large Straight',
     'Chance', 'Yatzy', 'Total'
   ],
-  Mini: [
-    'Ones', 'Twos', 'Threes', 'Fours', 'Fives', 'Sixes',
-    'Sum', 'Bonus',
-    'Pair', 'Two Pairs', 'Three of Kind',
-    'Small Straight', 'Middle Straight', 'Large Straight',
-    'Chance', 'Yatzy', 'Total'
-  ],
-  Maxi: [ // Includes MaxiR3, MaxiE3, MaxiRE3 as they share the board structure
+  Maxi: [
     'Ones', 'Twos', 'Threes', 'Fours', 'Fives', 'Sixes',
     'Sum', 'Bonus',
     'Pair', 'Two Pairs', 'Three Pairs',
@@ -10576,7 +4796,6 @@ const gameTypeMappings = {
 
 function getBaseGameType(gameType: string): keyof typeof gameTypeMappings {
   if (gameType.startsWith('Maxi')) return 'Maxi';
-  if (gameType === 'Mini') return 'Mini';
   return 'Ordinary'; // Default
 }
 
@@ -10599,210 +4818,9 @@ export function getSelectionIndex(gameType: string, label: string): number {
   }
   return index; // Returns -1 if not found
 }
+</file>
 
-
-================================================
-File: lib/injection.config.dart
-================================================
-// GENERATED CODE - DO NOT MODIFY BY HAND
-
-// **************************************************************************
-// InjectableConfigGenerator
-// **************************************************************************
-
-// ignore_for_file: unnecessary_lambdas
-// ignore_for_file: lines_longer_than_80_chars
-// coverage:ignore-file
-
-// ignore_for_file: no_leading_underscores_for_library_prefixes
-import 'package:get_it/get_it.dart' as _i1;
-import 'package:injectable/injectable.dart' as _i2;
-
-import 'core/injectable_modules.dart' as _i6;
-import 'router/router.dart' as _i3;
-import 'states/bloc/language/language_bloc.dart' as _i4;
-import 'states/cubit/state/state_cubit.dart' as _i5;
-
-extension GetItInjectableX on _i1.GetIt {
-  // initializes the registration of main-scope dependencies inside of GetIt
-  _i1.GetIt init({
-    String? environment,
-    _i2.EnvironmentFilter? environmentFilter,
-  }) {
-    final gh = _i2.GetItHelper(
-      this,
-      environment,
-      environmentFilter,
-    );
-    final injectableModule = _$InjectableModule();
-    gh.lazySingleton<_i3.AppRouter>(() => injectableModule.router);
-    gh.factory<_i4.LanguageBloc>(() => _i4.LanguageBloc());
-    gh.factory<_i5.SetStateCubit>(() => _i5.SetStateCubit());
-    return this;
-  }
-}
-
-class _$InjectableModule extends _i6.InjectableModule {}
-
-
-
-================================================
-File: lib/injection.dart
-================================================
-import 'package:get_it/get_it.dart';
-import 'package:injectable/injectable.dart';
-
-import 'injection.config.dart';
-
-final GetIt getIt = GetIt.instance;
-
-@InjectableInit(
-  initializerName: 'initApiInjection', // default
-  preferRelativeImports: true, // default
-  asExtension: true, // default
-)
-Future configureInjection(final String environment) async {
-  getIt.init(environment: environment);
-}
-
-
-
-================================================
-File: lib/main.dart
-================================================
-import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:yatzy/states/bloc/language/language_bloc.dart';
-import 'package:yatzy/states/cubit/state/state_cubit.dart';
-import 'package:injectable/injectable.dart';
-import 'core/app_widget.dart';
-import 'injection.dart';
-import 'shared_preferences.dart';
-
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await SharedPrefProvider.loadPrefs();
-  await configureInjection(Environment.dev);
-  runApp(
-    MultiBlocProvider(providers: [
-      BlocProvider(create: (_) => LanguageBloc()),
-      BlocProvider(create: (_) => SetStateCubit()),
-    ], child: AppWidget()),
-  );
-}
-
-
-
-================================================
-File: lib/shared_preferences.dart
-================================================
-import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
-
-/// Interacts with shared preferences to store and retrieve data
-abstract class SharedPrefProvider {
-  static late final SharedPreferences prefs;
-
-  static loadPrefs() async {
-    prefs = await SharedPreferences.getInstance();
-  }
-
-  /// Static lambda functions to retrieve value from state objects
-  static bool fetchPrefBool(String key) => prefs.getBool(key) ?? false;
-
-  static int fetchPrefInt(String key) => prefs.getInt(key) ?? 0;
-
-  static String fetchPrefString(String key) => prefs.getString(key) ?? '';
-
-  static dynamic fetchPrefObject(String key) =>
-      jsonDecode(prefs.getString(key) ?? jsonEncode({}));
-
-  /// Static lambda functions to set value from state objects
-  static Future<bool> setPrefBool(String key, bool value) async {
-    return await prefs.setBool(key, value);
-  }
-
-  static Future<bool> setPrefInt(String key, int value) async {
-    return await prefs.setInt(key, value);
-  }
-
-  static Future<bool> setPrefString(String key, String value) async {
-    return await prefs.setString(key, value);
-  }
-
-  static Future<bool> setPrefObject(String key, value) async {
-    return await prefs.setString(key, jsonEncode(value));
-  }
-}
-
-
-
-================================================
-File: lib/startup.dart
-================================================
-import 'package:flutter/cupertino.dart';
-
-import 'package:yatzy/scroll/animations_scroll.dart';
-import 'package:yatzy/top_score/top_score.dart';
-import 'package:yatzy/tutorial/tutorial.dart';
-
-import 'application/application.dart';
-import 'chat/chat.dart';
-import 'dices/dices.dart';
-import 'input_items/input_items.dart';
-
-var isOnline = false;
-var isDebug = true;
-
-// Updated localhost URL to ensure it works with the current network configuration
-// In local development, use your actual machine's IP address instead of 192.168.0.168
-// This is important for Socket.IO connections to work properly
-var localhost = isOnline 
-    ? isDebug 
-        ? "https://fluttersystems.com" 
-        : "https://clientsystem.net" 
-    : "http://localhost:8000";
-
-var localhostNET = "https://localhost:44357/api/Values";
-var localhostNETIO = "wss://localhost:44357/ws";
-var applicationStarted = false;
-var userName = "Yatzy";
-var userNames = [];
-//var devicePixelRatio = 0.0;
-var isTesting = false;
-var isTutorial = true;
-var mainPageLoaded = false;
-var keySettings = GlobalKey();
-late double screenWidth;
-late double screenHeight;
-late double devicePixelRatio;
-
-var chosenLanguage = "Swedish";
-var standardLanguage = "English";
-
-var differentLanguages = ["English", "Swedish"];
-
-// scrcpy -s R3CR4037M1R --shortcut-mod=lctrl --always-on-top --stay-awake --window-title "Samsung Galaxy S21"
-// android:theme="@style/UnityThemeSelector.Translucent"
-// android/app/src/main/AndroidManifest.xml
-
-var inputItems = InputItems();
-late Tutorial tutorial;
-//var languagesGlobal = LanguagesGlobal();
-
-late TopScore topScore;
-late AnimationsScroll animationsScroll; // = AnimationsScroll();
-
-late Application app;
-late Chat chat;
-
-late Dices dices;
-
-
-
-================================================
-File: lib/application/animations_application.dart
-================================================
+<file path="lib/application/animations_application.dart">
 import 'package:flutter/animation.dart';
 
 class AnimationsApplication {
@@ -10877,616 +4895,9 @@ class AnimationsApplication {
     }
   }
 }
+</file>
 
-
-
-================================================
-File: lib/application/application.dart
-================================================
-import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:yatzy/application/application_functions_internal.dart';
-import 'package:yatzy/dices/unity_communication.dart';
-import 'package:yatzy/services/socket_service.dart';
-import 'application_functions_internal_calc_dice_values.dart';
-import '../dices/dices.dart';
-import '../input_items/input_items.dart';
-import '../startup.dart';
-import '../states/cubit/state/state_cubit.dart';
-import 'animations_application.dart';
-import 'languages_application.dart';
-
-// cannot have typedef inside class
-typedef YatzyFunctions = int Function();
-
-class Application with LanguagesApplication  {
-  final BuildContext context;
-  final InputItems inputItems;
-  Application({required this.context, required this.gameDices, required this.inputItems}) {
-    gameDices.setCallbacks(callbackUpdateDiceValues, callbackUnityCreated,
-        callbackCheckPlayerToMove);
-    languagesSetup(getChosenLanguage(), getStandardLanguage());
-  }
-
-  Function getChosenLanguage() {
-    String f() {
-      return chosenLanguage;
-    }
-    return f;
-  }
-
-  String getStandardLanguage() {
-    return standardLanguage;
-  }
-
-  bool isSpectating = false;
-  int spectatedGameId = -1;
-  // Settings properties
-  dynamic tabController;
-  var textEditingController = TextEditingController();
-  var focusNode = FocusNode();
-  var animation = AnimationsApplication();
-  var games = [];
-  var presentations = [];
-  var boardAnimation = false;
-
-  // Application properties
-
-  var stackedWidgets = <Widget>[];
-
-  // "Ordinary" , "Mini", "Maxi"
-  var gameType = "Ordinary";
-  var nrPlayers = 1;
-
-  // Used by animation
-  var maxNrPlayers = 4;
-  var maxTotalFields = 23;
-
-  // Socket game
-  Map<String, dynamic> gameData = {};
-
-  var gameId = -1;
-  var playerIds = [];
-  var playerActive = [];
-
-  var totalFields = 18;
-  var bonusSum = 63;
-  var bonusAmount = 50;
-  var myPlayerId = -1;
-  var playerToMove = 0;
-  var winnerId = -1;
-  var gameStarted = false;
-  var gameFinished = false;
-
-  var boardXPos = [],
-      boardYPos = [],
-      boardWidth = [],
-      boardHeight = [],
-      cellValue = [],
-      fixedCell = [],
-      appText = [],
-      appColors = [],
-      focusStatus = [];
-
-  var listenerKey = GlobalKey();
-  late Dices gameDices;
-  late List<YatzyFunctions> yatzyFunctions;
-  var serverId = "";
-
-  var cellKeys = [];
-
-  // Reference to the modern socket service
-  SocketService? socketService;
-
-  bool callbackCheckPlayerToMove() {
-    return playerToMove == myPlayerId;
-  }
-
-  callbackUnityCreated() {
-    if (myPlayerId == playerToMove) {
-      gameDices.sendStartToUnity();
-    }
-  }
-
-  callbackUpdateDiceValues() {
-    updateDiceValues();
-    Map<String, dynamic> msg = {};
-    msg["action"] = "sendDices";
-    msg["gameId"] = gameId;
-    msg["playerIds"] = playerIds;
-    msg["diceValue"] = gameDices.diceValue;
-    
-    // Use socketService for sending dice values to ensure delivery
-    // This ensures we use the modern socket system which is correctly connected
-    print('🎲 Sending dice values to other players: ${gameDices.diceValue}');
-    if (socketService != null && socketService!.isConnected) {
-      socketService?.sendToClients(msg);
-    }
-  }
-
-  updateDiceValues() {
-    clearFocus();
-    for (var i = 0; i < totalFields; i++) {
-      if (!fixedCell[playerToMove][i]) {
-        cellValue[playerToMove][i] = yatzyFunctions[i]();
-        appText[playerToMove + 1][i] = cellValue[playerToMove][i].toString();
-      }
-    }
-
-    context.read<SetStateCubit>().setState();
-  }
-
-  setAppText() {
-    if (gameType == "Mini") {
-      appText[0] = [
-        ones_,
-        twos_,
-        threes_,
-        fours_,
-        fives_,
-        sixes_,
-        sum_,
-        "$bonus_ ( $bonusAmount )",
-        pair_,
-        twoPairs_,
-        threeOfKind_,
-        smallStraight_,
-        middleStraight_,
-        largeStraight_,
-        chance_,
-        yatzy_,
-        totalSum_
-      ];
-    } else if (gameType.startsWith("Maxi")) {
-      appText[0] = [
-        ones_,
-        twos_,
-        threes_,
-        fours_,
-        fives_,
-        sixes_,
-        sum_,
-        "$bonus_ ( $bonusAmount )",
-        pair_,
-        twoPairs_,
-        threePairs_,
-        threeOfKind_,
-        fourOfKind_,
-        fiveOfKind_,
-        smallStraight_,
-        largeStraight_,
-        fullStraight_,
-        house32_,
-        house33_,
-        house24_,
-        chance_,
-        maxiYatzy_,
-        totalSum_
-      ];
-    } else {
-      appText[0] = [
-        ones_,
-        twos_,
-        threes_,
-        fours_,
-        fives_,
-        sixes_,
-        sum_,
-        "$bonus_ ( $bonusAmount )",
-        pair_,
-        twoPairs_,
-        threeOfKind_,
-        fourOfKind_,
-        house_,
-        smallStraight_,
-        largeStraight_,
-        chance_,
-        yatzy_,
-        totalSum_
-      ];
-    }
-  }
-
-  setup() {
-    topScore.loadTopScoreFromServer(gameType, context.read<SetStateCubit>());
-    gameStarted = true;
-    playerToMove = 0;
-    winnerId = -1;
-
-    if (gameType == "Mini") {
-      totalFields = 17;
-      gameDices.initDices(4);
-      bonusSum = 50;
-      bonusAmount = 25;
-
-      yatzyFunctions =
-          [calcOnes, calcTwos, calcThrees, calcFours, calcFives, calcSixes] +
-              [
-                zero,
-                zero,
-                calcPair,
-                calcTwoPairs,
-                calcThreeOfKind,
-                calcSmallLadder,
-                calcMiddleLadder,
-                calcLargeLadder,
-                calcChance,
-                calcYatzy,
-                zero
-              ];
-    } else if (gameType.startsWith("Maxi")) {
-      totalFields = 23;
-      gameDices.initDices(6);
-      bonusSum = 84;
-      bonusAmount = 100;
-
-      yatzyFunctions =
-          [calcOnes, calcTwos, calcThrees, calcFours, calcFives, calcSixes] +
-              [
-                zero,
-                zero,
-                calcPair,
-                calcTwoPairs,
-                calcThreePairs,
-                calcThreeOfKind,
-                calcFourOfKind,
-                calcFiveOfKind,
-                calcSmallLadder,
-                calcLargeLadder,
-                calcFullLadder,
-                calcHouse,
-                calcVilla,
-                calcTower,
-                calcChance,
-                calcYatzy,
-                zero
-              ];
-    } else {
-      totalFields = 18;
-      gameDices.initDices(5);
-      bonusSum = 63;
-      bonusAmount = 50;
-
-      yatzyFunctions =
-          [calcOnes, calcTwos, calcThrees, calcFours, calcFives, calcSixes] +
-              [
-                zero,
-                zero,
-                calcPair,
-                calcTwoPairs,
-                calcThreeOfKind,
-                calcFourOfKind,
-                calcHouse,
-                calcSmallLadder,
-                calcLargeLadder,
-                calcChance,
-                calcYatzy,
-                zero
-              ];
-    }
-
-    appText = [];
-    if (isTesting) {
-      for (var i = 0; i < nrPlayers + 1; i++) {
-        var textColumn = List.filled(6, "0") +
-            List.filled(1, "0") +
-            List.filled(1, (-bonusSum).toString()) +
-            List.filled(totalFields - 9, "0") +
-            List.filled(1, "0");
-        textColumn[5] = "";
-        textColumn[totalFields - 2] = "";
-        appText.add(textColumn);
-      }
-    } else {
-      for (var i = 0; i < nrPlayers + 1; i++) {
-        appText.add(List.filled(6, "") +
-            List.filled(1, "0") +
-            List.filled(1, (-bonusSum).toString()) +
-            List.filled(totalFields - 9, "") +
-            List.filled(1, "0"));
-      }
-    }
-    setAppText();
-
-    boardXPos = [List.filled(maxTotalFields, 0.0)];
-    boardYPos = [List.filled(maxTotalFields, 0.0)];
-    boardWidth = [List.filled(maxTotalFields, 0.0)];
-    boardHeight = [List.filled(maxTotalFields, 0.0)];
-    animation.boardXAnimationPos = [List.filled(maxTotalFields, 0.0)];
-    animation.boardYAnimationPos = [List.filled(maxTotalFields, 0.0)];
-    for (var i = 0; i < maxNrPlayers; i++) {
-      boardXPos.add(List.filled(maxTotalFields, 0.0));
-      boardYPos.add(List.filled(maxTotalFields, 0.0));
-      boardWidth.add(List.filled(maxTotalFields, 0.0));
-      boardHeight.add(List.filled(maxTotalFields, 0.0));
-      animation.boardXAnimationPos.add(List.filled(maxTotalFields, 0.0));
-      animation.boardYAnimationPos.add(List.filled(maxTotalFields, 0.0));
-    }
-    clearFocus();
-    fixedCell = [];
-    cellValue = [];
-    appColors = [
-      List.filled(6, Colors.white.withValues(alpha: 0.3)) +
-          List.filled(2, Colors.blueAccent.withValues(alpha: 0.8)) +
-          List.filled(totalFields - 9, Colors.white.withValues(alpha: 0.3)) +
-          List.filled(1, Colors.blueAccent.withValues(alpha: 0.8))
-    ];
-
-    for (var i = 0; i < nrPlayers; i++) {
-      if (isTesting) {
-        var holdColumn = List.filled(totalFields, true);
-        holdColumn[5] = false;
-        holdColumn[totalFields - 2] = false;
-        fixedCell.add(holdColumn);
-      } else {
-        fixedCell.add(List.filled(6, false) +
-            [true, true] +
-            List.filled(totalFields - 9, false) +
-            [true]);
-      }
-
-      if (i == playerToMove) {
-        appColors.add(List.filled(6, Colors.greenAccent.withValues(alpha: 0.3)) +
-            List.filled(2, Colors.blue.withValues(alpha: 0.3)) +
-            List.filled(totalFields - 9, Colors.greenAccent.withValues(alpha: 0.3)) +
-            List.filled(1, Colors.blue.withValues(alpha: 0.3)));
-      } else {
-        appColors.add(List.filled(6, Colors.grey.withValues(alpha: 0.3)) +
-            List.filled(2, Colors.blue.withValues(alpha: 0.3)) +
-            List.filled(totalFields - 9, Colors.grey.withValues(alpha: 0.3)) +
-            List.filled(1, Colors.blue.withValues(alpha: 0.3)));
-      }
-
-      if (isTesting) {
-        var valueColumn = List.filled(totalFields, 0);
-        valueColumn[5] = -1;
-        valueColumn[totalFields - 2] = -1;
-        cellValue.add(valueColumn);
-      } else {
-        cellValue.add(List.filled(totalFields, -1));
-      }
-    }
-    if (gameDices.unityCreated) {
-      gameDices.sendResetToUnity();
-      if (myPlayerId == playerToMove) {
-        gameDices.sendStartToUnity();
-      }
-    }
-
-    cellKeys = [];
-    for (int i = 0; i < nrPlayers + 1; i++) {
-      var tmp = [];
-      for (int j = 0; j < totalFields; j++) {
-        tmp.add(GlobalKey());
-      }
-      cellKeys.add(tmp);
-    }
-  }
-
-  // Method to set the socket service reference
-  void setSocketService(SocketService service) {
-    print('🔌 Application: Setting socket service reference');
-    socketService = service;
-  }
-}
-
-
-
-================================================
-File: lib/application/application_functions_internal.dart
-================================================
-// lib/application/application_functions_internal.dart
-import 'package:flutter/material.dart';
-import 'package:yatzy/dices/unity_communication.dart';
-import '../startup.dart';
-import 'application.dart';
-import '../utils/yatzy_mapping_client.dart'; // <-- Import client-side mapping
-import '../states/cubit/state/state_cubit.dart'; // Import SetStateCubit
-import 'package:provider/provider.dart'; // Import Provider
-
-
-extension ApplicationFunctionsInternal on Application {
-  // ... (clearFocus remains the same) ...
-  clearFocus() {
-    focusStatus = [];
-    for (var i = 0; i < nrPlayers; i++) {
-      focusStatus.add(List.filled(totalFields, 0));
-    }
-  }
-
-
-  cellClick(int player, int cell) {
-    // Replace isMyTurn with the original logic
-    if (player == playerToMove &&
-        myPlayerId == playerToMove &&
-        !fixedCell[player][cell] &&
-        cellValue[player][cell] != -1) {
-
-      // Get the string label for the selected cell
-      String? selectionLabel = getSelectionLabel(gameType, cell); // Use mapping function
-      if (selectionLabel == null) {
-          print("Error: Could not find label for cell index $cell");
-          return; // Don't proceed if label is invalid
-      }
-
-      Map<String, dynamic> msg = {};
-      msg["diceValue"] = gameDices.diceValue; // Current dice
-      msg["gameId"] = gameId;
-      // msg["playerIds"] = playerIds; // Server knows players in gameId
-      msg["player"] = player; // Send player index (server validates)
-      // msg["cell"] = cell; // <-- REMOVE Index
-      msg["selectionLabel"] = selectionLabel; // <-- SEND Label String
-      msg["score"] = cellValue[player][cell]; // Send the score client calculated
-      msg["action"] = "sendSelection"; // Use consistent action name
-
-      // Use the stored socketService directly instead of trying to access through ServiceProvider
-      if (socketService != null && socketService!.isConnected) {
-        print('🎮 Sending selection via socketService: player $player cell $cell label "$selectionLabel" score ${msg["score"]}');
-        socketService!.sendToClients(msg);
-      } else {
-        print('❌ Cannot send selection: socketService is null or not connected');
-        // Handle offline mode - just continue with local updates
-      }
-
-      // --- Local Update (Optimistic UI) ---
-      // Apply the selection locally immediately for responsiveness.
-      // Server confirmation will solidify the state via onGameUpdate.
-      applyLocalSelection(player, cell, cellValue[player][cell]);
-      // ---------------------------------
-
-    } else {
-        print("Ignoring cell click: Not my turn or cell invalid/fixed.");
-    }
-  }
-
-  // New function to apply local UI changes after selection
-  void applyLocalSelection(int player, int cell, int score) {
-     if (gameDices.unityDices) {
-       gameDices.sendResetToUnity();
-       // Don't send start - wait for server to confirm next turn
-     }
-
-     appColors[player + 1][cell] = Colors.green.withAlpha(178); // Use alpha consistent with colorBoard
-     fixedCell[player][cell] = true;
-     cellValue[player][cell] = score; // Ensure value is set if passed
-
-     // Update Sums locally
-     var sum = 0;
-     var totalSum = 0;
-     var upperHalfSet = 0;
-     for (var i = 0; i < 6; i++) {
-       if (fixedCell[player][i]) {
-         upperHalfSet++;
-         sum += cellValue[player][i] as int; // Cast to int
-       }
-     }
-     totalSum = sum;
-     appText[player + 1][6] = sum.toString(); // Sum cell index = 6
-     cellValue[player][6] = sum; // Store sum value
-
-     // Bonus calculation index = 7
-     int bonusIndex = 7;
-     int bonusValue = 0; // Store calculated bonus value
-     if (sum >= bonusSum) {
-       bonusValue = bonusAmount;
-       appText[player + 1][bonusIndex] = bonusAmount.toString();
-       totalSum += bonusAmount;
-     } else {
-       // Check if all upper section cells are fixed
-       final allUpperFixed = !fixedCell[player].sublist(0, 6).contains(false);
-       if (allUpperFixed) {
-         bonusValue = 0; // All fixed, no bonus
-         appText[player + 1][bonusIndex] = "0";
-       } else {
-         bonusValue = sum - bonusSum; // Deficit
-         appText[player + 1][bonusIndex] = (sum - bonusSum).toString();
-       }
-     }
-     cellValue[player][bonusIndex] = bonusValue; // Store bonus/deficit
-
-
-      // Lower section sum calculation
-     for (var i = 8; i < totalFields -1; i++) { // Skip Sum, Bonus, Total (indices 6, 7, totalFields-1)
-       if (fixedCell[player][i]) {
-         totalSum += cellValue[player][i] as int;
-       }
-     }
-      // Update Total Sum cell (index = totalFields - 1)
-      int totalSumIndex = totalFields - 1;
-      appText[player + 1][totalSumIndex] = totalSum.toString();
-      cellValue[player][totalSumIndex] = totalSum;
-
-
-     // Zero results for remaining selectable cells for this player?
-     // This might be premature, let the server state dictate.
-     // Clear focus remains useful.
-     clearFocus();
-
-     // Check if this player finished locally (for UI feedback, maybe)
-      // Check all cells except Sum, Bonus, Total
-      bool playerFinished = true;
-      for(int j=0; j<totalFields; j++) {
-          if (j != 6 && j != 7 && j != totalFields - 1 && !fixedCell[player][j]) {
-              playerFinished = false;
-              break;
-          }
-      }
-      if (playerFinished) {
-          print("Player $player finished locally.");
-          // Server will confirm overall game finish status.
-      }
-
-     // Don't advance turn locally - wait for server message `onGameUpdate`
-     colorBoard(); // Update colors immediately for selection feedback
-     gameDices.clearDices(); // Clear dice display
-
-     // Trigger UI update
-     try {
-       context.read<SetStateCubit>().setState();
-     } catch (e) {
-       print('⚠️ Error updating UI state: $e');
-       // Continue without updating state
-     }
-  }
-
-
-  // calcNewSums is now mostly handled by applyLocalSelection and server updates
-  // Keep the coloring part if needed separately
-  // calcNewSums(int player, int cell) { ... } // <-- REMOVE OR REFACTOR
-
-  colorBoard() {
-    // Update player column colors based on playerToMove and playerActive status
-    for (var i = 0; i < nrPlayers; i++) {
-      Color columnColor;
-      if (i == playerToMove) {
-        columnColor = Colors.greenAccent.withAlpha(77); // ~0.3 alpha
-      } else if (playerActive != null && i < playerActive.length && playerActive[i]) {
-        columnColor = Colors.grey.withAlpha(77); // ~0.3 alpha
-      } else {
-        // disconnected/aborted player
-        columnColor = Colors.black.withAlpha(77); // ~0.3 alpha
-      }
-
-      for (var j = 0; j < totalFields; j++) {
-          // Keep special colors for non-selectable cells
-          if (j == 6 || j == 7 || j == totalFields - 1) { // Sum, Bonus, Total
-              appColors[i + 1][j] = Colors.blue.withAlpha(77); // Special color for calculated fields
-          }
-          // Apply base color only if not already fixed with the selection color
-          else if (!(fixedCell[i][j] && appColors[i + 1][j] == Colors.green.withAlpha(178))) { // Check if it's the 'just selected' color
-             appColors[i + 1][j] = columnColor;
-          }
-          // Re-apply selection color if cell is fixed
-          else if (fixedCell[i][j]) {
-              appColors[i + 1][j] = Colors.green.withAlpha(178); // ~0.7 alpha for selected/fixed
-          }
-      }
-    }
-      // Update header colors based on which cells are fixed for the *current* player
-     if (playerToMove >= 0 && playerToMove < nrPlayers) {
-         for (var j = 0; j < totalFields; j++) {
-              // Keep special colors
-              if (j == 6 || j == 7 || j == totalFields - 1) {
-                  appColors[0][j] = Colors.blueAccent.withAlpha(204); // ~0.8 alpha
-              }
-              // Highlight fixed cells in header? Or just dim unfixed? Let's dim unfixed.
-              else if (fixedCell[playerToMove][j]) {
-                   appColors[0][j] = Colors.white.withAlpha(178); // Brighter/Solid for fixed
-              } else {
-                   appColors[0][j] = Colors.white.withAlpha(77); // Dimmer for available
-              }
-         }
-     }
-
-  }
-
-}
-
-
-
-================================================
-File: lib/application/application_functions_internal_calc_dice_values.dart
-================================================
+<file path="lib/application/application_functions_internal_calc_dice_values.dart">
 import 'application.dart';
 
 extension ApplicationCalcDiceValues on Application {
@@ -11653,9 +5064,6 @@ extension ApplicationCalcDiceValues on Application {
     var diceNr = calcDiceNr();
     for (var i = 5; i >= 0; i--) {
       if (diceNr[i] == gameDices.nrDices) {
-        if (gameDices.nrDices == 4) {
-          value = 25;
-        }
         if (gameDices.nrDices == 5) {
           value = 50;
         }
@@ -11753,14 +5161,6 @@ extension ApplicationCalcDiceValues on Application {
         value = 1 + 2 + 3 + 4 + 5;
       }
     }
-    if (gameType == "Mini") {
-      if ((diceNr[0] > 0) &&
-          (diceNr[1] > 0) &&
-          (diceNr[2] > 0) &&
-          (diceNr[3] > 0)) {
-        value = 1 + 2 + 3 + 4;
-      }
-    }
     if (gameType.startsWith("Maxi")) {
       if ((diceNr[0] > 0) &&
           (diceNr[1] > 0) &&
@@ -11785,14 +5185,6 @@ extension ApplicationCalcDiceValues on Application {
         value = 2 + 3 + 4 + 5 + 6;
       }
     }
-    if (gameType == "Mini") {
-      if ((diceNr[2] > 0) &&
-          (diceNr[3] > 0) &&
-          (diceNr[4] > 0) &&
-          (diceNr[5] > 0)) {
-        value = 3 + 4 + 5 + 6;
-      }
-    }
     if (gameType.startsWith("Maxi")) {
       if ((diceNr[1] > 0) &&
           (diceNr[2] > 0) &&
@@ -11800,20 +5192,6 @@ extension ApplicationCalcDiceValues on Application {
           (diceNr[4] > 0) &&
           (diceNr[5] > 0)) {
         value = 2 + 3 + 4 + 5 + 6;
-      }
-    }
-    return value;
-  }
-
-  int calcMiddleLadder() {
-    var value = 0;
-    var diceNr = calcDiceNr();
-    if (gameType == "Mini") {
-      if ((diceNr[1] > 0) &&
-          (diceNr[2] > 0) &&
-          (diceNr[3] > 0) &&
-          (diceNr[4] > 0)) {
-        value = 2 + 3 + 4 + 5;
       }
     }
     return value;
@@ -11844,12 +5222,579 @@ extension ApplicationCalcDiceValues on Application {
     return value;
   }
 }
+</file>
+
+<file path="lib/application/application_functions_internal.dart">
+// lib/application/application_functions_internal.dart
+import 'package:flutter/material.dart';
+import 'package:yatzy/dices/unity_communication.dart';
+import '../startup.dart';
+import 'application.dart';
+import '../utils/yatzy_mapping_client.dart'; // <-- Import client-side mapping
+import '../states/cubit/state/state_cubit.dart'; // Import SetStateCubit
+import 'package:provider/provider.dart'; // Import Provider
 
 
+extension ApplicationFunctionsInternal on Application {
+  // ... (clearFocus remains the same) ...
+  clearFocus() {
+    focusStatus = [];
+    for (var i = 0; i < nrPlayers; i++) {
+      focusStatus.add(List.filled(totalFields, 0));
+    }
+  }
 
-================================================
-File: lib/application/communication_application.dart
-================================================
+
+  cellClick(int player, int cell) {
+    // Replace isMyTurn with the original logic
+    if (player == playerToMove &&
+        myPlayerId == playerToMove &&
+        !fixedCell[player][cell] &&
+        cellValue[player][cell] != -1) {
+
+      // Get the string label for the selected cell
+      String? selectionLabel = getSelectionLabel(gameType, cell); // Use mapping function
+      if (selectionLabel == null) {
+          print("Error: Could not find label for cell index $cell");
+          return; // Don't proceed if label is invalid
+      }
+
+      Map<String, dynamic> msg = {};
+      msg["diceValue"] = gameDices.diceValue; // Current dice
+      msg["gameId"] = gameId;
+      // msg["playerIds"] = playerIds; // Server knows players in gameId
+      msg["player"] = player; // Send player index (server validates)
+      // msg["cell"] = cell; // <-- REMOVE Index
+      msg["selectionLabel"] = selectionLabel; // <-- SEND Label String
+      msg["score"] = cellValue[player][cell]; // Send the score client calculated
+      msg["action"] = "sendSelection"; // Use consistent action name
+
+      // Use the stored socketService directly instead of trying to access through ServiceProvider
+      if (socketService != null && socketService!.isConnected) {
+        print('🎮 Sending selection via socketService: player $player cell $cell label "$selectionLabel" score ${msg["score"]}');
+        socketService!.sendToClients(msg);
+      } else {
+        print('❌ Cannot send selection: socketService is null or not connected');
+        // Handle offline mode - just continue with local updates
+      }
+
+      // --- Local Update (Optimistic UI) ---
+      // Apply the selection locally immediately for responsiveness.
+      // Server confirmation will solidify the state via onGameUpdate.
+      applyLocalSelection(player, cell, cellValue[player][cell]);
+      // ---------------------------------
+
+    } else {
+        print("Ignoring cell click: Not my turn or cell invalid/fixed.");
+    }
+  }
+
+  // New function to apply local UI changes after selection
+  void applyLocalSelection(int player, int cell, int score) {
+     if (gameDices.unityDices) {
+       gameDices.sendResetToUnity();
+       // Don't send start - wait for server to confirm next turn
+     }
+
+     appColors[player + 1][cell] = Colors.green.withAlpha(178); // Use alpha consistent with colorBoard
+     fixedCell[player][cell] = true;
+     cellValue[player][cell] = score; // Ensure value is set if passed
+
+     // Update Sums locally
+     var sum = 0;
+     var totalSum = 0;
+     var upperHalfSet = 0;
+     for (var i = 0; i < 6; i++) {
+       if (fixedCell[player][i]) {
+         upperHalfSet++;
+         sum += cellValue[player][i] as int; // Cast to int
+       }
+     }
+     totalSum = sum;
+     appText[player + 1][6] = sum.toString(); // Sum cell index = 6
+     cellValue[player][6] = sum; // Store sum value
+
+     // Bonus calculation index = 7
+     int bonusIndex = 7;
+     int bonusValue = 0; // Store calculated bonus value
+     if (sum >= bonusSum) {
+       bonusValue = bonusAmount;
+       appText[player + 1][bonusIndex] = bonusAmount.toString();
+       totalSum += bonusAmount;
+     } else {
+       // Check if all upper section cells are fixed
+       final allUpperFixed = !fixedCell[player].sublist(0, 6).contains(false);
+       if (allUpperFixed) {
+         bonusValue = 0; // All fixed, no bonus
+         appText[player + 1][bonusIndex] = "0";
+       } else {
+         bonusValue = sum - bonusSum; // Deficit
+         appText[player + 1][bonusIndex] = (sum - bonusSum).toString();
+       }
+     }
+     cellValue[player][bonusIndex] = bonusValue; // Store bonus/deficit
+
+
+      // Lower section sum calculation
+     for (var i = 8; i < totalFields -1; i++) { // Skip Sum, Bonus, Total (indices 6, 7, totalFields-1)
+       if (fixedCell[player][i]) {
+         totalSum += cellValue[player][i] as int;
+       }
+     }
+      // Update Total Sum cell (index = totalFields - 1)
+      int totalSumIndex = totalFields - 1;
+      appText[player + 1][totalSumIndex] = totalSum.toString();
+      cellValue[player][totalSumIndex] = totalSum;
+
+
+     // Zero results for remaining selectable cells for this player?
+     // This might be premature, let the server state dictate.
+     // Clear focus remains useful.
+     clearFocus();
+
+     // Check if this player finished locally (for UI feedback, maybe)
+      // Check all cells except Sum, Bonus, Total
+      bool playerFinished = true;
+      for(int j=0; j<totalFields; j++) {
+          if (j != 6 && j != 7 && j != totalFields - 1 && !fixedCell[player][j]) {
+              playerFinished = false;
+              break;
+          }
+      }
+      if (playerFinished) {
+          print("Player $player finished locally.");
+          // Server will confirm overall game finish status.
+      }
+
+     // Don't advance turn locally - wait for server message `onGameUpdate`
+     colorBoard(); // Update colors immediately for selection feedback
+     gameDices.clearDices(); // Clear dice display
+
+     // ***** FIX: Trigger board animation if enabled *****
+     if (boardAnimation) { // Check the flag from settings
+       print('🎬 Triggering board animation');
+       try {
+         // Animate the row that was just selected
+         animation.animateBoard(); // Pass player index + 1 (for the player row)
+         // Optionally animate the header row too?
+         // animation.animateBoardRow(0);
+       } catch (e) {
+         print("Error starting animation: $e");
+       }
+     }
+     // ***** END FIX *****
+     // Trigger UI update
+     try {
+       context.read<SetStateCubit>().setState();
+     } catch (e) {
+       print('⚠️ Error updating UI state: $e');
+       // Continue without updating state
+     }
+  }
+
+
+  // calcNewSums is now mostly handled by applyLocalSelection and server updates
+  // Keep the coloring part if needed separately
+  // calcNewSums(int player, int cell) { ... } // <-- REMOVE OR REFACTOR
+
+  colorBoard() {
+    // Update player column colors based on playerToMove and playerActive status
+    for (var i = 0; i < nrPlayers; i++) {
+      Color columnColor;
+      if (i == playerToMove) {
+        columnColor = Colors.greenAccent.withAlpha(77); // ~0.3 alpha
+      } else if (playerActive != null && i < playerActive.length && playerActive[i]) {
+        columnColor = Colors.grey.withAlpha(77); // ~0.3 alpha
+      } else {
+        // disconnected/aborted player
+        columnColor = Colors.black.withAlpha(77); // ~0.3 alpha
+      }
+
+      for (var j = 0; j < totalFields; j++) {
+          // Keep special colors for non-selectable cells
+          if (j == 6 || j == 7 || j == totalFields - 1) { // Sum, Bonus, Total
+              appColors[i + 1][j] = Colors.blue.withAlpha(77); // Special color for calculated fields
+          }
+          // Apply base color only if not already fixed with the selection color
+          else if (!(fixedCell[i][j] && appColors[i + 1][j] == Colors.green.withAlpha(178))) { // Check if it's the 'just selected' color
+             appColors[i + 1][j] = columnColor;
+          }
+          // Re-apply selection color if cell is fixed
+          else if (fixedCell[i][j]) {
+              appColors[i + 1][j] = Colors.green.withAlpha(178); // ~0.7 alpha for selected/fixed
+          }
+      }
+    }
+      // Update header colors based on which cells are fixed for the *current* player
+     if (playerToMove >= 0 && playerToMove < nrPlayers) {
+         for (var j = 0; j < totalFields; j++) {
+              // Keep special colors
+              if (j == 6 || j == 7 || j == totalFields - 1) {
+                  appColors[0][j] = Colors.blueAccent.withAlpha(204); // ~0.8 alpha
+              }
+              // Highlight fixed cells in header? Or just dim unfixed? Let's dim unfixed.
+              else if (fixedCell[playerToMove][j]) {
+                   appColors[0][j] = Colors.white.withAlpha(178); // Brighter/Solid for fixed
+              } else {
+                   appColors[0][j] = Colors.white.withAlpha(77); // Dimmer for available
+              }
+         }
+     }
+
+  }
+
+}
+</file>
+
+<file path="lib/application/application.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:yatzy/application/application_functions_internal.dart';
+import 'package:yatzy/dices/unity_communication.dart';
+import 'package:yatzy/services/socket_service.dart';
+import 'application_functions_internal_calc_dice_values.dart';
+import '../dices/dices.dart';
+import '../input_items/input_items.dart';
+import '../startup.dart';
+import '../states/cubit/state/state_cubit.dart';
+import 'animations_application.dart';
+import 'languages_application.dart';
+
+// cannot have typedef inside class
+typedef YatzyFunctions = int Function();
+
+class Application with LanguagesApplication  {
+  final BuildContext context;
+  final InputItems inputItems;
+  Application({required this.context, required this.gameDices, required this.inputItems}) {
+    gameDices.setCallbacks(callbackUpdateDiceValues, callbackUnityCreated,
+        callbackCheckPlayerToMove);
+    languagesSetup(getChosenLanguage(), getStandardLanguage());
+  }
+
+  Function getChosenLanguage() {
+    String f() {
+      return chosenLanguage;
+    }
+    return f;
+  }
+
+  String getStandardLanguage() {
+    return standardLanguage;
+  }
+
+  bool isSpectating = false;
+  int spectatedGameId = -1;
+  // Settings properties
+  dynamic tabController;
+  var textEditingController = TextEditingController();
+  var focusNode = FocusNode();
+  var animation = AnimationsApplication();
+  var games = [];
+  var presentations = [];
+  var boardAnimation = false;
+
+  // Application properties
+
+  var stackedWidgets = <Widget>[];
+
+  // "Ordinary" ,"Maxi"
+  var gameType = "Ordinary";
+  var nrPlayers = 1;
+
+  // Used by animation
+  var maxNrPlayers = 4;
+  var maxTotalFields = 23;
+
+  // Socket game
+  Map<String, dynamic> gameData = {};
+
+  var gameId = -1;
+  var playerIds = [];
+  var playerActive = [];
+
+  var totalFields = 18;
+  var bonusSum = 63;
+  var bonusAmount = 50;
+  var myPlayerId = -1;
+  var playerToMove = 0;
+  var winnerId = -1;
+  var gameStarted = false;
+  var gameFinished = false;
+
+  var boardXPos = [],
+      boardYPos = [],
+      boardWidth = [],
+      boardHeight = [],
+      cellValue = [],
+      fixedCell = [],
+      appText = [],
+      appColors = [],
+      focusStatus = [];
+
+  var listenerKey = GlobalKey();
+  late Dices gameDices;
+  late List<YatzyFunctions> yatzyFunctions;
+  var serverId = "";
+
+  var cellKeys = [];
+
+  // Reference to the modern socket service
+  SocketService? socketService;
+
+  bool callbackCheckPlayerToMove() {
+    return playerToMove == myPlayerId;
+  }
+
+  callbackUnityCreated() {
+    if (myPlayerId == playerToMove) {
+      gameDices.sendStartToUnity();
+    }
+  }
+
+  callbackUpdateDiceValues() {
+    updateDiceValues();
+    Map<String, dynamic> msg = {};
+    msg["action"] = "sendDices";
+    msg["gameId"] = gameId;
+    msg["playerIds"] = playerIds;
+    msg["diceValue"] = gameDices.diceValue;
+    
+    // Use socketService for sending dice values to ensure delivery
+    // This ensures we use the modern socket system which is correctly connected
+    print('🎲 Sending dice values to other players: ${gameDices.diceValue}');
+    if (socketService != null && socketService!.isConnected) {
+      socketService?.sendToClients(msg);
+    }
+  }
+
+  updateDiceValues() {
+    clearFocus();
+    for (var i = 0; i < totalFields; i++) {
+      if (!fixedCell[playerToMove][i]) {
+        cellValue[playerToMove][i] = yatzyFunctions[i]();
+        appText[playerToMove + 1][i] = cellValue[playerToMove][i].toString();
+      }
+    }
+
+    context.read<SetStateCubit>().setState();
+  }
+
+  setAppText() {
+   if (gameType.startsWith("Maxi")) {
+      appText[0] = [
+        ones_,
+        twos_,
+        threes_,
+        fours_,
+        fives_,
+        sixes_,
+        sum_,
+        "$bonus_ ( $bonusAmount )",
+        pair_,
+        twoPairs_,
+        threePairs_,
+        threeOfKind_,
+        fourOfKind_,
+        fiveOfKind_,
+        smallStraight_,
+        largeStraight_,
+        fullStraight_,
+        house32_,
+        house33_,
+        house24_,
+        chance_,
+        maxiYatzy_,
+        totalSum_
+      ];
+    } else {
+      appText[0] = [
+        ones_,
+        twos_,
+        threes_,
+        fours_,
+        fives_,
+        sixes_,
+        sum_,
+        "$bonus_ ( $bonusAmount )",
+        pair_,
+        twoPairs_,
+        threeOfKind_,
+        fourOfKind_,
+        house_,
+        smallStraight_,
+        largeStraight_,
+        chance_,
+        yatzy_,
+        totalSum_
+      ];
+    }
+  }
+
+  setup() {
+    topScore.loadTopScoreFromServer(gameType, context.read<SetStateCubit>());
+    gameStarted = true;
+    playerToMove = 0;
+    winnerId = -1;
+
+    if (gameType.startsWith("Maxi")) {
+      totalFields = 23;
+      gameDices.initDices(6);
+      bonusSum = 84;
+      bonusAmount = 100;
+
+      yatzyFunctions =
+          [calcOnes, calcTwos, calcThrees, calcFours, calcFives, calcSixes] +
+              [
+                zero,
+                zero,
+                calcPair,
+                calcTwoPairs,
+                calcThreePairs,
+                calcThreeOfKind,
+                calcFourOfKind,
+                calcFiveOfKind,
+                calcSmallLadder,
+                calcLargeLadder,
+                calcFullLadder,
+                calcHouse,
+                calcVilla,
+                calcTower,
+                calcChance,
+                calcYatzy,
+                zero
+              ];
+    } else {
+      totalFields = 18;
+      gameDices.initDices(5);
+      bonusSum = 63;
+      bonusAmount = 50;
+
+      yatzyFunctions =
+          [calcOnes, calcTwos, calcThrees, calcFours, calcFives, calcSixes] +
+              [
+                zero,
+                zero,
+                calcPair,
+                calcTwoPairs,
+                calcThreeOfKind,
+                calcFourOfKind,
+                calcHouse,
+                calcSmallLadder,
+                calcLargeLadder,
+                calcChance,
+                calcYatzy,
+                zero
+              ];
+    }
+
+    appText = [];
+    if (isTesting) {
+      for (var i = 0; i < nrPlayers + 1; i++) {
+        var textColumn = List.filled(6, "0") +
+            List.filled(1, "0") +
+            List.filled(1, (-bonusSum).toString()) +
+            List.filled(totalFields - 9, "0") +
+            List.filled(1, "0");
+        textColumn[5] = "";
+        textColumn[totalFields - 2] = "";
+        appText.add(textColumn);
+      }
+    } else {
+      for (var i = 0; i < nrPlayers + 1; i++) {
+        appText.add(List.filled(6, "") +
+            List.filled(1, "0") +
+            List.filled(1, (-bonusSum).toString()) +
+            List.filled(totalFields - 9, "") +
+            List.filled(1, "0"));
+      }
+    }
+    setAppText();
+
+    boardXPos = [List.filled(maxTotalFields, 0.0)];
+    boardYPos = [List.filled(maxTotalFields, 0.0)];
+    boardWidth = [List.filled(maxTotalFields, 0.0)];
+    boardHeight = [List.filled(maxTotalFields, 0.0)];
+    animation.boardXAnimationPos = [List.filled(maxTotalFields, 0.0)];
+    animation.boardYAnimationPos = [List.filled(maxTotalFields, 0.0)];
+    for (var i = 0; i < maxNrPlayers; i++) {
+      boardXPos.add(List.filled(maxTotalFields, 0.0));
+      boardYPos.add(List.filled(maxTotalFields, 0.0));
+      boardWidth.add(List.filled(maxTotalFields, 0.0));
+      boardHeight.add(List.filled(maxTotalFields, 0.0));
+      animation.boardXAnimationPos.add(List.filled(maxTotalFields, 0.0));
+      animation.boardYAnimationPos.add(List.filled(maxTotalFields, 0.0));
+    }
+    clearFocus();
+    fixedCell = [];
+    cellValue = [];
+    appColors = [
+      List.filled(6, Colors.white.withValues(alpha: 0.3)) +
+          List.filled(2, Colors.blueAccent.withValues(alpha: 0.8)) +
+          List.filled(totalFields - 9, Colors.white.withValues(alpha: 0.3)) +
+          List.filled(1, Colors.blueAccent.withValues(alpha: 0.8))
+    ];
+
+    for (var i = 0; i < nrPlayers; i++) {
+      if (isTesting) {
+        var holdColumn = List.filled(totalFields, true);
+        holdColumn[5] = false;
+        holdColumn[totalFields - 2] = false;
+        fixedCell.add(holdColumn);
+      } else {
+        fixedCell.add(List.filled(6, false) +
+            [true, true] +
+            List.filled(totalFields - 9, false) +
+            [true]);
+      }
+
+      if (i == playerToMove) {
+        appColors.add(List.filled(6, Colors.greenAccent.withValues(alpha: 0.3)) +
+            List.filled(2, Colors.blue.withValues(alpha: 0.3)) +
+            List.filled(totalFields - 9, Colors.greenAccent.withValues(alpha: 0.3)) +
+            List.filled(1, Colors.blue.withValues(alpha: 0.3)));
+      } else {
+        appColors.add(List.filled(6, Colors.grey.withValues(alpha: 0.3)) +
+            List.filled(2, Colors.blue.withValues(alpha: 0.3)) +
+            List.filled(totalFields - 9, Colors.grey.withValues(alpha: 0.3)) +
+            List.filled(1, Colors.blue.withValues(alpha: 0.3)));
+      }
+
+      if (isTesting) {
+        var valueColumn = List.filled(totalFields, 0);
+        valueColumn[5] = -1;
+        valueColumn[totalFields - 2] = -1;
+        cellValue.add(valueColumn);
+      } else {
+        cellValue.add(List.filled(totalFields, -1));
+      }
+    }
+    if (gameDices.unityCreated) {
+      gameDices.sendResetToUnity();
+      if (myPlayerId == playerToMove) {
+        gameDices.sendStartToUnity();
+      }
+    }
+
+    cellKeys = [];
+    for (int i = 0; i < nrPlayers + 1; i++) {
+      var tmp = [];
+      for (int j = 0; j < totalFields; j++) {
+        tmp.add(GlobalKey());
+      }
+      cellKeys.add(tmp);
+    }
+  }
+
+  // Method to set the socket service reference
+  void setSocketService(SocketService service) {
+    print('🔌 Application: Setting socket service reference');
+    socketService = service;
+  }
+}
+</file>
+
+<file path="lib/application/communication_application.dart">
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yatzy/application/application_functions_internal.dart';
@@ -12749,11 +6694,9 @@ extension CommunicationApplication on Application {
     }
   }
 }
+</file>
 
-
-================================================
-File: lib/application/languages_application.dart
-================================================
+<file path="lib/application/languages_application.dart">
 mixin LanguagesApplication  {
 
   late Function _getChosenLanguage;
@@ -13016,12 +6959,923 @@ mixin LanguagesApplication  {
     }
   }
 }
+</file>
+
+<file path="lib/application/widget_application_scaffold.dart">
+import 'package:auto_route/auto_route.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:yatzy/application/communication_application.dart';
+import 'package:yatzy/chat/widget_chat.dart';
+import 'package:yatzy/dices/unity_communication.dart';
+import 'package:yatzy/dices/widget_dices.dart';
+import 'package:yatzy/top_score/widget_top_scores.dart';
+
+import '../router/router.gr.dart';
+import '../scroll/widget_scroll.dart';
+import '../services/service_provider.dart';
+import '../startup.dart';
+import '../states/cubit/state/state_cubit.dart';
+import 'application.dart';
+import 'widget_application.dart';
+
+extension WidgetApplicationScaffold on Application {
+  Widget widgetScaffold(BuildContext context, Function state) {
+    screenWidth = MediaQuery.of(context).size.width;
+    screenHeight = MediaQuery.of(context).size.height;
+    devicePixelRatio = MediaQuery.of(context).devicePixelRatio;
+    // Get best 16:9 fit
+    var l = 0.0, t = 0.0, w = screenWidth, h = screenHeight, ratio = 16 / 9;
+    if (w > h) {
+      if (screenWidth / screenHeight < ratio) {
+        h = screenWidth / ratio;
+        t = (screenHeight - h) / 2;
+      } else {
+        w = screenHeight * ratio;
+        l = (screenWidth - w) / 2;
+      }
+    } else {
+      // topple screen, calculate best fit, topple back
+      var l_ = 0.0, t_ = 0.0, w_ = screenHeight, h_ = screenWidth;
+
+      if (screenHeight / screenWidth < ratio) {
+        h_ = screenHeight / ratio;
+        t_ = (screenWidth - h_) / 2;
+      } else {
+        w_ = screenWidth * ratio;
+        l_ = (screenHeight - w_) / 2;
+      }
+
+      h = w_;
+      w = h_;
+      l = t_;
+      t = l_;
+    }
+
+    //Widget empty(w,h) {return Container();}
+    var floatingButtonSize = 0.06;
+
+    Widget widgetFloatingButton(double size) {
+      // Temporary move on portrait mode
+      var moveButton = w > h ? 0 : h * 0.5;
 
 
+      Widget widget = Stack(children: [
+        Positioned(
+            key: keySettings,
+            left: l + (1.0 - floatingButtonSize * (size == h ? 2 : 1.1)) * w,
+            top: t +
+                (1.0 - floatingButtonSize * (size == w ? 2 : 1.1)) * h -
+                moveButton,
+            child: SizedBox(
+                width: size * floatingButtonSize,
+                height: size * floatingButtonSize,
+                child: FittedBox(
+                    child: FloatingActionButton(
+                  heroTag: "NavigateSettings",
+                  shape: const CircleBorder(),
+                  onPressed: () async {
+                    await AutoRouter.of(context).push(const SettingsView());
+                  },
+                  tooltip: settings_,
+                  backgroundColor: Colors.blue.withValues(alpha: 0.5),
+                  child: const Icon(Icons.settings_applications),
+                ))))
+      ]);
 
-================================================
-File: lib/application/widget_application.dart
-================================================
+      return widget;
+    }
+
+    gameFinished = true;
+    for (var i = 0; i < playerActive.length; i++) {
+      if (playerActive[i]) {
+        if (fixedCell[i].contains(false)) {
+          gameFinished = false;
+          break;
+        }
+      }
+    }
+
+    stackedWidgets = [];
+    if (!gameDices.unityDices &&
+        mainPageLoaded &&
+        isTutorial &&
+        callbackCheckPlayerToMove() &&
+        gameDices.nrRolls < 3) {
+      stackedWidgets = [
+        tutorial.widgetArrow(gameDices.rollDiceKey, w, h,
+            tutorial.animationController1, gameDices.pressToRoll_, 0, "R", 0.5)
+      ];
+      if (!tutorial.animationController1.isAnimating) {
+        tutorial.animationController1.repeat(reverse: true);
+      }
+    }
+
+    if (!gameDices.unityDices &&
+        mainPageLoaded &&
+        isTutorial &&
+        callbackCheckPlayerToMove() &&
+        (gameDices.nrRolls == 1 || gameDices.nrRolls == 2)) {
+      stackedWidgets.add(tutorial.widgetArrow(gameDices.holdDiceKey[0], w, h,
+          tutorial.animationController2, gameDices.pressToHold_, 1, "B", 0.5));
+      if (!tutorial.animationController2.isAnimating) {
+        tutorial.animationController2.repeat(reverse: true);
+      }
+    }
+
+    if (mainPageLoaded &&
+        isTutorial &&
+        callbackCheckPlayerToMove() &&
+        gameDices.nrRolls == 3) {
+      stackedWidgets.add(tutorial.widgetArrow(
+          cellKeys[myPlayerId + 1][totalFields - 5],
+          w,
+          h,
+          tutorial.animationController2,
+          chooseMove_,
+          1,
+          "R",
+          devicePixelRatio > 2.5 ? 1.0 : 1.5));
+      if (!tutorial.animationController2.isAnimating) {
+        tutorial.animationController2.repeat(reverse: true);
+      }
+    }
+    try {
+      if (mainPageLoaded && isTutorial && gameFinished) {
+        stackedWidgets.add(tutorial.widgetArrow(keySettings, w, h,
+            tutorial.animationController3, pressSettings_, 2, "L", 0.5));
+        if (!tutorial.animationController3.isAnimating) {
+          tutorial.animationController3.repeat(reverse: true);
+        }
+      }
+    } catch (e) {
+      // Error
+    }
+
+    if (h > w) {
+      return Scaffold(
+          body: Stack(children: <Widget>[
+        Image.asset("assets/images/yatzy_portrait.jpg",
+            fit: BoxFit.cover, height: double.infinity, width: double.infinity),
+        Stack(children: [
+          Positioned(
+              left: l,
+              top: h * 0.75 + t,
+              child: WidgetDices(width: w, height: h * 0.25)),
+          Positioned(
+              left: w * 0.35 + l,
+              top: h * 0.0 + t,
+              child: WidgetTopScore(width: w * 0.30, height: h * 0.2)),
+          Positioned(
+              left: l,
+              top: h * 0.20 + t,
+              child: WidgetSetupGameBoard(width: w, height: h * 0.55)),
+          Positioned(
+              left: w * 0.025 + l,
+              top: h * 0.04 + t,
+              child: WidgetDisplayGameStatus(width: w * 0.3, height: h * 0.16)),
+          Positioned(
+              left: w * 0.675 + l,
+              top: h * 0.04 + t,
+              child: WidgetChat(width: w * 0.30, height: h * 0.16)),
+          WidgetAnimationsScroll(
+              width: w,
+              height: h * 0.1,
+              left: w * 0.025 + l,
+              top: -h * 0.03 + t)
+        ]),
+        widgetFloatingButton(h),
+        Stack(children: stackedWidgets),
+      ]));
+    } else {
+      // landscape
+
+      return Scaffold(
+          body: Stack(children: <Widget>[
+        Image.asset("assets/images/yatzy_landscape2.jpg",
+            fit: BoxFit.cover, height: double.infinity, width: double.infinity),
+        Stack(children: [
+          Positioned(
+              left: w * 0.32 + l,
+              top: h * 0.32 + t,
+              child: WidgetDices(width: w * 0.625, height: h * 0.68)),
+          Positioned(
+              left: w * 0.81 + l,
+              top: h * 0.02 + t,
+              child: WidgetTopScore(width: w * 0.18, height: h * 0.3)),
+          Positioned(
+              left: l,
+              top: t,
+              child: WidgetSetupGameBoard(width: w * 0.35, height: h)),
+          Positioned(
+              left: w * 0.35 + l,
+              top: h * 0.02 + t,
+              child: WidgetDisplayGameStatus(width: w * 0.2, height: h * 0.3)),
+          Positioned(
+              left: w * 0.575 + l,
+              top: h * 0.02 + t,
+              child: WidgetChat(width: w * 0.22, height: h * 0.3)),
+          WidgetAnimationsScroll(
+              width: w * 0.43,
+              height: h * 0.2,
+              left: w * 0.355 + l,
+              top: -h * 0.07 + t)
+        ]),
+        widgetFloatingButton(w),
+        Stack(children: stackedWidgets),
+      ]));
+    }
+  }
+}
+</file>
+
+<file path="lib/application/widget_application_settings.dart">
+import 'package:auto_route/auto_route.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:yatzy/dices/unity_communication.dart';
+import '../router/router.gr.dart';
+import '../services/service_provider.dart';
+import '../shared_preferences.dart';
+import '../startup.dart';
+import '../states/bloc/language/language_bloc.dart';
+import '../states/bloc/language/language_event.dart';
+import '../states/cubit/state/state_cubit.dart';
+import '../widgets/spectator_game_board.dart';
+import 'application.dart';
+
+extension WidgetApplicationSettings on Application {
+  List<Widget> widgetWaitingGame(BuildContext context) {
+    List<Widget> gameWidgets = [];
+
+    var ongoingGames = 0;
+    for (var i = 0; i < games.length; i++) {
+      if (!games[i]["gameStarted"]) {
+        var gameTypeText = games[i]["gameType"];
+        if (gameTypeText == "Ordinary") {
+          gameTypeText = gameTypeOrdinary_;
+        }
+        var gameText = '$gameTypeText ${games[i]["connected"]}/${games[i]["nrPlayers"]} ${games[i]["userNames"]}';
+        try {
+          final serviceProvider = ServiceProvider.of(context);
+          if (games[i]["playerIds"].indexOf(serviceProvider.socketService.socketId) == -1) {
+            gameWidgets.add(inputItems.widgetButton(
+                () => onAttemptJoinGame(context, i), gameText));
+          } else {
+            gameWidgets.add(Text(gameText,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 20,
+                  color: Colors.black87,
+                )));
+          }
+        } catch (e) {
+          print('⚠️ ServiceProvider not available in widgetWaitingGame: $e');
+          // Add button without checking socket ID
+          gameWidgets.add(inputItems.widgetButton(
+              () => onAttemptJoinGame(context, i), gameText));
+        }
+      } else {
+        // This is an ongoing game - add a spectate button
+        ongoingGames++;
+        var gameTypeText = games[i]["gameType"];
+        if (gameTypeText == "Ordinary") {
+          gameTypeText = gameTypeOrdinary_;
+        }
+        var gameText = '$gameTypeText ${games[i]["connected"]}/${games[i]["nrPlayers"]} ${games[i]["userNames"]} (Ongoing)';
+        
+        // Add spectate button
+        gameWidgets.add(inputItems.widgetButton(
+            () => onSpectateGame(context, games[i]["gameId"]), gameText));
+      }
+    }
+    gameWidgets.add(Text("$ongoingGames_ : $ongoingGames",
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          fontWeight: FontWeight.bold,
+          fontSize: 20,
+          color: Colors.brown,
+        )));
+    return gameWidgets;
+  }
+
+  // Method to handle spectating a game
+  onSpectateGame(BuildContext context, int gameId) async {
+    print('🎮 Attempting to spectate game: $gameId');
+
+    try {
+      final serviceProvider = ServiceProvider.of(context);
+
+      // Create a message to request spectating
+      Map<String, dynamic> msg = {
+        "action": "spectateGame",
+        "gameId": gameId,
+        "userName": userName // Send username for logging/display?
+      };
+
+      // Send the spectate request
+      if (serviceProvider.socketService.isConnected) {
+        print('🎮 Sending spectate request via socket service');
+
+        // *** SET FLAG BEFORE sending request/setState ***
+        isSpectating = true;
+        spectatedGameId = gameId;
+        gameData = {}; // Clear previous game data immediately
+
+        serviceProvider.socketService.sendToServer(msg);
+
+        // *** Update the UI AFTER setting the flags ***
+        context.read<SetStateCubit>().setState(); // Update UI to show spectator board
+
+        // Show a snackbar to indicate spectating has started
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('👁️ Spectating game #$gameId...'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+
+      } else {
+        print('❌ Cannot spectate: Not connected to server');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cannot spectate: Not connected')),
+        );
+      }
+    } catch (e) {
+      print('⚠️ ServiceProvider not available in onSpectateGame: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error starting spectator mode')),
+      );
+      // Handle offline mode or show error
+    }
+  }
+
+  onAttemptJoinGame(BuildContext context, int i) {
+    Map<String, dynamic> msg = {};
+
+    msg = games[i];
+
+    msg["userName"] = userName;
+    msg["action"] = "requestJoinGame";
+
+    // Send the join game request
+    print('🎮 Joining multiplayer game: ${msg["gameType"]} (${msg["nrPlayers"]} players)');
+
+    // Get the service provider
+    try {
+      final serviceProvider = ServiceProvider.of(context);
+      final socketServiceConnected = serviceProvider.socketService.isConnected;
+
+      // Always use the modern SocketService if it's connected
+      if (socketServiceConnected) {
+        print('🎮 Using modern SocketService for joining game');
+        serviceProvider.socketService.sendToServer(msg);
+      }
+    } catch (e) {
+      print('⚠️ ServiceProvider not available in onAttemptJoinGame: $e');
+      // Handle offline mode or show error
+    }
+  }
+
+  // --- Simplified Game Type Selection ---
+  Widget _buildGameTypeSelection(Function state) {
+    return Padding(
+      padding: const EdgeInsets.all(12.0),
+      child: Card(
+        elevation: 4,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Colors.white,
+                Colors.blue.shade50,
+              ],
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Column(
+              children: [
+                Text("Game Type", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)), // Use headingStyle if available
+                const SizedBox(height: 8),
+                inputItems.widgetStringRadioButton( // Use widgetStringRadioButton
+                    state,
+                    [ // Simplified list of values
+                      "Ordinary",
+                      "Maxi",
+                    ],
+                    [ // Simplified list of translations
+                      gameTypeOrdinary_,
+                      gameTypeMaxi_,
+                    ],
+                        (x) => {gameType = x},
+                    gameType),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  // --- End Simplified Game Type Selection ---
+  onStartGameButton(BuildContext context, Function state) async {
+    try {
+      final serviceProvider = ServiceProvider.of(context);
+      final socketServiceConnected = serviceProvider.socketService.isConnected;
+
+      if (socketServiceConnected) {
+        Map<String, dynamic> msg = {};
+
+        msg = {};
+        msg["playerIds"] = List.filled(nrPlayers, "");
+        msg["userNames"] = List.filled(nrPlayers, "");
+        msg["userName"] = userName;
+        msg["gameType"] = gameType;
+        msg["nrPlayers"] = nrPlayers;
+        msg["connected"] = 0;
+        msg["gameStarted"] = false;
+        msg["action"] = "requestGame";
+
+        // Send through the active socket connection
+        print('🎮 Creating multiplayer game with $nrPlayers players');
+
+        // Always use the modern SocketService if it's connected
+        if (socketServiceConnected) {
+          print('🎮 Using modern SocketService for game creation');
+          serviceProvider.socketService.sendToServer(msg);
+        }
+
+        state();
+
+        msg = {};
+        msg["action"] = "saveSettings";
+        msg["userName"] = userName;
+        msg["gameType"] = gameType;
+        msg["nrPlayers"] = nrPlayers;
+        msg["language"] = chosenLanguage;
+        msg["boardAnimation"] = boardAnimation;
+        msg["unityDices"] = gameDices.unityDices;
+        msg["unityLightMotion"] = gameDices.unityLightMotion;
+        SharedPrefProvider.setPrefObject('yatzySettings', msg);
+      } else {
+        print('❌ No socket connection - starting offline 1-player game');
+        myPlayerId = 0;
+        gameId = 0;
+        playerIds = [""];
+        playerActive = List.filled(playerIds.length, true);
+        nrPlayers = 1;
+
+        setup();
+        userNames = [userName];
+        animation.players = 1;
+        if (applicationStarted) {
+          if (gameDices.unityDices) {
+            gameDices.sendResetToUnity();
+            if (gameDices.unityDices && myPlayerId == playerToMove) {
+              gameDices.sendStartToUnity();
+            }
+          }
+
+          context.read<SetStateCubit>().setState();
+          AutoRouter.of(context).pop();
+        } else {
+          applicationStarted = true;
+          await AutoRouter.of(context).pushAndPopUntil(const ApplicationView(),
+              predicate: (Route<dynamic> route) => false);
+        }
+      }
+    } catch (e) {
+      print('⚠️ ServiceProvider not available in onStartGameButton: $e');
+      // Start offline game
+      print('❌ No service provider - starting offline 1-player game');
+      myPlayerId = 0;
+      gameId = 0;
+      playerIds = [""];
+      playerActive = List.filled(playerIds.length, true);
+      nrPlayers = 1;
+
+      setup();
+      userNames = [userName];
+      animation.players = 1;
+      if (applicationStarted) {
+        if (gameDices.unityDices) {
+          gameDices.sendResetToUnity();
+          if (gameDices.unityDices && myPlayerId == playerToMove) {
+            gameDices.sendStartToUnity();
+          }
+        }
+
+        context.read<SetStateCubit>().setState();
+        AutoRouter.of(context).pop();
+      } else {
+        applicationStarted = true;
+        await AutoRouter.of(context).pushAndPopUntil(const ApplicationView(),
+            predicate: (Route<dynamic> route) => false);
+      }
+    }
+  }
+
+  onChangeUserName(value) {
+    userName = textEditingController.text;
+  }
+
+  Widget widgetScaffoldSettings(BuildContext context, Function state) {
+    // Define a consistent color scheme for better visibility
+    final primaryColor = Colors.blue.shade700; // Brighter primary color
+    final accentColor = Theme.of(context).colorScheme.secondary;
+    final backgroundColor = Theme.of(context).scaffoldBackgroundColor;
+
+    const tabTextStyle = TextStyle(
+      fontSize: 24,
+      fontWeight: FontWeight.bold,
+      color: Colors.white, // Ensure high contrast for tab text
+    );
+
+    final headingStyle = TextStyle(
+      fontSize: 22,
+      fontWeight: FontWeight.bold,
+      color: Theme.of(context).colorScheme.onSurface,
+    );
+
+    final subtitleStyle = TextStyle(
+      fontSize: 18,
+      fontWeight: FontWeight.w500,
+      color: Theme.of(context).colorScheme.onSurface,
+    );
+
+    return DefaultTabController(
+        length: tabController.length,
+        child: Scaffold(
+            appBar: AppBar(
+              backgroundColor: primaryColor, // Explicitly set app bar color
+              title: Text(
+                settings_,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white, // High contrast white text
+                  fontSize: 24,
+                ),
+              ),
+              elevation: 4,
+              bottom: TabBar(
+                controller: tabController,
+                isScrollable: false,
+                indicatorWeight: 3,
+                indicatorColor: Colors.white, // High contrast indicator
+                labelColor: Colors.white, // Ensure high contrast for selected tab
+                unselectedLabelColor: Colors.white.withOpacity(0.8), // Still visible unselected tabs
+                tabs: [
+                  Tab(child: Text(game_, style: tabTextStyle)),
+                  Tab(child: Text(general_, style: tabTextStyle)),
+                ],
+              ),
+            ),
+            body: TabBarView(
+              controller: tabController,
+              children: [
+                // Game Settings Tab
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.blue.shade50,
+                        Colors.white,
+                      ],
+                    ),
+                  ),
+                  child: Scrollbar(
+                    child: ListView(
+                        primary: true,
+                        children: <Widget>[
+                          // --- Use the simplified game type selection ---
+                          _buildGameTypeSelection(state),
+                          // --- End simplified game type selection ---
+                              // Number of Players Selection
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                                child: Card(
+                                  elevation: 4,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  // Add decorative patterns to card
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(12),
+                                      gradient: LinearGradient(
+                                        begin: Alignment.bottomLeft,
+                                        end: Alignment.topRight,
+                                        colors: [
+                                          Colors.white,
+                                          Colors.blue.shade50,
+                                        ],
+                                      ),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(12.0),
+                                      child: Column(
+                                        children: [
+                                          Text("Number of Players", style: headingStyle),
+                                          const SizedBox(height: 8),
+                                          inputItems.widgetIntRadioButton(
+                                              state,
+                                              ["1", "2", "3", "4"],
+                                              (x) => {nrPlayers = x},
+                                              nrPlayers),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+
+                              // Username Input
+                              Padding(
+                                padding: const EdgeInsets.all(12.0),
+                                child: Card(
+                                  elevation: 4,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  // Add decorative patterns to card
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(12),
+                                      gradient: LinearGradient(
+                                        begin: Alignment.centerLeft,
+                                        end: Alignment.centerRight,
+                                        colors: [
+                                          Colors.white,
+                                          Colors.blue.shade50,
+                                        ],
+                                      ),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(12.0),
+                                      child: Column(
+                                        children: [
+                                          Text("Player Name", style: headingStyle),
+                                          const SizedBox(height: 8),
+                                          Row(
+                                              mainAxisAlignment: MainAxisAlignment.center,
+                                              children: [
+                                                Text(
+                                                  currentUsername_ + userName.toString(),
+                                                  style: subtitleStyle,
+                                                ),
+                                                const SizedBox(width: 10),
+                                                SizedBox(
+                                                    width: 150,
+                                                    height: 40,
+                                                    child: inputItems.widgetInputText(
+                                                        enterUsername_,
+                                                        (x) => {onChangeUserName(x), state()},
+                                                        (x) => {onChangeUserName(x), state()},
+                                                        textEditingController,
+                                                        focusNode)),
+                                              ]),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+
+                              // Start Game Button - centered with appropriate width
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24.0,
+                                  vertical: 8.0,
+                                ),
+                                child: Center(
+                                  child: ElevatedButton(
+                                    onPressed: () => onStartGameButton(context, state),
+                                    style: ElevatedButton.styleFrom(
+                                      foregroundColor: Colors.white,
+                                      backgroundColor: Colors.green.shade700,
+                                      minimumSize: const Size(200, 60), // Regular sized button
+                                      padding: const EdgeInsets.symmetric(horizontal: 32),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      elevation: 8,
+                                    ),
+                                    child: Text(
+                                      createGame_,
+                                      style: const TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ] +
+                            // Available Games List
+                            widgetWaitingGame(context) +
+
+                            // Spectator View (if active)
+                            (isSpectating ? [
+                              // Full-screen spectator view
+                              ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  minHeight: MediaQuery.of(context).size.height * 0.7, // 70% of screen height
+                                  maxHeight: MediaQuery.of(context).size.height * 0.85, // 85% of screen height
+                                ),
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: Colors.blue.shade300),
+                                    borderRadius: BorderRadius.circular(8.0),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.1),
+                                        spreadRadius: 1,
+                                        blurRadius: 3,
+                                        offset: const Offset(0, 2),
+                                      )
+                                    ],
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      // Spectator header with close button
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                                        decoration: BoxDecoration(
+                                          color: Colors.blue.shade100,
+                                          borderRadius: const BorderRadius.only(
+                                            topLeft: Radius.circular(7.0),
+                                            topRight: Radius.circular(7.0),
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                const Icon(Icons.visibility, color: Colors.blue, size: 22),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  "Spectating Game #$spectatedGameId",
+                                                  style: const TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.blue,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            ElevatedButton.icon(
+                                              icon: const Icon(Icons.close, size: 18),
+                                              label: const Text("Stop"),
+                                              onPressed: () {
+                                                // *** STOP SPECTATING LOGIC ***
+                                                print('⏹️ Stopping spectator mode for game $spectatedGameId');
+                                                isSpectating = false;
+                                                spectatedGameId = -1;
+                                                gameData = {}; // Clear the spectator data
+                                                // Optionally send a message to server? (Not strictly necessary if server handles disconnects)
+                                                // final serviceProvider = ServiceProvider.of(context);
+                                                // serviceProvider.socketService.sendToServer({'action': 'stopSpectating', 'gameId': spectatedGameId});
+                                                context.read<SetStateCubit>().setState(); // Update UI
+                                              },
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.red,
+                                                foregroundColor: Colors.white,
+                                                minimumSize: const Size(80, 30),
+                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius: BorderRadius.circular(4),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      // Spectator game board
+                                      Expanded(
+                                        child: SpectatorGameBoard(gameData: gameData), // Pass app.gameData
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ] : []) +
+                            // Unity Settings
+                            gameDices.widgetUnitySettings(state)),
+                  ),
+                ),
+
+                // General Settings Tab
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.blue.shade50,
+                        Colors.white,
+                      ],
+                    ),
+                  ),
+                  child: Scrollbar(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: ListView(
+                        primary: true,
+                        children: [
+                          // Miscellaneous Settings Section
+                          Card(
+                            elevation: 4,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    Colors.white,
+                                    Colors.blue.shade50,
+                                  ],
+                                ),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(16.0),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(misc_, style: headingStyle),
+                                    const Divider(thickness: 1.5),
+                                    const SizedBox(height: 8),
+                                    // Animation Checkbox
+                                    Theme(
+                                      data: Theme.of(context).copyWith(
+                                        checkboxTheme: CheckboxThemeData(
+                                          fillColor: MaterialStateProperty.resolveWith<Color>(
+                                            (Set<MaterialState> states) {
+                                              if (states.contains(MaterialState.selected)) {
+                                                return accentColor;
+                                              }
+                                              return Colors.grey.shade400;
+                                            },
+                                          ),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                        ),
+                                      ),
+                                      child: inputItems.widgetCheckbox(
+                                        (x) => {boardAnimation = x, state()},
+                                        boardAnimation_,
+                                        boardAnimation,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    // Language Selection
+                                    Text("Language", style: subtitleStyle),
+                                    const SizedBox(height: 8),
+                                    inputItems.widgetDropDownList(
+                                      () => {},
+                                      " $choseLanguage_",
+                                      differentLanguages,
+                                      (language) => {
+                                        chosenLanguage = language,
+                                        context.read<LanguageBloc>().add(
+                                          LanguageChanged(language: language),
+                                        ),
+                                        context.read<SetStateCubit>().setState()
+                                      },
+                                      chosenLanguage,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            )));
+  }
+}
+</file>
+
+<file path="lib/application/widget_application.dart">
 import 'dart:math';
 
 import 'package:auto_size_text/auto_size_text.dart';
@@ -13336,7 +8190,8 @@ class _WidgetDisplayGameStatusState extends State<WidgetDisplayGameStatus> with 
                           fontWeight: FontWeight.bold,
                           fontSize: width / 5,
                           color: Colors.blueGrey))),
-              if (app.myPlayerId != -1)
+              // ***** FIX: Add !app.gameFinished check *****
+              if (!app.gameFinished && app.myPlayerId != -1)
                 SizedBox(
                     width: width,
                     height: height * 0.2,
@@ -13347,997 +8202,14 @@ class _WidgetDisplayGameStatusState extends State<WidgetDisplayGameStatus> with 
                             style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                                 color: Colors.blueGrey))))
+              // ***** END FIX *****
             ]));
     return myWidget;
   }
 }
+</file>
 
-
-
-================================================
-File: lib/application/widget_application_scaffold.dart
-================================================
-import 'package:auto_route/auto_route.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:yatzy/application/communication_application.dart';
-import 'package:yatzy/chat/widget_chat.dart';
-import 'package:yatzy/dices/unity_communication.dart';
-import 'package:yatzy/dices/widget_dices.dart';
-import 'package:yatzy/top_score/widget_top_scores.dart';
-
-import '../router/router.gr.dart';
-import '../scroll/widget_scroll.dart';
-import '../services/service_provider.dart';
-import '../startup.dart';
-import '../states/cubit/state/state_cubit.dart';
-import 'application.dart';
-import 'widget_application.dart';
-
-extension WidgetApplicationScaffold on Application {
-  Widget widgetScaffold(BuildContext context, Function state) {
-    screenWidth = MediaQuery.of(context).size.width;
-    screenHeight = MediaQuery.of(context).size.height;
-    devicePixelRatio = MediaQuery.of(context).devicePixelRatio;
-    // Get best 16:9 fit
-    var l = 0.0, t = 0.0, w = screenWidth, h = screenHeight, ratio = 16 / 9;
-    if (w > h) {
-      if (screenWidth / screenHeight < ratio) {
-        h = screenWidth / ratio;
-        t = (screenHeight - h) / 2;
-      } else {
-        w = screenHeight * ratio;
-        l = (screenWidth - w) / 2;
-      }
-    } else {
-      // topple screen, calculate best fit, topple back
-      var l_ = 0.0, t_ = 0.0, w_ = screenHeight, h_ = screenWidth;
-
-      if (screenHeight / screenWidth < ratio) {
-        h_ = screenHeight / ratio;
-        t_ = (screenWidth - h_) / 2;
-      } else {
-        w_ = screenWidth * ratio;
-        l_ = (screenHeight - w_) / 2;
-      }
-
-      h = w_;
-      w = h_;
-      l = t_;
-      t = l_;
-    }
-
-    //Widget empty(w,h) {return Container();}
-    var floatingButtonSize = 0.06;
-
-    Widget widgetFloatingButton(double size) {
-      // Temporary move on portrait mode
-      var moveButton = w > h ? 0 : h * 0.5;
-
-
-      Widget widget = Stack(children: [
-        Positioned(
-            key: keySettings,
-            left: l + (1.0 - floatingButtonSize * (size == h ? 2 : 1.1)) * w,
-            top: t +
-                (1.0 - floatingButtonSize * (size == w ? 2 : 1.1)) * h -
-                moveButton,
-            child: SizedBox(
-                width: size * floatingButtonSize,
-                height: size * floatingButtonSize,
-                child: FittedBox(
-                    child: FloatingActionButton(
-                  heroTag: "NavigateSettings",
-                  shape: const CircleBorder(),
-                  onPressed: () async {
-                    await AutoRouter.of(context).push(const SettingsView());
-                  },
-                  tooltip: settings_,
-                  backgroundColor: Colors.blue.withValues(alpha: 0.5),
-                  child: const Icon(Icons.settings_applications),
-                ))))
-      ]);
-
-      return widget;
-    }
-
-    gameFinished = true;
-    for (var i = 0; i < playerActive.length; i++) {
-      if (playerActive[i]) {
-        if (fixedCell[i].contains(false)) {
-          gameFinished = false;
-          break;
-        }
-      }
-    }
-
-    stackedWidgets = [];
-    if (!gameDices.unityDices &&
-        mainPageLoaded &&
-        isTutorial &&
-        callbackCheckPlayerToMove() &&
-        gameDices.nrRolls < 3) {
-      stackedWidgets = [
-        tutorial.widgetArrow(gameDices.rollDiceKey, w, h,
-            tutorial.animationController1, gameDices.pressToRoll_, 0, "R", 0.5)
-      ];
-      if (!tutorial.animationController1.isAnimating) {
-        tutorial.animationController1.repeat(reverse: true);
-      }
-    }
-
-    if (!gameDices.unityDices &&
-        mainPageLoaded &&
-        isTutorial &&
-        callbackCheckPlayerToMove() &&
-        (gameDices.nrRolls == 1 || gameDices.nrRolls == 2)) {
-      stackedWidgets.add(tutorial.widgetArrow(gameDices.holdDiceKey[0], w, h,
-          tutorial.animationController2, gameDices.pressToHold_, 1, "B", 0.5));
-      if (!tutorial.animationController2.isAnimating) {
-        tutorial.animationController2.repeat(reverse: true);
-      }
-    }
-
-    if (mainPageLoaded &&
-        isTutorial &&
-        callbackCheckPlayerToMove() &&
-        gameDices.nrRolls == 3) {
-      stackedWidgets.add(tutorial.widgetArrow(
-          cellKeys[myPlayerId + 1][totalFields - 5],
-          w,
-          h,
-          tutorial.animationController2,
-          chooseMove_,
-          1,
-          "R",
-          devicePixelRatio > 2.5 ? 1.0 : 1.5));
-      if (!tutorial.animationController2.isAnimating) {
-        tutorial.animationController2.repeat(reverse: true);
-      }
-    }
-    try {
-      if (mainPageLoaded && isTutorial && gameFinished) {
-        stackedWidgets.add(tutorial.widgetArrow(keySettings, w, h,
-            tutorial.animationController3, pressSettings_, 2, "L", 0.5));
-        if (!tutorial.animationController3.isAnimating) {
-          tutorial.animationController3.repeat(reverse: true);
-        }
-      }
-    } catch (e) {
-      // Error
-    }
-
-    if (h > w) {
-      return Scaffold(
-          body: Stack(children: <Widget>[
-        Image.asset("assets/images/yatzy_portrait.jpg",
-            fit: BoxFit.cover, height: double.infinity, width: double.infinity),
-        Stack(children: [
-          Positioned(
-              left: l,
-              top: h * 0.75 + t,
-              child: WidgetDices(width: w, height: h * 0.25)),
-          Positioned(
-              left: w * 0.35 + l,
-              top: h * 0.0 + t,
-              child: WidgetTopScore(width: w * 0.30, height: h * 0.2)),
-          Positioned(
-              left: l,
-              top: h * 0.20 + t,
-              child: WidgetSetupGameBoard(width: w, height: h * 0.55)),
-          Positioned(
-              left: w * 0.025 + l,
-              top: h * 0.04 + t,
-              child: WidgetDisplayGameStatus(width: w * 0.3, height: h * 0.16)),
-          Positioned(
-              left: w * 0.675 + l,
-              top: h * 0.04 + t,
-              child: WidgetChat(width: w * 0.30, height: h * 0.16)),
-          WidgetAnimationsScroll(
-              width: w,
-              height: h * 0.1,
-              left: w * 0.025 + l,
-              top: -h * 0.03 + t)
-        ]),
-        widgetFloatingButton(h),
-        Stack(children: stackedWidgets),
-      ]));
-    } else {
-      // landscape
-
-      return Scaffold(
-          body: Stack(children: <Widget>[
-        Image.asset("assets/images/yatzy_landscape2.jpg",
-            fit: BoxFit.cover, height: double.infinity, width: double.infinity),
-        Stack(children: [
-          Positioned(
-              left: w * 0.32 + l,
-              top: h * 0.32 + t,
-              child: WidgetDices(width: w * 0.625, height: h * 0.68)),
-          Positioned(
-              left: w * 0.81 + l,
-              top: h * 0.02 + t,
-              child: WidgetTopScore(width: w * 0.18, height: h * 0.3)),
-          Positioned(
-              left: l,
-              top: t,
-              child: WidgetSetupGameBoard(width: w * 0.35, height: h)),
-          Positioned(
-              left: w * 0.35 + l,
-              top: h * 0.02 + t,
-              child: WidgetDisplayGameStatus(width: w * 0.2, height: h * 0.3)),
-          Positioned(
-              left: w * 0.575 + l,
-              top: h * 0.02 + t,
-              child: WidgetChat(width: w * 0.22, height: h * 0.3)),
-          WidgetAnimationsScroll(
-              width: w * 0.43,
-              height: h * 0.2,
-              left: w * 0.355 + l,
-              top: -h * 0.07 + t)
-        ]),
-        widgetFloatingButton(w),
-        Stack(children: stackedWidgets),
-      ]));
-    }
-  }
-}
-
-
-
-================================================
-File: lib/application/widget_application_settings.dart
-================================================
-import 'package:auto_route/auto_route.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:yatzy/dices/unity_communication.dart';
-import '../router/router.gr.dart';
-import '../services/service_provider.dart';
-import '../shared_preferences.dart';
-import '../startup.dart';
-import '../states/bloc/language/language_bloc.dart';
-import '../states/bloc/language/language_event.dart';
-import '../states/cubit/state/state_cubit.dart';
-import '../widgets/spectator_game_board.dart';
-import 'application.dart';
-
-extension WidgetApplicationSettings on Application {
-  List<Widget> widgetWaitingGame(BuildContext context) {
-    List<Widget> gameWidgets = [];
-
-    var ongoingGames = 0;
-    for (var i = 0; i < games.length; i++) {
-      if (!games[i]["gameStarted"]) {
-        var gameTypeText = games[i]["gameType"];
-        if (gameTypeText == "Ordinary") {
-          gameTypeText = gameTypeOrdinary_;
-        }
-        var gameText = '$gameTypeText ${games[i]["connected"]}/${games[i]["nrPlayers"]} ${games[i]["userNames"]}';
-        try {
-          final serviceProvider = ServiceProvider.of(context);
-          if (games[i]["playerIds"].indexOf(serviceProvider.socketService.socketId) == -1) {
-            gameWidgets.add(inputItems.widgetButton(
-                () => onAttemptJoinGame(context, i), gameText));
-          } else {
-            gameWidgets.add(Text(gameText,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 20,
-                  color: Colors.black87,
-                )));
-          }
-        } catch (e) {
-          print('⚠️ ServiceProvider not available in widgetWaitingGame: $e');
-          // Add button without checking socket ID
-          gameWidgets.add(inputItems.widgetButton(
-              () => onAttemptJoinGame(context, i), gameText));
-        }
-      } else {
-        // This is an ongoing game - add a spectate button
-        ongoingGames++;
-        var gameTypeText = games[i]["gameType"];
-        if (gameTypeText == "Ordinary") {
-          gameTypeText = gameTypeOrdinary_;
-        }
-        var gameText = '$gameTypeText ${games[i]["connected"]}/${games[i]["nrPlayers"]} ${games[i]["userNames"]} (Ongoing)';
-        
-        // Add spectate button
-        gameWidgets.add(inputItems.widgetButton(
-            () => onSpectateGame(context, games[i]["gameId"]), gameText));
-      }
-    }
-    gameWidgets.add(Text("$ongoingGames_ : $ongoingGames",
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          fontWeight: FontWeight.bold,
-          fontSize: 20,
-          color: Colors.brown,
-        )));
-    return gameWidgets;
-  }
-
-  // Method to handle spectating a game
-  onSpectateGame(BuildContext context, int gameId) async {
-    print('🎮 Attempting to spectate game: $gameId');
-
-    try {
-      final serviceProvider = ServiceProvider.of(context);
-
-      // Create a message to request spectating
-      Map<String, dynamic> msg = {
-        "action": "spectateGame",
-        "gameId": gameId,
-        "userName": userName // Send username for logging/display?
-      };
-
-      // Send the spectate request
-      if (serviceProvider.socketService.isConnected) {
-        print('🎮 Sending spectate request via socket service');
-
-        // *** SET FLAG BEFORE sending request/setState ***
-        isSpectating = true;
-        spectatedGameId = gameId;
-        gameData = {}; // Clear previous game data immediately
-
-        serviceProvider.socketService.sendToServer(msg);
-
-        // *** Update the UI AFTER setting the flags ***
-        context.read<SetStateCubit>().setState(); // Update UI to show spectator board
-
-        // Show a snackbar to indicate spectating has started
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('👁️ Spectating game #$gameId...'),
-            duration: const Duration(seconds: 3),
-          ),
-        );
-
-      } else {
-        print('❌ Cannot spectate: Not connected to server');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Cannot spectate: Not connected')),
-        );
-      }
-    } catch (e) {
-      print('⚠️ ServiceProvider not available in onSpectateGame: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Error starting spectator mode')),
-      );
-      // Handle offline mode or show error
-    }
-  }
-
-  onAttemptJoinGame(BuildContext context, int i) {
-    Map<String, dynamic> msg = {};
-
-    msg = games[i];
-
-    msg["userName"] = userName;
-    msg["action"] = "requestJoinGame";
-
-    // Send the join game request
-    print('🎮 Joining multiplayer game: ${msg["gameType"]} (${msg["nrPlayers"]} players)');
-
-    // Get the service provider
-    try {
-      final serviceProvider = ServiceProvider.of(context);
-      final socketServiceConnected = serviceProvider.socketService.isConnected;
-
-      // Always use the modern SocketService if it's connected
-      if (socketServiceConnected) {
-        print('🎮 Using modern SocketService for joining game');
-        serviceProvider.socketService.sendToServer(msg);
-      }
-    } catch (e) {
-      print('⚠️ ServiceProvider not available in onAttemptJoinGame: $e');
-      // Handle offline mode or show error
-    }
-  }
-
-  // --- Simplified Game Type Selection ---
-  Widget _buildGameTypeSelection(Function state) {
-    return Padding(
-      padding: const EdgeInsets.all(12.0),
-      child: Card(
-        elevation: 4,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white,
-                Colors.blue.shade50,
-              ],
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Column(
-              children: [
-                Text("Game Type", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)), // Use headingStyle if available
-                const SizedBox(height: 8),
-                inputItems.widgetStringRadioButton( // Use widgetStringRadioButton
-                    state,
-                    [ // Simplified list of values
-                      "Mini",
-                      "Ordinary",
-                      "Maxi",
-                    ],
-                    [ // Simplified list of translations
-                      gameTypeMini_,
-                      gameTypeOrdinary_,
-                      gameTypeMaxi_,
-                    ],
-                        (x) => {gameType = x},
-                    gameType),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-  // --- End Simplified Game Type Selection ---
-  onStartGameButton(BuildContext context, Function state) async {
-    try {
-      final serviceProvider = ServiceProvider.of(context);
-      final socketServiceConnected = serviceProvider.socketService.isConnected;
-
-      if (socketServiceConnected) {
-        Map<String, dynamic> msg = {};
-
-        msg = {};
-        msg["playerIds"] = List.filled(nrPlayers, "");
-        msg["userNames"] = List.filled(nrPlayers, "");
-        msg["userName"] = userName;
-        msg["gameType"] = gameType;
-        msg["nrPlayers"] = nrPlayers;
-        msg["connected"] = 0;
-        msg["gameStarted"] = false;
-        msg["action"] = "requestGame";
-
-        // Send through the active socket connection
-        print('🎮 Creating multiplayer game with $nrPlayers players');
-
-        // Always use the modern SocketService if it's connected
-        if (socketServiceConnected) {
-          print('🎮 Using modern SocketService for game creation');
-          serviceProvider.socketService.sendToServer(msg);
-        }
-
-        state();
-
-        msg = {};
-        msg["action"] = "saveSettings";
-        msg["userName"] = userName;
-        msg["gameType"] = gameType;
-        msg["nrPlayers"] = nrPlayers;
-        msg["language"] = chosenLanguage;
-        msg["boardAnimation"] = boardAnimation;
-        msg["unityDices"] = gameDices.unityDices;
-        msg["unityLightMotion"] = gameDices.unityLightMotion;
-        SharedPrefProvider.setPrefObject('yatzySettings', msg);
-      } else {
-        print('❌ No socket connection - starting offline 1-player game');
-        myPlayerId = 0;
-        gameId = 0;
-        playerIds = [""];
-        playerActive = List.filled(playerIds.length, true);
-        nrPlayers = 1;
-
-        setup();
-        userNames = [userName];
-        animation.players = 1;
-        if (applicationStarted) {
-          if (gameDices.unityDices) {
-            gameDices.sendResetToUnity();
-            if (gameDices.unityDices && myPlayerId == playerToMove) {
-              gameDices.sendStartToUnity();
-            }
-          }
-
-          context.read<SetStateCubit>().setState();
-          AutoRouter.of(context).pop();
-        } else {
-          applicationStarted = true;
-          await AutoRouter.of(context).pushAndPopUntil(const ApplicationView(),
-              predicate: (Route<dynamic> route) => false);
-        }
-      }
-    } catch (e) {
-      print('⚠️ ServiceProvider not available in onStartGameButton: $e');
-      // Start offline game
-      print('❌ No service provider - starting offline 1-player game');
-      myPlayerId = 0;
-      gameId = 0;
-      playerIds = [""];
-      playerActive = List.filled(playerIds.length, true);
-      nrPlayers = 1;
-
-      setup();
-      userNames = [userName];
-      animation.players = 1;
-      if (applicationStarted) {
-        if (gameDices.unityDices) {
-          gameDices.sendResetToUnity();
-          if (gameDices.unityDices && myPlayerId == playerToMove) {
-            gameDices.sendStartToUnity();
-          }
-        }
-
-        context.read<SetStateCubit>().setState();
-        AutoRouter.of(context).pop();
-      } else {
-        applicationStarted = true;
-        await AutoRouter.of(context).pushAndPopUntil(const ApplicationView(),
-            predicate: (Route<dynamic> route) => false);
-      }
-    }
-  }
-
-  onChangeUserName(value) {
-    userName = textEditingController.text;
-  }
-
-  // **** Updated Widget to use topScore instance ****
-  Widget _buildTopScoresWidget() {
-    // Read data directly from the global topScore instance
-    if (topScore.topScores.isEmpty) { // Assuming the internal list is named topScores
-      return const Padding(
-        padding: EdgeInsets.all(16.0),
-        child: Center(child: Text("Top Scores for current game type will appear here...")),
-      );
-    }
-
-    List<Widget> scoreWidgets = [];
-    // Add header using the current gameType
-    scoreWidgets.add(
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
-        child: Text(
-          'Top Scores: $gameType', // Use app.gameType for the header
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blueGrey),
-        ),
-      )
-    );
-
-    // Limit display to top N scores
-    int count = 0;
-    // Iterate through the list in the topScore instance
-    for (var scoreEntry in topScore.topScores) { 
-      if (count >= 10) break; // Limit to top 10
-      
-      // Ensure scoreEntry is a Map before accessing keys
-      if (scoreEntry is Map) {
-          scoreWidgets.add(
-            ListTile(
-              dense: true,
-              leading: Text('${count + 1}.', style: const TextStyle(fontWeight: FontWeight.bold)),
-              title: Text('${scoreEntry['name'] ?? 'Unknown'}'),
-              trailing: Text('${scoreEntry['score'] ?? '-'}', style: const TextStyle(fontWeight: FontWeight.bold)),
-            )
-          );
-          count++;
-      } else {
-          print("⚠️ Invalid score entry format in topScore.topScores: $scoreEntry");
-      }
-    }
-    
-    // Add padding at the bottom
-    scoreWidgets.add(const SizedBox(height: 10));
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: scoreWidgets,
-    );
-  }
-  // **** END UPDATED WIDGET ****
-
-  Widget widgetScaffoldSettings(BuildContext context, Function state) {
-    // Define a consistent color scheme for better visibility
-    final primaryColor = Colors.blue.shade700; // Brighter primary color
-    final accentColor = Theme.of(context).colorScheme.secondary;
-    final backgroundColor = Theme.of(context).scaffoldBackgroundColor;
-
-    const tabTextStyle = TextStyle(
-      fontSize: 24,
-      fontWeight: FontWeight.bold,
-      color: Colors.white, // Ensure high contrast for tab text
-    );
-
-    final headingStyle = TextStyle(
-      fontSize: 22,
-      fontWeight: FontWeight.bold,
-      color: Theme.of(context).colorScheme.onSurface,
-    );
-
-    final subtitleStyle = TextStyle(
-      fontSize: 18,
-      fontWeight: FontWeight.w500,
-      color: Theme.of(context).colorScheme.onSurface,
-    );
-
-    return DefaultTabController(
-        length: tabController.length,
-        child: Scaffold(
-            appBar: AppBar(
-              backgroundColor: primaryColor, // Explicitly set app bar color
-              title: Text(
-                settings_,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white, // High contrast white text
-                  fontSize: 24,
-                ),
-              ),
-              elevation: 4,
-              bottom: TabBar(
-                controller: tabController,
-                isScrollable: false,
-                indicatorWeight: 3,
-                indicatorColor: Colors.white, // High contrast indicator
-                labelColor: Colors.white, // Ensure high contrast for selected tab
-                unselectedLabelColor: Colors.white.withOpacity(0.8), // Still visible unselected tabs
-                tabs: [
-                  Tab(child: Text(game_, style: tabTextStyle)),
-                  Tab(child: Text(general_, style: tabTextStyle)),
-                ],
-              ),
-            ),
-            body: TabBarView(
-              controller: tabController,
-              children: [
-                // Game Settings Tab
-                Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.blue.shade50,
-                        Colors.white,
-                      ],
-                    ),
-                  ),
-                  child: Scrollbar(
-                    child: ListView(
-                        primary: true,
-                        children: <Widget>[
-                          // --- Use the simplified game type selection ---
-                          _buildGameTypeSelection(state),
-                          // --- End simplified game type selection ---
-                              // Number of Players Selection
-                              Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 12.0),
-                                child: Card(
-                                  elevation: 4,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  // Add decorative patterns to card
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(12),
-                                      gradient: LinearGradient(
-                                        begin: Alignment.bottomLeft,
-                                        end: Alignment.topRight,
-                                        colors: [
-                                          Colors.white,
-                                          Colors.blue.shade50,
-                                        ],
-                                      ),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(12.0),
-                                      child: Column(
-                                        children: [
-                                          Text("Number of Players", style: headingStyle),
-                                          const SizedBox(height: 8),
-                                          inputItems.widgetIntRadioButton(
-                                              state,
-                                              ["1", "2", "3", "4"],
-                                              (x) => {nrPlayers = x},
-                                              nrPlayers),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-
-                              // Username Input
-                              Padding(
-                                padding: const EdgeInsets.all(12.0),
-                                child: Card(
-                                  elevation: 4,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  // Add decorative patterns to card
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(12),
-                                      gradient: LinearGradient(
-                                        begin: Alignment.centerLeft,
-                                        end: Alignment.centerRight,
-                                        colors: [
-                                          Colors.white,
-                                          Colors.blue.shade50,
-                                        ],
-                                      ),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(12.0),
-                                      child: Column(
-                                        children: [
-                                          Text("Player Name", style: headingStyle),
-                                          const SizedBox(height: 8),
-                                          Row(
-                                              mainAxisAlignment: MainAxisAlignment.center,
-                                              children: [
-                                                Text(
-                                                  currentUsername_ + userName.toString(),
-                                                  style: subtitleStyle,
-                                                ),
-                                                const SizedBox(width: 10),
-                                                SizedBox(
-                                                    width: 150,
-                                                    height: 40,
-                                                    child: inputItems.widgetInputText(
-                                                        enterUsername_,
-                                                        (x) => {onChangeUserName(x), state()},
-                                                        (x) => {onChangeUserName(x), state()},
-                                                        textEditingController,
-                                                        focusNode)),
-                                              ]),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-
-                              // Start Game Button - centered with appropriate width
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 24.0,
-                                  vertical: 8.0,
-                                ),
-                                child: Center(
-                                  child: ElevatedButton(
-                                    onPressed: () => onStartGameButton(context, state),
-                                    style: ElevatedButton.styleFrom(
-                                      foregroundColor: Colors.white,
-                                      backgroundColor: Colors.green.shade700,
-                                      minimumSize: const Size(200, 60), // Regular sized button
-                                      padding: const EdgeInsets.symmetric(horizontal: 32),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(16),
-                                      ),
-                                      elevation: 8,
-                                    ),
-                                    child: Text(
-                                      createGame_,
-                                      style: const TextStyle(
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ] +
-                            // Available Games List
-                            widgetWaitingGame(context) +
-                            // **** ADD Top Scores Section ****
-                            [ 
-                              const SizedBox(height: 20), // Add some spacing
-                              _buildTopScoresWidget(),
-                              const SizedBox(height: 20), // Add some spacing
-                            ] +
-                            // Spectator View (if active)
-                            (isSpectating ? [
-                              // Full-screen spectator view
-                              ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  minHeight: MediaQuery.of(context).size.height * 0.7, // 70% of screen height
-                                  maxHeight: MediaQuery.of(context).size.height * 0.85, // 85% of screen height
-                                ),
-                                child: Container(
-                                  margin: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 16.0),
-                                  decoration: BoxDecoration(
-                                    border: Border.all(color: Colors.blue.shade300),
-                                    borderRadius: BorderRadius.circular(8.0),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withOpacity(0.1),
-                                        spreadRadius: 1,
-                                        blurRadius: 3,
-                                        offset: const Offset(0, 2),
-                                      )
-                                    ],
-                                  ),
-                                  child: Column(
-                                    children: [
-                                      // Spectator header with close button
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-                                        decoration: BoxDecoration(
-                                          color: Colors.blue.shade100,
-                                          borderRadius: const BorderRadius.only(
-                                            topLeft: Radius.circular(7.0),
-                                            topRight: Radius.circular(7.0),
-                                          ),
-                                        ),
-                                        child: Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Row(
-                                              children: [
-                                                const Icon(Icons.visibility, color: Colors.blue, size: 22),
-                                                const SizedBox(width: 8),
-                                                Text(
-                                                  "Spectating Game #$spectatedGameId",
-                                                  style: const TextStyle(
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Colors.blue,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                            ElevatedButton.icon(
-                                              icon: const Icon(Icons.close, size: 18),
-                                              label: const Text("Stop"),
-                                              onPressed: () {
-                                                // *** STOP SPECTATING LOGIC ***
-                                                print('⏹️ Stopping spectator mode for game $spectatedGameId');
-                                                isSpectating = false;
-                                                spectatedGameId = -1;
-                                                gameData = {}; // Clear the spectator data
-                                                // Optionally send a message to server? (Not strictly necessary if server handles disconnects)
-                                                // final serviceProvider = ServiceProvider.of(context);
-                                                // serviceProvider.socketService.sendToServer({'action': 'stopSpectating', 'gameId': spectatedGameId});
-                                                context.read<SetStateCubit>().setState(); // Update UI
-                                              },
-                                              style: ElevatedButton.styleFrom(
-                                                backgroundColor: Colors.red,
-                                                foregroundColor: Colors.white,
-                                                minimumSize: const Size(80, 30),
-                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                                shape: RoundedRectangleBorder(
-                                                  borderRadius: BorderRadius.circular(4),
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      // Spectator game board
-                                      Expanded(
-                                        child: SpectatorGameBoard(gameData: gameData), // Pass app.gameData
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ] : []) +
-                            // Unity Settings
-                            gameDices.widgetUnitySettings(state)),
-                  ),
-                ),
-
-                // General Settings Tab
-                Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.blue.shade50,
-                        Colors.white,
-                      ],
-                    ),
-                  ),
-                  child: Scrollbar(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: ListView(
-                        primary: true,
-                        children: [
-                          // Miscellaneous Settings Section
-                          Card(
-                            elevation: 4,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                gradient: LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: [
-                                    Colors.white,
-                                    Colors.blue.shade50,
-                                  ],
-                                ),
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.all(16.0),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(misc_, style: headingStyle),
-                                    const Divider(thickness: 1.5),
-                                    const SizedBox(height: 8),
-                                    // Animation Checkbox
-                                    Theme(
-                                      data: Theme.of(context).copyWith(
-                                        checkboxTheme: CheckboxThemeData(
-                                          fillColor: MaterialStateProperty.resolveWith<Color>(
-                                            (Set<MaterialState> states) {
-                                              if (states.contains(MaterialState.selected)) {
-                                                return accentColor;
-                                              }
-                                              return Colors.grey.shade400;
-                                            },
-                                          ),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(4),
-                                          ),
-                                        ),
-                                      ),
-                                      child: inputItems.widgetCheckbox(
-                                        (x) => {boardAnimation = x, state()},
-                                        boardAnimation_,
-                                        boardAnimation,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 16),
-                                    // Language Selection
-                                    Text("Language", style: subtitleStyle),
-                                    const SizedBox(height: 8),
-                                    inputItems.widgetDropDownList(
-                                      () => {},
-                                      " $choseLanguage_",
-                                      differentLanguages,
-                                      (language) => {
-                                        chosenLanguage = language,
-                                        context.read<LanguageBloc>().add(
-                                          LanguageChanged(language: language),
-                                        ),
-                                        context.read<SetStateCubit>().setState()
-                                      },
-                                      chosenLanguage,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            )));
-  }
-}
-
-
-
-================================================
-File: lib/chat/chat.dart
-================================================
+<file path="lib/chat/chat.dart">
 import 'package:flutter/cupertino.dart';
 
 import '../input_items/input_items.dart';
@@ -14400,12 +8272,9 @@ class Chat {
         curve: Curves.fastOutSlowIn);
   }
 }
+</file>
 
-
-
-================================================
-File: lib/chat/languages_chat.dart
-================================================
+<file path="lib/chat/languages_chat.dart">
 mixin LanguagesChat {
   late Function _getChosenLanguage;
   late String _standardLanguage;
@@ -14429,12 +8298,9 @@ mixin LanguagesChat {
     }
   }
 }
+</file>
 
-
-
-================================================
-File: lib/chat/widget_chat.dart
-================================================
+<file path="lib/chat/widget_chat.dart">
 import 'package:flutter/material.dart';
 import 'package:yatzy/chat/languages_chat.dart';
 import '../startup.dart';
@@ -14683,12 +8549,9 @@ class _WidgetChatState extends State<WidgetChat> with LanguagesChat{
     );
   }
 }
+</file>
 
-
-
-================================================
-File: lib/core/app_widget.dart
-================================================
+<file path="lib/core/app_widget.dart">
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yatzy/application/communication_application.dart';
@@ -14780,12 +8643,9 @@ class AppWidget extends StatelessWidget {
     );
   }
 }
+</file>
 
-
-
-================================================
-File: lib/core/injectable_modules.dart
-================================================
+<file path="lib/core/injectable_modules.dart">
 import 'package:injectable/injectable.dart';
 
 import '../router/router.dart';
@@ -14795,16 +8655,14 @@ abstract class InjectableModule {
   @lazySingleton
   AppRouter get router => AppRouter();
 }
+</file>
 
-
-
-================================================
-File: lib/dices/dices.dart
-================================================
+<file path="lib/dices/dices.dart">
 import 'dart:math';
 
 import 'package:flutter/cupertino.dart';
 import '../input_items/input_items.dart';
+import '../startup.dart';
 import 'unity_communication.dart';
 import 'package:flutter_unity_widget/flutter_unity_widget.dart';
 
@@ -14912,6 +8770,17 @@ class Dices extends LanguagesDices  {
   }
 
   bool rollDices(BuildContext context) {
+    // ***** FIX: Add checks for game state *****
+    if (app.gameFinished) { // Check if the game is globally finished
+      print("🎲 Roll blocked: Game is finished.");
+      return false;
+    }
+
+    if (!callbackCheckPlayerToMove()) { // Check if it's actually my turn
+      print("🎲 Roll blocked: Not my turn.");
+      return false;
+    }
+    // ***** END FIX *****
     if (nrRolls < nrTotalRolls) {
       nrRolls += 1;
       var randomNumberGenerator = Random(DateTime.now().millisecondsSinceEpoch);
@@ -14931,6 +8800,7 @@ class Dices extends LanguagesDices  {
 
       return true;
     }
+    print("🎲 Roll blocked: No rolls left ($nrRolls/$nrTotalRolls).");
     return false;
   }
 
@@ -14951,12 +8821,9 @@ class Dices extends LanguagesDices  {
     return widgets;
   }
 }
+</file>
 
-
-
-================================================
-File: lib/dices/languages_dices.dart
-================================================
+<file path="lib/dices/languages_dices.dart">
 class LanguagesDices{
   late Function _getChosenLanguage;
   late String _standardLanguage;
@@ -15029,12 +8896,9 @@ class LanguagesDices{
     }
   }
 }
+</file>
 
-
-
-================================================
-File: lib/dices/unity_communication.dart
-================================================
+<file path="lib/dices/unity_communication.dart">
 import 'dart:convert';
 
 import 'unity_message.dart';
@@ -15180,12 +9044,9 @@ extension UnityCommunication on Dices {
   // Communication from Unity when new scene is loaded to Flutter
   onUnitySceneLoaded(SceneLoaded? sceneInfo) {}
 }
+</file>
 
-
-
-================================================
-File: lib/dices/unity_message.dart
-================================================
+<file path="lib/dices/unity_message.dart">
 class UnityMessage {
   UnityMessage(this.actionUnity);
 
@@ -15238,12 +9099,9 @@ class UnityMessage {
   var nrDices = 5;
   var nrThrows = 3;
 }
+</file>
 
-
-
-================================================
-File: lib/dices/widget_dices.dart
-================================================
+<file path="lib/dices/widget_dices.dart">
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_unity_widget/flutter_unity_widget.dart';
@@ -15397,12 +9255,16 @@ class _WidgetDicesState extends State<WidgetDices>
     }
 
     // Roll button
-
     listings.add(AnimatedBuilder(
       animation: app.gameDices.animationController,
       builder: (BuildContext context, Widget? widget) {
-        final tmp = Listener(
-            onPointerDown: (e) {
+        // ***** FIX: Determine if rolling should be allowed *****
+        final bool canRoll = !app.gameFinished && // Game not finished
+            app.callbackCheckPlayerToMove() && // Is my turn
+            app.gameDices.nrRolls < app.gameDices.nrTotalRolls; // Have rolls left
+        // ***** END FIX *****
+        final rollButtonWidget = Listener(
+            onPointerDown: canRoll ? (e) {
               if (!app.callbackCheckPlayerToMove()) {
                 return;
               }
@@ -15411,7 +9273,7 @@ class _WidgetDicesState extends State<WidgetDices>
 
                 app.gameDices.setState();
               }
-            },
+            } : null,
             child: Container(
               width: diceWidthHeight * (1 - app.gameDices.sizeAnimation.value / 2),
               height: diceWidthHeight * (1 - app.gameDices.sizeAnimation.value / 2),
@@ -15430,7 +9292,7 @@ class _WidgetDicesState extends State<WidgetDices>
           top: top +
               diceWidthHeight * (app.gameDices.sizeAnimation.value / 4) +
               1.5 * diceWidthHeight,
-          child: tmp,
+          child: rollButtonWidget,
         );
       },
     ));
@@ -15439,12 +9301,69 @@ class _WidgetDicesState extends State<WidgetDices>
         width: width, height: height, child: Stack(children: listings));
   }
 }
+</file>
 
+<file path="lib/injection.config.dart">
+// GENERATED CODE - DO NOT MODIFY BY HAND
 
+// **************************************************************************
+// InjectableConfigGenerator
+// **************************************************************************
 
-================================================
-File: lib/input_items/input_items.dart
-================================================
+// ignore_for_file: unnecessary_lambdas
+// ignore_for_file: lines_longer_than_80_chars
+// coverage:ignore-file
+
+// ignore_for_file: no_leading_underscores_for_library_prefixes
+import 'package:get_it/get_it.dart' as _i1;
+import 'package:injectable/injectable.dart' as _i2;
+
+import 'core/injectable_modules.dart' as _i6;
+import 'router/router.dart' as _i3;
+import 'states/bloc/language/language_bloc.dart' as _i4;
+import 'states/cubit/state/state_cubit.dart' as _i5;
+
+extension GetItInjectableX on _i1.GetIt {
+  // initializes the registration of main-scope dependencies inside of GetIt
+  _i1.GetIt init({
+    String? environment,
+    _i2.EnvironmentFilter? environmentFilter,
+  }) {
+    final gh = _i2.GetItHelper(
+      this,
+      environment,
+      environmentFilter,
+    );
+    final injectableModule = _$InjectableModule();
+    gh.lazySingleton<_i3.AppRouter>(() => injectableModule.router);
+    gh.factory<_i4.LanguageBloc>(() => _i4.LanguageBloc());
+    gh.factory<_i5.SetStateCubit>(() => _i5.SetStateCubit());
+    return this;
+  }
+}
+
+class _$InjectableModule extends _i6.InjectableModule {}
+</file>
+
+<file path="lib/injection.dart">
+import 'package:get_it/get_it.dart';
+import 'package:injectable/injectable.dart';
+
+import 'injection.config.dart';
+
+final GetIt getIt = GetIt.instance;
+
+@InjectableInit(
+  initializerName: 'initApiInjection', // default
+  preferRelativeImports: true, // default
+  asExtension: true, // default
+)
+Future configureInjection(final String environment) async {
+  getIt.init(environment: environment);
+}
+</file>
+
+<file path="lib/input_items/input_items.dart">
 import 'package:flutter/material.dart';
 
 class InputItems {
@@ -15907,12 +9826,32 @@ class InputItems {
         children: paragraphWidgets);
   }
 }
+</file>
 
+<file path="lib/main.dart">
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:yatzy/states/bloc/language/language_bloc.dart';
+import 'package:yatzy/states/cubit/state/state_cubit.dart';
+import 'package:injectable/injectable.dart';
+import 'core/app_widget.dart';
+import 'injection.dart';
+import 'shared_preferences.dart';
 
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SharedPrefProvider.loadPrefs();
+  await configureInjection(Environment.dev);
+  runApp(
+    MultiBlocProvider(providers: [
+      BlocProvider(create: (_) => LanguageBloc()),
+      BlocProvider(create: (_) => SetStateCubit()),
+    ], child: AppWidget()),
+  );
+}
+</file>
 
-================================================
-File: lib/models/board_cell.dart
-================================================
+<file path="lib/models/board_cell.dart">
 import 'package:flutter/material.dart';
 
 /// Board cell for Yatzy game
@@ -16015,12 +9954,9 @@ class BoardCell {
       ..hasFocus = hasFocus;
   }
 }
+</file>
 
-
-
-================================================
-File: lib/models/game.dart
-================================================
+<file path="lib/models/game.dart">
 import 'package:flutter/foundation.dart';
 import 'board_cell.dart';
 import 'player.dart';
@@ -16347,12 +10283,9 @@ class Game {
     }
   }
 }
+</file>
 
-
-
-================================================
-File: lib/models/player.dart
-================================================
+<file path="lib/models/player.dart">
 import 'board_cell.dart';
 
 /// Player model for Yatzy game
@@ -16465,12 +10398,9 @@ class Player {
     };
   }
 }
+</file>
 
-
-
-================================================
-File: lib/router/router.dart
-================================================
+<file path="lib/router/router.dart">
 import 'package:auto_route/auto_route.dart';
 import 'package:yatzy/router/router.gr.dart';
 
@@ -16485,12 +10415,9 @@ class AppRouter extends $AppRouter {
 
   ];
 }
+</file>
 
-
-
-================================================
-File: lib/router/router.gr.dart
-================================================
+<file path="lib/router/router.gr.dart">
 // GENERATED CODE - DO NOT MODIFY BY HAND
 
 // **************************************************************************
@@ -16552,12 +10479,9 @@ class SettingsView extends _i3.PageRouteInfo<void> {
 
   static const _i3.PageInfo<void> page = _i3.PageInfo<void>(name);
 }
+</file>
 
-
-
-================================================
-File: lib/scroll/animations_scroll.dart
-================================================
+<file path="lib/scroll/animations_scroll.dart">
 import 'package:flutter/animation.dart';
 
 import 'languages_animations_scroll.dart';
@@ -16585,12 +10509,9 @@ class AnimationsScroll with LanguagesAnimationsScroll {
     return _standardLanguage;
   }
 }
+</file>
 
-
-
-================================================
-File: lib/scroll/languages_animations_scroll.dart
-================================================
+<file path="lib/scroll/languages_animations_scroll.dart">
 mixin LanguagesAnimationsScroll {
   late Function _getChosenLanguage;
   late String _standardLanguage;
@@ -16622,12 +10543,9 @@ mixin LanguagesAnimationsScroll {
     }
   }
 }
+</file>
 
-
-
-================================================
-File: lib/scroll/widget_scroll.dart
-================================================
+<file path="lib/scroll/widget_scroll.dart">
 import 'package:animated_text_kit/animated_text_kit.dart';
 import 'package:flutter/material.dart';
 
@@ -16715,12 +10633,9 @@ class _WidgetAnimationsScrollState extends State<WidgetAnimationsScroll>
     }
   }
 }
+</file>
 
-
-
-================================================
-File: lib/services/game_service.dart
-================================================
+<file path="lib/services/game_service.dart">
 import '../models/game.dart';
 import '../models/board_cell.dart';
 import 'socket_service.dart';
@@ -17027,12 +10942,9 @@ class GameService {
     return 0;
   }
 }
+</file>
 
-
-
-================================================
-File: lib/services/http_service.dart
-================================================
+<file path="lib/services/http_service.dart">
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
@@ -17108,12 +11020,9 @@ class HttpService {
         }));
   }
 }
+</file>
 
-
-
-================================================
-File: lib/services/service_provider.dart
-================================================
+<file path="lib/services/service_provider.dart">
 import 'package:flutter/material.dart';
 
 import 'socket_service.dart';
@@ -17171,12 +11080,9 @@ class ServiceProvider extends InheritedWidget {
            gameService != oldWidget.gameService;
   }
 }
+</file>
 
-
-
-================================================
-File: lib/services/socket_service.dart
-================================================
+<file path="lib/services/socket_service.dart">
 import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -17668,12 +11574,110 @@ class SocketService {
     }
   }
 }
+</file>
 
+<file path="lib/shared_preferences.dart">
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 
+/// Interacts with shared preferences to store and retrieve data
+abstract class SharedPrefProvider {
+  static late final SharedPreferences prefs;
 
-================================================
-File: lib/states/bloc/language/language_bloc.dart
-================================================
+  static loadPrefs() async {
+    prefs = await SharedPreferences.getInstance();
+  }
+
+  /// Static lambda functions to retrieve value from state objects
+  static bool fetchPrefBool(String key) => prefs.getBool(key) ?? false;
+
+  static int fetchPrefInt(String key) => prefs.getInt(key) ?? 0;
+
+  static String fetchPrefString(String key) => prefs.getString(key) ?? '';
+
+  static dynamic fetchPrefObject(String key) =>
+      jsonDecode(prefs.getString(key) ?? jsonEncode({}));
+
+  /// Static lambda functions to set value from state objects
+  static Future<bool> setPrefBool(String key, bool value) async {
+    return await prefs.setBool(key, value);
+  }
+
+  static Future<bool> setPrefInt(String key, int value) async {
+    return await prefs.setInt(key, value);
+  }
+
+  static Future<bool> setPrefString(String key, String value) async {
+    return await prefs.setString(key, value);
+  }
+
+  static Future<bool> setPrefObject(String key, value) async {
+    return await prefs.setString(key, jsonEncode(value));
+  }
+}
+</file>
+
+<file path="lib/startup.dart">
+import 'package:flutter/cupertino.dart';
+
+import 'package:yatzy/scroll/animations_scroll.dart';
+import 'package:yatzy/top_score/top_score.dart';
+import 'package:yatzy/tutorial/tutorial.dart';
+
+import 'application/application.dart';
+import 'chat/chat.dart';
+import 'dices/dices.dart';
+import 'input_items/input_items.dart';
+
+var isOnline = false;
+var isDebug = true;
+
+// Updated localhost URL to ensure it works with the current network configuration
+// In local development, use your actual machine's IP address instead of 192.168.0.168
+// This is important for Socket.IO connections to work properly
+var localhost = isOnline 
+    ? isDebug 
+        ? "https://fluttersystems.com" 
+        : "https://clientsystem.net" 
+    : "http://localhost:8000";
+
+var localhostNET = "https://localhost:44357/api/Values";
+var localhostNETIO = "wss://localhost:44357/ws";
+var applicationStarted = false;
+var userName = "Yatzy";
+var userNames = [];
+//var devicePixelRatio = 0.0;
+var isTesting = false;
+var isTutorial = true;
+var mainPageLoaded = false;
+var keySettings = GlobalKey();
+late double screenWidth;
+late double screenHeight;
+late double devicePixelRatio;
+
+var chosenLanguage = "Swedish";
+var standardLanguage = "English";
+
+var differentLanguages = ["English", "Swedish"];
+
+// scrcpy -s R3CR4037M1R --shortcut-mod=lctrl --always-on-top --stay-awake --window-title "Samsung Galaxy S21"
+// android:theme="@style/UnityThemeSelector.Translucent"
+// android/app/src/main/AndroidManifest.xml
+
+var inputItems = InputItems();
+late Tutorial tutorial;
+//var languagesGlobal = LanguagesGlobal();
+
+late TopScore topScore;
+late AnimationsScroll animationsScroll; // = AnimationsScroll();
+
+late Application app;
+late Chat chat;
+
+late Dices dices;
+</file>
+
+<file path="lib/states/bloc/language/language_bloc.dart">
 import 'package:injectable/injectable.dart';
 
 import '../../../shared_preferences.dart';
@@ -17695,14 +11699,9 @@ class LanguageBloc extends Bloc<LanguageEvent, String> {
     emit(event.language);
   }
 }
+</file>
 
-
-
-================================================
-File: lib/states/bloc/language/language_event.dart
-================================================
-
-
+<file path="lib/states/bloc/language/language_event.dart">
 /// Event being processed by [CounterBloc].
 abstract class LanguageEvent {}
 
@@ -17712,12 +11711,9 @@ class LanguageChanged extends LanguageEvent {
 
   LanguageChanged({required this.language});
 }
+</file>
 
-
-
-================================================
-File: lib/states/cubit/state/state_cubit.dart
-================================================
+<file path="lib/states/cubit/state/state_cubit.dart">
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 class SetStateCubit extends Cubit<int> {
@@ -17727,12 +11723,9 @@ class SetStateCubit extends Cubit<int> {
     emit(state + 1);
   }
 }
+</file>
 
-
-
-================================================
-File: lib/top_score/languages_top_score.dart
-================================================
+<file path="lib/top_score/languages_top_score.dart">
 mixin LanguagesTopScore {
   late Function _getChosenLanguage;
   late String _standardLanguage;
@@ -17757,12 +11750,9 @@ mixin LanguagesTopScore {
     }
   }
 }
+</file>
 
-
-
-================================================
-File: lib/top_score/top_score.dart
-================================================
+<file path="lib/top_score/top_score.dart">
 import 'dart:convert';
 
 import 'package:flutter/animation.dart';
@@ -17844,12 +11834,9 @@ class TopScore with LanguagesTopScore {
     }
   }
 }
+</file>
 
-
-
-================================================
-File: lib/top_score/widget_top_scores.dart
-================================================
+<file path="lib/top_score/widget_top_scores.dart">
 import 'package:flutter/material.dart';
 import '../startup.dart';
 import 'languages_top_score.dart';
@@ -18013,12 +12000,9 @@ class _WidgetTopScoreState extends State<WidgetTopScore>
         width: width, height: height, child: Stack(children: listings));
   }
 }
+</file>
 
-
-
-================================================
-File: lib/tutorial/tutorial.dart
-================================================
+<file path="lib/tutorial/tutorial.dart">
 import 'package:flutter/material.dart';
 
 class Tutorial {
@@ -18199,12 +12183,9 @@ class Tutorial {
         });
   }
 }
+</file>
 
-
-
-================================================
-File: lib/utils/yatzy_mapping_client.dart
-================================================
+<file path="lib/utils/yatzy_mapping_client.dart">
 // lib/utils/yatzy_mapping_client.dart
 
 // Based on the frontend `application/application.dart` structure
@@ -18215,13 +12196,6 @@ const Map<String, List<String>> _gameTypeMappingsClient = {
     'Sum', 'Bonus', // Note: Bonus label might include value on UI, use base label for mapping
     'Pair', 'Two Pairs', 'Three of Kind', 'Four of Kind',
     'House', 'Small Straight', 'Large Straight',
-    'Chance', 'Yatzy', 'Total'
-  ],
-  'Mini': [
-    'Ones', 'Twos', 'Threes', 'Fours', 'Fives', 'Sixes',
-    'Sum', 'Bonus',
-    'Pair', 'Two Pairs', 'Three of Kind',
-    'Small Straight', 'Middle Straight', 'Large Straight',
     'Chance', 'Yatzy', 'Total'
   ],
   'Maxi': [ // Includes MaxiR3, MaxiE3, MaxiRE3
@@ -18237,7 +12211,6 @@ const Map<String, List<String>> _gameTypeMappingsClient = {
 
 String _getBaseGameTypeClient(String gameType) {
   if (gameType.startsWith('Maxi')) return 'Maxi';
-  if (gameType == 'Mini') return 'Mini';
   return 'Ordinary'; // Default
 }
 
@@ -18273,11 +12246,9 @@ int getSelectionIndex(String gameType, String label) {
   print('Client Mapping Error: Game type $gameType not found in mappings.');
   return -1;
 }
+</file>
 
-
-================================================
-File: lib/views/application_view.dart
-================================================
+<file path="lib/views/application_view.dart">
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -18385,12 +12356,9 @@ class _ApplicationViewState extends State<ApplicationView>
     });
   }
 }
+</file>
 
-
-
-================================================
-File: lib/views/settings_view.dart
-================================================
+<file path="lib/views/settings_view.dart">
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -18426,12 +12394,9 @@ class _SettingsViewHomeState extends State<SettingsView>
     });
   }
 }
+</file>
 
-
-
-================================================
-File: lib/widgets/spectator_game_board.dart
-================================================
+<file path="lib/widgets/spectator_game_board.dart">
 import 'package:flutter/material.dart';
 
 class SpectatorGameBoard extends StatefulWidget {
@@ -19047,4 +13012,2887 @@ class ScoreCategory {
 
   ScoreCategory(this.displayName, this.index, this.isHighlighted);
 }
+</file>
 
+<file path="unity/yatzy/Assets/FlutterUnityIntegration/Demo/GameManager.cs">
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using FlutterUnityIntegration;
+using UnityEngine;
+
+public class GameManager : MonoBehaviour
+{
+    // Start is called before the first frame update
+    // Start is called before the first frame update
+    void Start()
+    {
+        gameObject.AddComponent<UnityMessageManager>();
+    }
+
+    // Update is called once per frame
+    void Update()
+    { }
+
+    void HandleWebFnCall(String action)
+    {
+        switch (action)
+        {
+            case "pause":
+                Time.timeScale = 0;
+                break;
+            case "resume":
+                Time.timeScale = 1;
+                break;
+            case "unload":
+                Application.Unload();
+                break;
+            case "quit":
+                Application.Quit();
+                break;
+        }
+    }
+}
+</file>
+
+<file path="unity/yatzy/Assets/FlutterUnityIntegration/Demo/Rotate.cs">
+using System;
+using FlutterUnityIntegration;
+using UnityEngine;
+using UnityEngine.EventSystems;
+
+public class Rotate : MonoBehaviour, IEventSystemHandler
+{
+    [SerializeField]
+    Vector3 RotateAmount;
+
+    // Start is called before the first frame update
+    void Start()
+    {
+        RotateAmount = new Vector3(0, 0, 0);
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+        gameObject.transform.Rotate(RotateAmount * Time.deltaTime * 120);
+
+        for (int i = 0; i < Input.touchCount; ++i)
+        {
+            if (Input.GetTouch(i).phase.Equals(TouchPhase.Began))
+            {
+                var hit = new RaycastHit();
+
+                Ray ray = Camera.main.ScreenPointToRay(Input.GetTouch(i).position);
+
+                if (Physics.Raycast(ray, out hit))
+                {
+                    // This method is used to send data to Flutter
+                    UnityMessageManager.Instance.SendMessageToFlutter("The cube feels touched.");
+                }
+            }
+        }
+    }
+
+    // This method is called from Flutter
+    public void SetRotationSpeed(String message)
+    {
+        float value = float.Parse(message);
+        RotateAmount = new Vector3(value, value, value);
+    }
+}
+</file>
+
+<file path="unity/yatzy/Assets/FlutterUnityIntegration/Demo/SceneLoader.cs">
+using System.Collections;
+using System.Collections.Generic;
+using FlutterUnityIntegration;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public class SceneLoader : MonoBehaviour
+{
+    // Start is called before the first frame update
+    void Start()
+    {
+        // mMessenger = new UnityMessageManager();
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+        
+    }
+
+    public void LoadScene(int idx)
+    {
+        Debug.Log("scene = " + idx);
+        SceneManager.LoadScene(idx, LoadSceneMode.Single);
+    }
+
+    public void MessengerFlutter()
+    {
+
+        UnityMessageManager.Instance.SendMessageToFlutter("Hey man");
+    }
+
+    public void SwitchNative()
+    {
+        UnityMessageManager.Instance.ShowHostMainWindow();
+    }
+
+    public void UnloadNative()
+    {
+        UnityMessageManager.Instance.UnloadMainWindow();
+    }
+
+    public void QuitNative()
+    {
+        UnityMessageManager.Instance.QuitUnityWindow();
+    }
+}
+</file>
+
+<file path="unity/yatzy/Assets/FlutterUnityIntegration/Editor/Build.cs">
+using System;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using UnityEditor;
+using UnityEngine;
+using Application = UnityEngine.Application;
+using BuildResult = UnityEditor.Build.Reporting.BuildResult;
+
+// uncomment for addressables
+//using UnityEditor.AddressableAssets;
+//using UnityEditor.AddressableAssets.Settings;
+
+namespace FlutterUnityIntegration.Editor
+{
+    public class Build : EditorWindow
+    {
+        private static readonly string ProjectPath = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+        private static readonly string APKPath = Path.Combine(ProjectPath, "Builds/" + Application.productName + ".apk");
+
+        private static readonly string AndroidExportPath = Path.GetFullPath(Path.Combine(ProjectPath, "../../android/unityLibrary"));
+        private static readonly string WindowsExportPath = Path.GetFullPath(Path.Combine(ProjectPath, "../../windows/unityLibrary/data"));
+        private static readonly string IOSExportPath = Path.GetFullPath(Path.Combine(ProjectPath, "../../ios/UnityLibrary"));
+        private static readonly string WebExportPath = Path.GetFullPath(Path.Combine(ProjectPath, "../../web/UnityLibrary"));
+        private static readonly string IOSExportPluginPath = Path.GetFullPath(Path.Combine(ProjectPath, "../../ios_xcode/UnityLibrary"));
+
+        private bool _pluginMode = false;
+        private static string _persistentKey = "flutter-unity-widget-pluginMode";
+
+        //#region GUI Member Methods
+        [MenuItem("Flutter/Export Android %&n", false, 1)]
+        public static void DoBuildAndroidLibrary()
+        {
+            DoBuildAndroid(Path.Combine(APKPath, "unityLibrary"), false);
+
+            // Copy over resources from the launcher module that are used by the library
+            Copy(Path.Combine(APKPath + "/launcher/src/main/res"), Path.Combine(AndroidExportPath, "src/main/res"));
+        }
+
+        [MenuItem("Flutter/Export Android Plugin %&p", false, 5)]
+        public static void DoBuildAndroidPlugin()
+        {
+            DoBuildAndroid(Path.Combine(APKPath, "unityLibrary"), true);
+
+            // Copy over resources from the launcher module that are used by the library
+            Copy(Path.Combine(APKPath + "/launcher/src/main/res"), Path.Combine(AndroidExportPath, "src/main/res"));
+        }
+
+        [MenuItem("Flutter/Export IOS %&i", false, 2)]
+        public static void DoBuildIOS()
+        {
+            BuildIOS(IOSExportPath);
+        }
+
+        [MenuItem("Flutter/Export IOS Plugin %&o", false, 6)]
+        public static void DoBuildIOSPlugin()
+        {
+            BuildIOS(IOSExportPluginPath);
+
+            // Automate so manual steps
+            SetupIOSProjectForPlugin();
+
+            // Build Archive
+            // BuildUnityFrameworkArchive();
+
+        }
+
+        [MenuItem("Flutter/Export Web GL %&w", false, 3)]
+        public static void DoBuildWebGL()
+        {
+            BuildWebGL(WebExportPath);
+        }
+
+
+        [MenuItem("Flutter/Export Windows %&d", false, 4)]
+        public static void DoBuildWindowsOS()
+        {
+            BuildWindowsOS(WindowsExportPath);
+        }
+
+        [MenuItem("Flutter/Settings %&S", false, 7)]
+        public static void PluginSettings()
+        {
+            EditorWindow.GetWindow(typeof(Build));
+        }
+
+        private void OnGUI()
+        {
+            GUILayout.Label("Flutter Unity Widget Settings", EditorStyles.boldLabel);
+
+            EditorGUI.BeginChangeCheck();
+            _pluginMode = EditorGUILayout.Toggle("Plugin Mode", _pluginMode);
+
+            if (EditorGUI.EndChangeCheck())
+            {
+                EditorPrefs.SetBool(_persistentKey, _pluginMode);
+            }
+        }
+
+        private void OnEnable()
+        {
+            _pluginMode = EditorPrefs.GetBool(_persistentKey, false);
+        }
+        //#endregion
+
+
+        //#region Build Member Methods
+
+        private static void BuildWindowsOS(String path)
+        {
+            // Switch to Android standalone build.
+            EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android);
+
+            if (Directory.Exists(path))
+                Directory.Delete(path, true);
+
+            if (Directory.Exists(WindowsExportPath))
+                Directory.Delete(WindowsExportPath, true);
+
+            var playerOptions = new BuildPlayerOptions
+            {
+                scenes = GetEnabledScenes(),
+                target = BuildTarget.StandaloneWindows64,
+                locationPathName = path,
+                options = BuildOptions.AllowDebugging
+            };
+
+            // Switch to Android standalone build.
+            EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Standalone, BuildTarget.StandaloneWindows64);
+
+            // build addressable
+            ExportAddressables();
+            var report = BuildPipeline.BuildPlayer(playerOptions);
+
+            if (report.summary.result != BuildResult.Succeeded)
+                throw new Exception("Build failed");
+        }
+
+        private static void BuildWebGL(String path)
+        {
+            // Switch to Android standalone build.
+            EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android);
+
+            if (Directory.Exists(path))
+                Directory.Delete(path, true);
+
+            if (Directory.Exists(WebExportPath))
+                Directory.Delete(WebExportPath, true);
+
+            // EditorUserBuildSettings. = true;
+
+            var playerOptions = new BuildPlayerOptions();
+            playerOptions.scenes = GetEnabledScenes();
+            playerOptions.target = BuildTarget.WebGL;
+            playerOptions.locationPathName = path;
+
+            // Switch to Android standalone build.
+            EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.WebGL, BuildTarget.WebGL);
+            // build addressable
+            ExportAddressables();
+            var report = BuildPipeline.BuildPlayer(playerOptions);
+
+            if (report.summary.result != BuildResult.Succeeded)
+                throw new Exception("Build failed");
+
+            // Copy(path, WebExportPath);
+            ModifyWebGLExport();
+        }
+
+        private static void DoBuildAndroid(String buildPath, bool isPlugin)
+        {
+            // Switch to Android standalone build.
+            EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android);
+
+            if (Directory.Exists(APKPath))
+                Directory.Delete(APKPath, true);
+
+            if (Directory.Exists(AndroidExportPath))
+                Directory.Delete(AndroidExportPath, true);
+
+            EditorUserBuildSettings.androidBuildSystem = AndroidBuildSystem.Gradle;
+            EditorUserBuildSettings.exportAsGoogleAndroidProject = true;
+
+            var playerOptions = new BuildPlayerOptions();
+            playerOptions.scenes = GetEnabledScenes();
+            playerOptions.target = BuildTarget.Android;
+            playerOptions.locationPathName = APKPath;
+            playerOptions.options = BuildOptions.AllowDebugging;
+
+            // Switch to Android standalone build.
+            EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android);
+            // build addressable
+            ExportAddressables();
+            var report = BuildPipeline.BuildPlayer(playerOptions);
+
+            if (report.summary.result != BuildResult.Succeeded)
+                throw new Exception("Build failed");
+
+            Copy(buildPath, AndroidExportPath);
+
+            // Modify build.gradle
+            ModifyAndroidGradle(isPlugin);
+
+            if(isPlugin)
+            {
+                SetupAndroidProjectForPlugin();
+            } else
+            {
+                SetupAndroidProject();
+            }
+        }
+
+        private static void ModifyWebGLExport()
+        {
+            // Modify index.html
+            var indexFile = Path.Combine(WebExportPath, "index.html");
+            var indexHtmlText = File.ReadAllText(indexFile);
+
+            indexHtmlText = indexHtmlText.Replace("<script>", @"
+            <script>
+              var mainUnityInstance;
+
+              window['handleUnityMessage'] = function (params) {
+                window.parent.postMessage({
+                    name: 'onUnityMessage',
+                    data: params,
+                   }, '*');
+              };
+
+              window['handleUnitySceneLoaded'] = function (name, buildIndex, isLoaded, isValid) {
+                window.parent.postMessage({
+                    name: 'onUnitySceneLoaded',
+                    data: {
+                        'name': name,
+                        'buildIndex': buildIndex,
+                        'isLoaded': isLoaded == 1,
+                        'isValid': isValid == 1,
+                    }
+                   }, '*');
+              };
+
+              window.parent.addEventListener('unityFlutterBiding', function (args) {
+                const obj = JSON.parse(args.data);
+                mainUnityInstance.SendMessage(obj.gameObject, obj.methodName, obj.message);
+              });
+
+              window.parent.addEventListener('unityFlutterBidingFnCal', function (args) {
+                mainUnityInstance.SendMessage('GameManager', 'HandleWebFnCall', args);
+              });
+            ");
+
+            indexHtmlText = indexHtmlText.Replace("}).then((unityInstance) => {", @"
+         }).then((unityInstance) => {
+           window.parent.postMessage('unityReady', '*');
+           mainUnityInstance = unityInstance;
+         ");
+            
+            //
+            // window.parent.addEventListener("flutter2js", function (params) {
+            //     const obj = JSON.parse(params.data);
+            //     globalUnityInstance.SendMessage(obj.gameObject, obj.method, obj.data);
+            // });
+            
+            File.WriteAllText(indexFile, indexHtmlText);
+        }
+
+        private static void ModifyAndroidGradle(bool isPlugin)
+        {
+            // Modify build.gradle
+            var buildFile = Path.Combine(AndroidExportPath, "build.gradle");
+            var buildText = File.ReadAllText(buildFile);
+            buildText = buildText.Replace("com.android.application", "com.android.library");
+            buildText = buildText.Replace("bundle {", "splits {");
+            buildText = buildText.Replace("enableSplit = false", "enable false");
+            buildText = buildText.Replace("enableSplit = true", "enable true");
+            buildText = buildText.Replace("implementation fileTree(dir: 'libs', include: ['*.jar'])", "implementation(name: 'unity-classes', ext:'jar')");
+            buildText = buildText.Replace(" + unityStreamingAssets.tokenize(', ')", "");
+
+            if(isPlugin)
+            {
+                buildText = Regex.Replace(buildText, @"implementation\(name: 'androidx.* ext:'aar'\)", "\n");
+            }
+//        build_text = Regex.Replace(build_text, @"commandLineArgs.add\(\"--enable-debugger\"\)", "\n");
+//        build_text = Regex.Replace(build_text, @"commandLineArgs.add\(\"--profiler-report\"\)", "\n");
+//        build_text = Regex.Replace(build_text, @"commandLineArgs.add\(\"--profiler-output-file=\" + workingDir + \"/build/il2cpp_\"+ abi + \"_\" + configuration + \"/il2cpp_conv.traceevents\"\)", "\n");
+
+            buildText = Regex.Replace(buildText, @"\n.*applicationId '.+'.*\n", "\n");
+            File.WriteAllText(buildFile, buildText);
+
+            // Modify AndroidManifest.xml
+            var manifestFile = Path.Combine(AndroidExportPath, "src/main/AndroidManifest.xml");
+            var manifestText = File.ReadAllText(manifestFile);
+            manifestText = Regex.Replace(manifestText, @"<application .*>", "<application>");
+            var regex = new Regex(@"<activity.*>(\s|\S)+?</activity>", RegexOptions.Multiline);
+            manifestText = regex.Replace(manifestText, "");
+            File.WriteAllText(manifestFile, manifestText);
+
+            // Modify proguard-unity.txt
+            var proguardFile = Path.Combine(AndroidExportPath, "proguard-unity.txt");
+            var proguardText = File.ReadAllText(proguardFile);
+            proguardText = proguardText.Replace("-ignorewarnings", "-keep class com.xraph.plugin.** { *; }\n-ignorewarnings");
+            File.WriteAllText(proguardFile, proguardText);
+
+        }
+
+        private static void BuildIOS(String path)
+        {
+            // Switch to ios standalone build.
+            EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.iOS, BuildTarget.iOS);
+
+            if (Directory.Exists(path))
+                Directory.Delete(path, true);
+
+            EditorUserBuildSettings.iOSXcodeBuildConfig = XcodeBuildConfig.Release;
+
+            var playerOptions = new BuildPlayerOptions
+            {
+                scenes = GetEnabledScenes(),
+                target = BuildTarget.iOS,
+                locationPathName = path,
+                options = BuildOptions.AllowDebugging
+            };
+
+            // build addressable
+            ExportAddressables();
+
+            var report = BuildPipeline.BuildPlayer(playerOptions);
+
+            if (report.summary.result != BuildResult.Succeeded)
+                throw new Exception("Build failed");
+        }
+
+        //#endregion
+
+
+        //#region Other Member Methods
+        private static void Copy(string source, string destinationPath)
+        {
+            if (Directory.Exists(destinationPath))
+                Directory.Delete(destinationPath, true);
+
+            Directory.CreateDirectory(destinationPath);
+
+            foreach (var dirPath in Directory.GetDirectories(source, "*",
+                         SearchOption.AllDirectories))
+                Directory.CreateDirectory(dirPath.Replace(source, destinationPath));
+
+            foreach (var newPath in Directory.GetFiles(source, "*.*",
+                         SearchOption.AllDirectories))
+                File.Copy(newPath, newPath.Replace(source, destinationPath), true);
+        }
+
+        private static string[] GetEnabledScenes()
+        {
+            var scenes = EditorBuildSettings.scenes
+                .Where(s => s.enabled)
+                .Select(s => s.path)
+                .ToArray();
+
+            return scenes;
+        }
+
+        // uncomment for addressables
+        private static void ExportAddressables() {
+            /*
+        Debug.Log("Start building player content (Addressables)");
+        Debug.Log("BuildAddressablesProcessor.PreExport start");
+
+        AddressableAssetSettings.CleanPlayerContent(
+            AddressableAssetSettingsDefaultObject.Settings.ActivePlayerDataBuilder);
+
+        AddressableAssetProfileSettings profileSettings = AddressableAssetSettingsDefaultObject.Settings.profileSettings;
+        string profileId = profileSettings.GetProfileId("Default");
+        AddressableAssetSettingsDefaultObject.Settings.activeProfileId = profileId;
+
+        AddressableAssetSettings.BuildPlayerContent();
+        Debug.Log("BuildAddressablesProcessor.PreExport done");
+        */
+        }
+
+
+        /// <summary>
+        /// This method tries to autome the build setup required for Android
+        /// </summary>
+        private static void SetupAndroidProject()
+        {
+            var androidPath = Path.GetFullPath(Path.Combine(ProjectPath, "../../android"));
+            var androidAppPath = Path.GetFullPath(Path.Combine(ProjectPath, "../../android/app"));
+            var projBuildPath = Path.Combine(androidPath, "build.gradle");
+            var appBuildPath = Path.Combine(androidAppPath, "build.gradle");
+            var settingsPath = Path.Combine(androidPath, "settings.gradle");
+
+            var projBuildScript = File.ReadAllText(projBuildPath);
+            var settingsScript = File.ReadAllText(settingsPath);
+            var appBuildScript = File.ReadAllText(appBuildPath);
+
+            // Sets up the project build.gradle files correctly
+            if (!Regex.IsMatch(projBuildScript, @"flatDir[^/]*[^}]*}"))
+            {
+                var regex = new Regex(@"allprojects \{[^\{]*\{", RegexOptions.Multiline);
+                projBuildScript = regex.Replace(projBuildScript, @"
+allprojects {
+    repositories {
+        flatDir {
+            dirs ""${project(':unityLibrary').projectDir}/libs""
+        }
+");
+                File.WriteAllText(projBuildPath, projBuildScript);
+            }
+
+            // Sets up the project settings.gradle files correctly
+            if (!Regex.IsMatch(settingsScript, @"include "":unityLibrary"""))
+            {
+                settingsScript += @"
+
+include "":unityLibrary""
+project("":unityLibrary"").projectDir = file(""./unityLibrary"")
+";
+                File.WriteAllText(settingsPath, settingsScript);
+            }
+
+
+            // Sets up the project app build.gradle files correctly
+            if (!Regex.IsMatch(appBuildScript, @"dependencies \{"))
+            {
+                appBuildScript += @"
+dependencies {
+    implementation project(':unityLibrary')
+}
+";
+                File.WriteAllText(appBuildPath, appBuildScript);
+            } else
+            {
+                if (!appBuildScript.Contains(@"implementation project(':unityLibrary')"))
+                {
+                    var regex = new Regex(@"dependencies \{", RegexOptions.Multiline);
+                    appBuildScript = regex.Replace(appBuildScript, @"
+dependencies {
+    implementation project(':unityLibrary')
+");
+                    File.WriteAllText(appBuildPath, appBuildScript);
+                }
+            }
+        }
+
+        /// <summary>
+        /// This method tries to autome the build setup required for Android
+        /// </summary>
+        private static void SetupAndroidProjectForPlugin()
+        {
+            var androidPath = Path.GetFullPath(Path.Combine(ProjectPath, "../../android"));
+            var projBuildPath = Path.Combine(androidPath, "build.gradle");
+            var settingsPath = Path.Combine(androidPath, "settings.gradle");
+
+            var projBuildScript = File.ReadAllText(projBuildPath);
+            var settingsScript = File.ReadAllText(settingsPath);
+
+            // Sets up the project build.gradle files correctly
+            if (Regex.IsMatch(projBuildScript, @"// BUILD_ADD_UNITY_LIBS"))
+            {
+                var regex = new Regex(@"// BUILD_ADD_UNITY_LIBS", RegexOptions.Multiline);
+                projBuildScript = regex.Replace(projBuildScript, @"
+        flatDir {
+            dirs ""${project(':unityLibrary').projectDir}/libs""
+        }
+");
+                File.WriteAllText(projBuildPath, projBuildScript);
+            }
+
+            // Sets up the project settings.gradle files correctly
+            if (!Regex.IsMatch(settingsScript, @"include "":unityLibrary"""))
+            {
+                settingsScript += @"
+
+include "":unityLibrary""
+project("":unityLibrary"").projectDir = file(""./unityLibrary"")
+";
+                File.WriteAllText(settingsPath, settingsScript);
+            }
+        }
+
+        private static void SetupIOSProjectForPlugin()
+        {
+            var iosRunnerPath = Path.GetFullPath(Path.Combine(ProjectPath, "../../ios"));
+            var pubsecFile = Path.Combine(iosRunnerPath, "flutter_unity_widget.podspec");
+            var pubsecText = File.ReadAllText(pubsecFile);
+
+            if (!Regex.IsMatch(pubsecText, @"\w\.xcconfig(?:[^}]*})+") && !Regex.IsMatch(pubsecText, @"tar -xvjf UnityFramework.tar.bz2"))
+            {
+                var regex = new Regex(@"\w\.xcconfig(?:[^}]*})+", RegexOptions.Multiline);
+                pubsecText = regex.Replace(pubsecText, @"
+	spec.xcconfig = {
+        'FRAMEWORK_SEARCH_PATHS' => '""${PODS_ROOT}/../.symlinks/plugins/flutter_unity_widget/ios"" ""${PODS_ROOT}/../.symlinks/flutter/ios-release"" ""${PODS_CONFIGURATION_BUILD_DIR}""',
+        'OTHER_LDFLAGS' => '$(inherited) -framework UnityFramework \${PODS_LIBRARIES}'
+    }
+
+    spec.vendored_frameworks = ""UnityFramework.framework""
+			");
+                File.WriteAllText(pubsecFile, pubsecText);
+            }
+        }
+
+        // DO NOT USE (Contact before trying)
+        private static async void BuildUnityFrameworkArchive()
+        {
+            var xcprojectExt = "/Unity-iPhone.xcodeproj";
+
+            // check if we have a workspace or not
+            if (Directory.Exists(IOSExportPluginPath + "/Unity-iPhone.xcworkspace")) {
+                xcprojectExt = "/Unity-iPhone.xcworkspace";
+            }
+
+            const string framework = "UnityFramework";
+            var xcprojectName = $"{IOSExportPluginPath}{xcprojectExt}";
+            var schemeName = $"{framework}";
+            var buildPath = IOSExportPluginPath + "/build";
+            var frameworkNameWithExt = $"{framework}.framework";
+
+            var iosRunnerPath = Path.GetFullPath(Path.Combine(ProjectPath, "../../ios/"));
+            const string iosArchiveDir = "Release-iphoneos-archive";
+            var iosArchiveFrameworkPath = $"{buildPath}/{iosArchiveDir}/Products/Library/Frameworks/{frameworkNameWithExt}";
+            var dysmNameWithExt = $"{frameworkNameWithExt}.dSYM";
+
+            try
+            {
+                Debug.Log("### Cleaning up after old builds");
+                await $" - rf {iosRunnerPath}{frameworkNameWithExt}".Bash("rm");
+                await $" - rf {buildPath}".Bash("rm");
+
+                Debug.Log("### BUILDING FOR iOS");
+                Debug.Log("### Building for device (Archive)");
+
+                await $"archive -workspace {xcprojectName} -scheme {schemeName} -sdk iphoneos -archivePath {buildPath}/Release-iphoneos.xcarchive ENABLE_BITCODE=NO |xcpretty".Bash("xcodebuild");
+
+                Debug.Log("### Copying framework files");
+                await $" -RL {iosArchiveFrameworkPath} {iosRunnerPath}/{frameworkNameWithExt}".Bash("cp");
+                await $" -RL {iosArchiveFrameworkPath}/{dysmNameWithExt} {iosRunnerPath}/{dysmNameWithExt}".Bash("cp");
+                Debug.Log("### DONE ARCHIVING");
+            }
+            catch (Exception e)
+            {
+                Debug.Log(e);
+            }
+
+
+        }
+
+        //#endregion
+    }
+}
+</file>
+
+<file path="unity/yatzy/Assets/FlutterUnityIntegration/Editor/SweetShellHelper.cs">
+using System.Diagnostics;
+using System.Threading.Tasks;
+using System;
+
+public static class SweetShellHelper
+{
+    public static Task<int> Bash(this string cmd, string fileName)
+    {
+        var source = new TaskCompletionSource<int>();
+        var escapedArgs = cmd.Replace("\"", "\\\"");
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = fileName,
+                Arguments = $"\"{escapedArgs}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            },
+            EnableRaisingEvents = true
+        };
+        process.Exited += (sender, args) =>
+        {
+            UnityEngine.Debug.LogWarning(process.StandardError.ReadToEnd());
+            UnityEngine.Debug.Log(process.StandardOutput.ReadToEnd());
+            if (process.ExitCode == 0)
+            {
+                source.SetResult(0);
+            }
+            else
+            {
+                source.SetException(new Exception($"Command `{cmd}` failed with exit code `{process.ExitCode}`"));
+            }
+
+            process.Dispose();
+        };
+
+        try
+        {
+            process.Start();
+        }
+        catch (Exception e)
+        {
+            UnityEngine.Debug.LogError(e);
+            source.SetException(e);
+        }
+
+        return source.Task;
+    }
+}
+</file>
+
+<file path="unity/yatzy/Assets/FlutterUnityIntegration/Editor/XCodePostBuild.cs">
+/*
+MIT License
+Copyright (c) 2021 REX ISAAC RAPHAEL
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
+#if UNITY_IOS
+
+using System;
+
+using System.Collections.Generic;
+using System.IO;
+
+using UnityEditor;
+using UnityEditor.Callbacks;
+using UnityEditor.iOS.Xcode;
+using UnityEngine;
+
+/// <summary>
+/// Adding this post build script to Unity project enables the flutter-unity-widget to access it
+/// </summary>
+public static class XcodePostBuild
+{
+
+    /// <summary>
+    /// The identifier added to touched file to avoid double edits when building to existing directory without
+    /// replace existing content.
+    /// </summary>
+    private const string TouchedMarker = "https://github.com/juicycleff/flutter-unity-view-widget";
+
+    [PostProcessBuild]
+    public static void OnPostBuild(BuildTarget target, string pathToBuiltProject)
+    {
+        if (target != BuildTarget.iOS)
+        {
+            return;
+        }
+
+        PatchUnityNativeCode(pathToBuiltProject);
+
+        UpdateUnityProjectFiles(pathToBuiltProject);
+
+        UpdateBuildSettings(pathToBuiltProject);
+    }
+
+    /// <summary>
+    /// We need to set particular build settings on the UnityFramework target.
+    /// This includes:
+    ///   - skip_install = NO (It is YES by default)
+    /// </summary>
+    /// <param name="pathToBuildProject"></param>
+    private static void UpdateBuildSettings(string pathToBuildProject)
+    {
+        var pbx = new PBXProject();
+        var pbxPath = Path.Combine(pathToBuildProject, "Unity-iPhone.xcodeproj/project.pbxproj");
+        pbx.ReadFromFile(pbxPath);
+
+        var targetGuid = pbx.GetUnityFrameworkTargetGuid();
+        var projGuid = pbx.ProjectGuid();
+
+        // Set skip_install to NO 
+        pbx.SetBuildProperty(targetGuid, "SKIP_INSTALL", "NO");
+
+        // Set some linker flags
+        pbx.SetBuildProperty(projGuid, "ENABLE_BITCODE", "YES");
+
+        // Persist changes
+        pbx.WriteToFile(pbxPath);
+    }
+
+    /// <summary>
+    /// We need to add the Data folder to the UnityFramework framework
+    /// </summary>
+    private static void UpdateUnityProjectFiles(string pathToBuiltProject)
+    {
+        var pbx = new PBXProject();
+        var pbxPath = Path.Combine(pathToBuiltProject, "Unity-iPhone.xcodeproj/project.pbxproj");
+        pbx.ReadFromFile(pbxPath);
+
+        // PatchRemoveTargetMembership(pathToBuiltProject);
+        // Add unityLibrary/Data
+        var targetGuid = pbx.TargetGuidByName("UnityFramework");
+        var fileGuid = pbx.AddFolderReference(Path.Combine(pathToBuiltProject, "Data"), "Data");
+        pbx.AddFileToBuild(targetGuid, fileGuid);
+
+        pbx.WriteToFile(pbxPath);
+    }
+
+    /// <summary>
+    /// Make necessary changes to Unity build output that enables it to be embedded into existing Xcode project.
+    /// </summary>
+    private static void PatchUnityNativeCode(string pathToBuiltProject)
+    {
+        if (!CheckUnityAppController(Path.Combine(pathToBuiltProject, "Classes/UnityAppController.h")))
+        {
+            EditUnityAppControllerH(Path.Combine(pathToBuiltProject, "Classes/UnityAppController.h"));
+            MarkUnityAppControllerH(Path.Combine(pathToBuiltProject, "Classes/UnityAppController.h"));
+        }
+
+        if (!CheckUnityAppController(Path.Combine(pathToBuiltProject, "Classes/UnityAppController.mm")))
+        {
+            EditUnityAppControllerMM(Path.Combine(pathToBuiltProject, "Classes/UnityAppController.mm"));
+            MarkUnityAppControllerMM(Path.Combine(pathToBuiltProject, "Classes/UnityAppController.mm"));
+        }
+    }
+
+    private static bool MarkUnityAppControllerH(string path)
+    {
+        var inScope = false;
+        var mark = false;
+        EditCodeFile(path, line =>
+        {
+            inScope |= line.Contains("include \"RenderPluginDelegate.h\"");
+            if (inScope)
+            {
+                if (line.Trim() == "")
+                {
+                    inScope = false;
+
+                    return new string[]
+                    {
+                        "",
+                        "// Edited by " + TouchedMarker,
+                        "",
+                    };
+                }
+
+                return new string[] { line };
+            }
+
+            return new string[] { line };
+        });
+        return mark;
+    }
+
+    private static bool MarkUnityAppControllerMM(string path)
+    {
+        var inScope = false;
+        var mark = false;
+        EditCodeFile(path, line =>
+        {
+            inScope |= line.Contains("#include <sys/sysctl.h>");
+            if (inScope)
+            {
+                if (line.Trim() == "")
+                {
+                    inScope = false;
+
+                    return new string[]
+                    {
+                        "",
+                        "// Edited by " + TouchedMarker,
+                        "",
+                    };
+                }
+
+                return new string[] { line };
+            }
+
+            return new string[] { line };
+        });
+        return mark;
+    }
+    private static bool CheckUnityAppController(string path)
+    {
+        var mark = false;
+        EditCodeFile(path, line =>
+        {
+            mark |= line.Contains("// Edited by " + TouchedMarker);
+            return new string[] { line };
+        });
+        return mark;
+    }
+
+    /// <summary>
+    /// Edit 'UnityAppController.h': returns 'UnityAppController' from 'AppDelegate' class.
+    /// </summary>
+    private static void EditUnityAppControllerH(string path)
+    {
+        var inScope = false;
+        var markerDetected = false;
+
+        // Modify inline GetAppController
+        EditCodeFile(path, line =>
+        {
+            inScope |= line.Contains("include \"RenderPluginDelegate.h\"");
+
+            if (inScope && !markerDetected)
+            {
+                if (line.Trim() == "")
+                {
+                    inScope = false;
+                    markerDetected = true;
+
+                    return new string[]
+                    {
+                        "",
+                        "// Added by " + TouchedMarker,
+                        "@protocol UnityEventListener <NSObject>",
+                        "- (void)onSceneLoaded:(NSString *)name buildIndex:(NSInteger *)bIndex loaded:(bool *)isLoaded valid:(bool *)IsValid;",
+                        "- (void)onMessage:(NSString *)message;",
+                        "@end",
+                        "",
+                    };
+                }
+
+                return new string[] { line };
+            }
+
+            return new string[] { line };
+        });
+
+        inScope = false;
+        markerDetected = false;
+
+        // Modify inline GetAppController
+        EditCodeFile(path, line =>
+        {
+            inScope |= line.Contains("include \"RenderPluginDelegate.h\"");
+
+            if (inScope && !markerDetected)
+            {
+                if (line.Trim() == "")
+                {
+                    inScope = false;
+                    markerDetected = true;
+
+                    return new string[]
+                    {
+                        "",
+                        "// Added by " + TouchedMarker,
+                        "typedef void(^unitySceneLoadedCallbackType)(const char* name, const int* buildIndex, const bool* isLoaded, const bool* IsValid);",
+                        "",
+                        "typedef void(^unityMessageCallbackType)(const char* message);",
+                        "",
+                    };
+                }
+
+                return new string[] { line };
+            }
+
+            return new string[] { line };
+        });
+
+        inScope = false;
+        markerDetected = false;
+
+        // Modify inline GetAppController
+        EditCodeFile(path, line =>
+        {
+            inScope |= line.Contains("quitHandler)");
+
+            if (inScope && !markerDetected)
+            {
+                if (line.Trim() == "")
+                {
+                    inScope = false;
+                    markerDetected = true;
+
+                    return new string[]
+                    {
+                        "@property (nonatomic, copy)                                 void(^unitySceneLoadedHandler)(const char* name, const int* buildIndex, const bool* isLoaded, const bool* IsValid);",
+                        "@property (nonatomic, copy)                                 void(^unityMessageHandler)(const char* message);",
+                    };
+                }
+
+                return new string[] { line };
+            }
+
+            return new string[] { line };
+        });
+
+    }
+
+    /// <summary>
+    /// Edit 'UnityAppController.mm': triggers 'UnityReady' notification after Unity is actually started.
+    /// </summary>
+    private static void EditUnityAppControllerMM(string path)
+    {
+
+        var inScope = false;
+        var markerDetected = false;
+
+        EditCodeFile(path, line =>
+        {
+            if (line.Trim() == "@end")
+            {
+                return new string[]
+                {
+                    "",
+                    "// Added by " + TouchedMarker,
+                    "extern \"C\" void OnUnityMessage(const char* message)",
+                    "{",
+                    "    if (GetAppController().unityMessageHandler) {",
+                    "        GetAppController().unityMessageHandler(message);",
+                    "    }",
+                    "}",
+                    "",
+                    "extern \"C\" void OnUnitySceneLoaded(const char* name, const int* buildIndex, const bool* isLoaded, const bool* IsValid)",
+                    "{",
+                    "    if (GetAppController().unitySceneLoadedHandler) {",
+                    "        GetAppController().unitySceneLoadedHandler(name, buildIndex, isLoaded, IsValid);",
+                    "    }",
+                    "}",
+                    line,
+
+                };
+            }
+
+            inScope |= line.Contains("- (void)startUnity:");
+            markerDetected |= inScope && line.Contains(TouchedMarker);
+
+            if (inScope && line.Trim() == "}")
+            {
+                inScope = false;
+
+                if (markerDetected)
+                {
+                    return new string[] { line };
+                }
+                else
+                {
+                    return new string[]
+                    {
+                        "    // Modified by " + TouchedMarker,
+                        @"    [[NSNotificationCenter defaultCenter] postNotificationName: @""UnityReady"" object:self];",
+                        "}",
+                    };
+                }
+            }
+
+            return new string[] { line };
+        });
+
+    }
+
+
+    private static void EditCodeFile(string path, Func<string, IEnumerable<string>> lineHandler)
+    {
+        var bakPath = path + ".bak";
+        if (File.Exists(bakPath))
+        {
+            File.Delete(bakPath);
+        }
+
+        File.Move(path, bakPath);
+
+        using (var reader = File.OpenText(bakPath))
+        using (var stream = File.Create(path))
+        using (var writer = new StreamWriter(stream))
+        {
+            string line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                var outputs = lineHandler(line);
+                foreach (var o in outputs)
+                {
+                    writer.WriteLine(o);
+                }
+            }
+        }
+    }
+}
+
+#endif
+</file>
+
+<file path="unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs">
+using System.Runtime.InteropServices;
+using UnityEngine.SceneManagement;
+using UnityEngine;
+using System;
+
+namespace FlutterUnityIntegration
+{
+    public class NativeAPI
+    {
+#if UNITY_IOS && !UNITY_EDITOR
+    [DllImport("__Internal")]
+    public static extern void OnUnityMessage(string message);
+
+    [DllImport("__Internal")]
+    public static extern void OnUnitySceneLoaded(string name, int buildIndex, bool isLoaded, bool IsValid);
+#endif
+
+#if UNITY_WEBGL
+        [DllImport("__Internal")]
+        public static extern void OnUnityMessageWeb(string message);
+
+        [DllImport("__Internal")]
+        public static extern void OnUnitySceneLoadedWeb(string name, int buildIndex, bool isLoaded, bool isValid);
+#endif
+
+        public static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+#if UNITY_ANDROID
+        try
+        {
+            AndroidJavaClass jc = new AndroidJavaClass("com.xraph.plugin.flutter_unity_widget.UnityPlayerUtils");
+            jc.CallStatic("onUnitySceneLoaded", scene.name, scene.buildIndex, scene.isLoaded, scene.IsValid());
+        }
+        catch (Exception e)
+        {
+            Debug.Log(e.Message);
+        }
+#elif UNITY_WEBGL
+            OnUnitySceneLoadedWeb(scene.name, scene.buildIndex, scene.isLoaded, scene.IsValid());
+#elif UNITY_IOS && !UNITY_EDITOR
+        OnUnitySceneLoaded(scene.name, scene.buildIndex, scene.isLoaded, scene.IsValid());
+#endif
+        }
+
+        public static void SendMessageToFlutter(string message)
+        {
+#if UNITY_ANDROID
+        try
+        {
+            AndroidJavaClass jc = new AndroidJavaClass("com.xraph.plugin.flutter_unity_widget.UnityPlayerUtils");
+            jc.CallStatic("onUnityMessage", message);
+        }
+        catch (Exception e)
+        {
+            Debug.Log(e.Message);
+        }
+#elif UNITY_WEBGL
+        OnUnityMessageWeb(message);
+#elif UNITY_IOS && !UNITY_EDITOR
+        OnUnityMessage(message);
+#endif
+        }
+
+        public static void ShowHostMainWindow()
+        {
+#if UNITY_ANDROID
+        try
+        {
+            var jc = new AndroidJavaClass("com.xraph.plugin.flutter_unity_widget.OverrideUnityActivity");
+            var overrideActivity = jc.GetStatic<AndroidJavaObject>("instance");
+            overrideActivity.Call("showMainActivity");
+        }
+        catch (Exception e)
+        {
+            Debug.Log(e.Message);
+        }
+#elif UNITY_IOS && !UNITY_EDITOR
+        // NativeAPI.showHostMainWindow();
+#endif
+        }
+
+        public static void UnloadMainWindow()
+        {
+#if UNITY_ANDROID
+        try
+        {
+            AndroidJavaClass jc = new AndroidJavaClass("com.xraph.plugin.flutter_unity_widget.OverrideUnityActivity");
+            AndroidJavaObject overrideActivity = jc.GetStatic<AndroidJavaObject>("instance");
+            overrideActivity.Call("unloadPlayer");
+        }
+        catch (Exception e)
+        {
+            Debug.Log(e.Message);
+        }
+#elif UNITY_IOS && !UNITY_EDITOR
+        // NativeAPI.unloadPlayer();
+#endif
+        }
+
+        public static void QuitUnityWindow()
+        {
+#if UNITY_ANDROID
+        try
+        {
+            AndroidJavaClass jc = new AndroidJavaClass("com.xraph.plugin.flutter_unity_widget.OverrideUnityActivity");
+            AndroidJavaObject overrideActivity = jc.GetStatic<AndroidJavaObject>("instance");
+            overrideActivity.Call("quitPlayer");
+        }
+        catch (Exception e)
+        {
+            Debug.Log(e.Message);
+        }
+#elif UNITY_IOS && !UNITY_EDITOR
+        // NativeAPI.quitPlayer();
+#endif
+        }
+    }
+}
+</file>
+
+<file path="unity/yatzy/Assets/FlutterUnityIntegration/SingletonMonoBehaviour.cs">
+using System;
+using UnityEngine;
+
+namespace FlutterUnityIntegration
+{
+    public abstract class SingletonMonoBehaviour<T> : MonoBehaviour where T : MonoBehaviour
+    {
+        private static readonly Lazy<T> LazyInstance = new Lazy<T>(CreateSingleton);
+
+        public static T Instance => LazyInstance.Value;
+
+        private static T CreateSingleton()
+        {
+            var ownerObject = new GameObject($"{typeof(T).Name} (singleton)");
+            var instance = ownerObject.AddComponent<T>();
+            DontDestroyOnLoad(ownerObject);
+            return instance;
+        }
+    }
+}
+</file>
+
+<file path="unity/yatzy/Assets/FlutterUnityIntegration/UnityMessageManager.cs">
+using System;
+using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+namespace FlutterUnityIntegration
+{
+    public class MessageHandler
+    {
+        public int id;
+        public string seq;
+
+        public String name;
+        private readonly JToken data;
+
+        public static MessageHandler Deserialize(string message)
+        {
+            var m = JObject.Parse(message);
+            var handler = new MessageHandler(
+                m.GetValue("id").Value<int>(),
+                m.GetValue("seq").Value<string>(),
+                m.GetValue("name").Value<string>(),
+                m.GetValue("data")
+            );
+            return handler;
+        }
+
+        public T getData<T>()
+        {
+            return data.Value<T>();
+        }
+
+        public MessageHandler(int id, string seq, string name, JToken data)
+        {
+            this.id = id;
+            this.seq = seq;
+            this.name = name;
+            this.data = data;
+        }
+
+        public void send(object data)
+        {
+            var o = JObject.FromObject(new
+            {
+                id = id,
+                seq = "end",
+                name = name,
+                data = data
+            });
+            UnityMessageManager.Instance.SendMessageToFlutter(UnityMessageManager.MessagePrefix + o.ToString());
+        }
+    }
+
+    public class UnityMessage
+    {
+        public String name;
+        public JObject data;
+        public Action<object> callBack;
+    }
+
+    public class UnityMessageManager : SingletonMonoBehaviour<UnityMessageManager>
+    {
+
+        public const string MessagePrefix = "@UnityMessage@";
+        private static int ID = 0;
+
+        private static int generateId()
+        {
+            ID = ID + 1;
+            return ID;
+        }
+
+        public delegate void MessageDelegate(string message);
+        public event MessageDelegate OnMessage;
+
+        public delegate void MessageHandlerDelegate(MessageHandler handler);
+        public event MessageHandlerDelegate OnFlutterMessage;
+
+        private readonly Dictionary<int, UnityMessage> waitCallbackMessageMap = new Dictionary<int, UnityMessage>();
+
+        private void Start()
+        {
+            SceneManager.sceneLoaded += OnSceneLoaded;
+        }
+
+        void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            NativeAPI.OnSceneLoaded(scene, mode);
+
+        }
+
+        public void ShowHostMainWindow()
+        {
+            NativeAPI.ShowHostMainWindow();
+        }
+
+        public void UnloadMainWindow()
+        {
+            NativeAPI.UnloadMainWindow();
+        }
+
+
+        public void QuitUnityWindow()
+        {
+            NativeAPI.QuitUnityWindow();
+        }
+
+
+        public void SendMessageToFlutter(string message)
+        {
+            NativeAPI.SendMessageToFlutter(message);
+        }
+
+        public void SendMessageToFlutter(UnityMessage message)
+        {
+            var id = generateId();
+            if (message.callBack != null)
+            {
+                waitCallbackMessageMap.Add(id, message);
+            }
+
+            var o = JObject.FromObject(new
+            {
+                id = id,
+                seq = message.callBack != null ? "start" : "",
+                name = message.name,
+                data = message.data
+            });
+            UnityMessageManager.Instance.SendMessageToFlutter(MessagePrefix + o.ToString());
+        }
+
+        void onMessage(string message)
+        {
+            OnMessage?.Invoke(message);
+        }
+
+        void onFlutterMessage(string message)
+        {
+            if (message.StartsWith(MessagePrefix))
+            {
+                message = message.Replace(MessagePrefix, "");
+            }
+            else
+            {
+                return;
+            }
+
+            var handler = MessageHandler.Deserialize(message);
+            if ("end".Equals(handler.seq))
+            {
+                // handle callback message
+                if (!waitCallbackMessageMap.TryGetValue(handler.id, out var m)) return;
+                waitCallbackMessageMap.Remove(handler.id);
+                m.callBack?.Invoke(handler.getData<object>()); // todo
+                return;
+            }
+
+            OnFlutterMessage?.Invoke(handler);
+        }
+    }
+}
+</file>
+
+<file path="unity/yatzy/Assets/Scripts/CircularMotionScript.cs">
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class CircularMotionScript : MonoBehaviour
+{
+    float timeCounter=0;
+    public Color myColor;
+    public bool lightMotion;
+    Vector3 originalPosition;
+    private float speed;
+    // Start is called before the first frame update
+    void Start()
+    {
+        speed = 10f;
+        originalPosition = transform.position;
+        lightMotion = true;
+        myColor = new Color(0.15f, 0.10f, 0.0f, 0f);
+        // goStartPlane = new GameObject();  
+        // goPlane = new GameObject();  
+        // goWall1 = new GameObject();  
+        // goWall2 = new GameObject();  
+        // goStartPlane = GameObject.Find("StartPlane");
+        // goPlane = GameObject.Find("Plane");
+        // goWall1 = GameObject.Find("Wall1");
+        // goWall2 = GameObject.Find("Wall2");
+        // meshRendererStartPlane = new MeshRenderer();
+        // meshRendererPlane = new MeshRenderer();
+        // meshRendererWall1 = new MeshRenderer();
+        // meshRendererWall2 = new MeshRenderer();
+        // meshRendererStartPlane = goStartPlane.GetComponent<MeshRenderer>();
+        // meshRendererPlane = goPlane.GetComponent<MeshRenderer>();
+        // meshRendererWall1 = goWall1.GetComponent<MeshRenderer>();
+        // meshRendererWall2 = goWall3.GetComponent<MeshRenderer>();
+
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+        if (lightMotion) {
+            timeCounter += Time.deltaTime;
+
+            float x = speed * Mathf.Cos(timeCounter) + originalPosition.x;
+            float y = transform.position.y;
+            float z = speed * Mathf.Sin(timeCounter) + originalPosition.z;
+
+            transform.position  = new Vector3(x, y, z);
+        }
+
+        GameObject.Find("StartPlane").GetComponent<Renderer>().material.color = myColor;
+        //GameObject.Find("Wall1").GetComponent<Renderer>().material.color = myColor;
+        //GameObject.Find("Wall2").GetComponent<Renderer>().material.color = myColor;
+        GameObject.Find("Plane").GetComponent<Renderer>().material.color = myColor;
+        // meshRendererStartPlane.material.color = myColor;
+        // meshRendererPlane.material.color = myColor;
+        // meshRendererWall1.material.color = myColor;
+        // meshRendererWall2.material.color = myColor;
+    }
+}
+</file>
+
+<file path="unity/yatzy/Assets/Scripts/Connection.cs">
+using System;
+using System.Collections;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using UnityEngine;
+
+using NativeWebSocket;
+
+public class Connection : MonoBehaviour
+{
+  WebSocket websocket;
+  private readonly ConcurrentQueue<Action> _actions = new ConcurrentQueue<Action>(); 
+  bool isOnline = false;
+  // Start is called before the first frame update
+  async void Start()
+  {
+    // websocket = new WebSocket("ws://echo.websocket.org");
+    websocket = isOnline ? new WebSocket("wss://clientsystem.net/ws") : new WebSocket("ws://localhost:8001");
+
+    websocket.OnOpen += () =>
+    {
+      Debug.Log("Connection open!");
+    };
+
+    websocket.OnError += (e) =>
+    {
+      Debug.Log("Error! " + e);
+    };
+
+    websocket.OnClose += (e) =>
+    {
+      Debug.Log("Connection closed!");
+    };
+
+    websocket.OnMessage += (bytes) =>
+    {
+      // Reading a plain text message
+      var message = System.Text.Encoding.UTF8.GetString(bytes);
+      Debug.Log("Received OnMessage! (" + bytes.Length + " bytes) " + message);
+      _actions.Enqueue(() => GameObject.Find("GameManager").GetComponent<GameManagerScript>().flutterMessage(message));
+    };
+
+    // Keep sending messages at every 0.3s
+    //InvokeRepeating("SendWebSocketMessage", 0.0f, 0.3f);
+
+    await websocket.Connect();
+  }
+
+  void Update()
+  {
+    // Work the dispatched actions on the Unity main thread
+    while(_actions.Count > 0)
+    {
+        if(_actions.TryDequeue(out var action))
+        {
+            action?.Invoke();
+        }
+    }
+
+    #if !UNITY_WEBGL || UNITY_EDITOR
+      websocket.DispatchMessageQueue();
+    #endif
+  }
+
+  // async void SendWebSocketMessage()
+  // {
+  //   if (websocket.State == WebSocketState.Open)
+  //   {
+  //     // Sending bytes
+  //     await websocket.Send(new byte[] { 10, 20, 30 });
+
+  //     // Sending plain text
+  //     await websocket.SendText("plain text message");
+  //   }
+  // }
+
+  private async void OnApplicationQuit()
+  {
+    await websocket.Close();
+  }
+}
+</file>
+
+<file path="unity/yatzy/Assets/Scripts/DiceCheckZoneScript.cs">
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class DiceCheckZoneScript : MonoBehaviour {
+
+	private Vector3 vel;
+	private Vector3 angVel;
+
+	void OnTriggerStay(Collider col)
+	{
+		if (col.gameObject.GetComponentInParent<DiceScript>().GetDiceNumber() == 0) {
+			vel = col.gameObject.GetComponentInParent<Rigidbody>().linearVelocity;
+			angVel = col.gameObject.GetComponentInParent<Rigidbody>().angularVelocity;
+			//if (vel.x < 1e-7f && vel.y < 1e-7f && vel.z < 1e-7f && angVel.x < 1e-7f && angVel.y < 1e-7f && angVel.z < 1e-7f)
+			if (vel.x == 0f && vel.y == 0f && vel.z == 0f && angVel.x == 0f && angVel.y == 0f && angVel.z == 0f)
+			{
+				// Check to see rotation in plane direction is multiple of 90 degrees i.e. lies flat.
+				Vector3 rot = col.gameObject.GetComponentInParent<Rigidbody>().rotation.eulerAngles;
+				
+				// Allow up to 25degree deviation it's still clear which side is top, also check for the negative version of angles :)
+					if (Mathf.Abs(rot.x % 90.0f) < 35.0f && Mathf.Abs(rot.z % 90.0f) < 35.0f ||
+					Mathf.Abs(90f-rot.x % 90.0f) < 35.0f && Mathf.Abs(rot.z % 90.0f) < 35.0f ||
+					Mathf.Abs(rot.x % 90.0f) < 35.0f && Mathf.Abs(90f-rot.z % 90.0f) < 35.0f ||
+					Mathf.Abs(90f-rot.x % 90.0f) < 35.0f && Mathf.Abs(90f-rot.z % 90.0f) < 35.0f) {
+					switch (col.gameObject.name) {
+					case "Side1":
+
+						col.gameObject.GetComponentInParent<DiceScript>().SetDiceNumber(6);
+						break;
+					case "Side2":
+						col.gameObject.GetComponentInParent<DiceScript>().SetDiceNumber(5);
+						break;
+					case "Side3":
+						col.gameObject.GetComponentInParent<DiceScript>().SetDiceNumber(4);
+						break;
+					case "Side4":
+						col.gameObject.GetComponentInParent<DiceScript>().SetDiceNumber(3);
+						break;
+					case "Side5":
+						col.gameObject.GetComponentInParent<DiceScript>().SetDiceNumber(2);
+						break;
+					case "Side6":
+						col.gameObject.GetComponentInParent<DiceScript>().SetDiceNumber(1);
+						break;
+					} 
+				} else {
+					// Debug.Log("Failed Throw!!!!!!!!!!!!!!!!!!!!!!!");
+					// Debug.Log("rot.x: " + rot.x.ToString() + " rot.y: " + rot.y.ToString() + " rot.z: " + rot.z.ToString());
+					// Debug.Log(col.gameObject.name);
+				}
+			}			
+		}
+	}
+}
+</file>
+
+<file path="unity/yatzy/Assets/Scripts/DiceScript.cs">
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class DiceScript : MonoBehaviour {
+
+	public int diceNumber;
+	public Vector3 originalPosition;
+	public Vector3 cupPosition;
+	public Vector3 startPosition;
+	public bool respondsToClicks;
+	public bool isGreen;
+	public bool isBlue;
+	public bool isActive;
+	
+	void Awake() {
+		originalPosition = transform.position;
+		diceNumber = 0;
+		respondsToClicks = false;
+		isActive = false;
+	}
+	
+	
+	void Update () {
+		
+	}
+
+	void OnMouseDown(){
+		if (respondsToClicks) {
+			if (isGreen) {
+				// Put current dice in storage
+				transform.position = originalPosition;
+				// Move blue dice to start position
+				GameObject go = GameObject.Find(transform.name.Replace('G', 'B'));
+				go.transform.position = go.GetComponent<DiceScript>().startPosition;
+				// rotate it right
+				Vector3 rot = transform.rotation.eulerAngles;
+                go.transform.rotation = Quaternion.Euler(rot.x, rot.y, rot.z);	
+				go.GetComponent<DiceScript>().isActive = true;			
+			} else {
+				// Put current dice in storage
+				transform.position = originalPosition;
+				// Move blue dice to start position
+				GameObject go = GameObject.Find(transform.name.Replace('B', 'G'));
+				go.transform.position = go.GetComponent<DiceScript>().startPosition;
+				// rotate it right
+				Vector3 rot = transform.rotation.eulerAngles;
+                go.transform.rotation = Quaternion.Euler(rot.x, rot.y, rot.z);
+				isActive = false;			
+			}
+		}
+	}
+
+	public int GetDiceNumber() {
+		return diceNumber;
+	}
+	public void SetDiceNumber(int number) {
+		diceNumber = number;
+	}
+
+}
+</file>
+
+<file path="unity/yatzy/Assets/Scripts/GameManagerScript.cs">
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using FlutterUnityIntegration;
+using Random=UnityEngine.Random;
+
+public class GameManagerScript : MonoBehaviour 
+{
+
+    public class jsonCommunicator{
+        public string actionUnity;
+        public List<int> diceResult;
+
+        public jsonCommunicator(string _actionUnity, List<int> _diceResult) {
+            actionUnity = _actionUnity;
+            diceResult = new List<int>(_diceResult);
+        }
+    }
+
+    
+    //UnityMessageManager unityMessageManager;
+    
+    public bool throwDices = false;
+    public bool throwActive;
+
+    private static int maxNrDices = 10;
+    GameObject []go;
+    GameObject []goG;
+    GameObject []goB;
+    GameObject goSnow;
+    bool goSnowActive = false;
+    private static List<int> diceResult;
+    //private static int []diceResult;
+    static Rigidbody rb;
+    
+    private float c;
+    private int nrDices = 5;
+    private int nrThrows = 3;
+    private int nrThrowsRemaining = 3;
+    private Animator animatorCup;
+    private Animator animatorCat;
+    private Animator animatorDog;
+    private float timeFromThrownDices;
+    private bool rethrow = false;
+    private bool dicesActive = false;
+   
+    void Start()
+    {
+        Debug.Log(SystemInfo.graphicsDeviceType);
+        gameObject.AddComponent<UnityMessageManager>();
+        throwActive = true;
+        goSnow = new GameObject();
+        goSnow = GameObject.Find("Snow");
+        for(int i = 0; i < goSnow.transform.childCount; i++)
+        {
+            GameObject Go = goSnow.transform.GetChild(i).gameObject;
+            Debug.Log(Go.GetComponent<ParticleSystem>().main.startSize.constant);
+        }
+        goSnow.SetActive(false);
+        Time.timeScale = 2f;
+        //unityMessageManager = GetComponent<UnityMessageManager>();
+        go = new GameObject[maxNrDices];
+        goG = new GameObject[maxNrDices];
+        goB = new GameObject[maxNrDices];
+        diceResult = new List<int>(new int[maxNrDices]);
+        
+        go[0] = GameObject.Find("Dice1");
+        goG[0] = GameObject.Find("DiceG1");
+        goB[0] = GameObject.Find("DiceB1");
+        for (int i=1; i<maxNrDices; i++) {
+            go[i] = GameObject.Find("Dice"+(i+1).ToString());
+            goG[i] = GameObject.Find("DiceG"+(i+1).ToString());
+            goB[i] = GameObject.Find("DiceB"+(i+1).ToString());
+        }
+
+        InitDices();
+
+        float sep = 1.1f;
+        float height = 2f;
+        go[0].GetComponent<DiceScript>().cupPosition = new Vector3(0,1+height,0);
+        go[1].GetComponent<DiceScript>().cupPosition = new Vector3(sep,1+height,0);
+        go[2].GetComponent<DiceScript>().cupPosition = new Vector3(-sep,1+height,0);
+        go[3].GetComponent<DiceScript>().cupPosition = new Vector3(0,1+height,sep);
+        go[4].GetComponent<DiceScript>().cupPosition = new Vector3(0,1+height,-sep);
+        go[5].GetComponent<DiceScript>().cupPosition = new Vector3(sep,2+height,sep);
+        go[6].GetComponent<DiceScript>().cupPosition = new Vector3(-sep,2+height,sep);
+        go[7].GetComponent<DiceScript>().cupPosition = new Vector3(sep,2+height,-sep);
+        go[8].GetComponent<DiceScript>().cupPosition = new Vector3(-sep,2+height,-sep);
+        go[9].GetComponent<DiceScript>().cupPosition = new Vector3(0,4+height,0);
+
+        // anim = GameObject.Find("Empire_Cup").GetComponent<Animator>();
+        animatorCup = GameObject.Find("Empire_Cup").GetComponent<Animator>();
+        animatorCup.speed = 1f;
+        animatorCat = GameObject.Find("cat_Walk").GetComponent<Animator>();
+        animatorCat.Play("Walk");
+        animatorDog = GameObject.Find("DogPBR").GetComponent<Animator>();
+        animatorDog.Play("Attack01");
+        Physics.gravity = new Vector3(0, -20f, 0);
+    }
+
+    void InitDices(bool initRotation = true) {
+
+        // Reset all positions first
+        for (int i=0; i<maxNrDices; i++) {
+            go[i].transform.position = go[i].GetComponent<DiceScript>().originalPosition;
+            goG[i].transform.position = goG[i].GetComponent<DiceScript>().originalPosition;
+            goB[i].transform.position = goB[i].GetComponent<DiceScript>().originalPosition;
+        }
+
+        float c = (20f - nrDices) / (nrDices + 1f);
+        go[0].transform.position = new Vector3(GameObject.Find("StartPlane").transform.position.x, 
+                                                GameObject.Find("StartPlane").transform.position.y+2.5f, 
+                                                GameObject.Find("StartPlane").transform.position.z+c+0.5f-10f);
+        if (initRotation){
+            go[0].transform.rotation = Quaternion.Euler(0f, 90f, 0f);
+        }                                        
+        
+        go[0].GetComponent<DiceScript>().startPosition = go[0].transform.position;
+        goG[0].GetComponent<DiceScript>().startPosition = go[0].transform.position;
+        goB[0].GetComponent<DiceScript>().startPosition = go[0].transform.position;
+        goB[0].GetComponent<DiceScript>().isActive = false;
+        
+        for (int i=1; i<nrDices; i++) {
+            go[i].transform.position = new Vector3(go[i-1].transform.position.x, go[i-1].transform.position.y, go[i-1].transform.position.z + 1 + c );
+            if (initRotation){
+                go[i].transform.rotation = Quaternion.Euler(0f, 90f, 0f);
+            }
+            go[i].GetComponent<DiceScript>().startPosition = go[i].transform.position;
+            goG[i].GetComponent<DiceScript>().startPosition = go[i].transform.position;
+            goB[i].GetComponent<DiceScript>().startPosition = go[i].transform.position;
+            goB[i].GetComponent<DiceScript>().isActive = false;
+        }
+
+        for (int i=0; i<nrDices; i++) {
+            diceResult[i] = 0; 
+        }
+    }
+
+    void SetDices(List<int> dices) {
+        for(var i=0;i<dices.Count;i++) {
+            go[i].transform.rotation = Quaternion.Euler(0f, 90f, 0f);
+            switch (dices[i]) {
+                case 1:
+                    go[i].transform.rotation = Quaternion.Euler(90f, 90f, 0f);
+                    break;
+                case 2:
+                    go[i].transform.rotation = Quaternion.Euler(0f, 90f, 270f);
+                    break;
+                case 4:
+                    go[i].transform.rotation = Quaternion.Euler(180f, 90f, 0f);
+                    break;
+                case 5:
+                    go[i].transform.rotation = Quaternion.Euler(0f, 90f, 90f);
+                    break;
+                case 6:
+                    go[i].transform.rotation = Quaternion.Euler(270f, 90f, 0f);
+                    break;
+            }
+        }
+    }
+    
+    void Update()
+    {
+
+        bool isFinished = true;
+        for (int i=0; i<nrDices; i++) {
+            diceResult[i] = go[i].GetComponent<DiceScript>().GetDiceNumber();
+            isFinished = isFinished && diceResult[i] != 0;
+        }
+
+        if (isFinished && dicesActive && !rethrow) {
+            dicesActive = false;
+            for (int i=0; i<nrDices; i++) {
+                // Position green dices on start bar if not HOLD i.e blue dice there
+                if (!goB[i].GetComponent<DiceScript>().isActive) {
+                    //rb = goB[i].GetComponent<Rigidbody>();
+                    //rb.angularVelocity = new Vector3(0, 0, 0);
+                    goG[i].transform.position = goG[i].GetComponent<DiceScript>().startPosition;
+                    Vector3 rot = go[i].GetComponentInParent<Rigidbody>().rotation.eulerAngles;
+                    goG[i].transform.rotation = Quaternion.Euler(rot.x, 90f, rot.z);
+                    goG[i].GetComponent<DiceScript>().respondsToClicks = true;
+                    goB[i].GetComponent<DiceScript>().respondsToClicks = true;
+                } 
+            }
+            var json = new jsonCommunicator("results", diceResult.GetRange(0,nrDices));
+
+            string jsonStr = JsonConvert.SerializeObject(json).ToString();
+            nrThrowsRemaining -= 1;
+            if (nrThrowsRemaining == 0) {
+                InitDices(false);  
+                throwActive = false;                      
+            }
+            UnityMessageManager.Instance.SendMessageToFlutter(jsonStr); 
+        }
+
+       
+        // Put Dices in Cup
+        if ((Time.time - timeFromThrownDices > 7f) && dicesActive || (throwDices && nrThrowsRemaining > 0) || Input.GetKeyDown (KeyCode.O)) {
+           Debug.Log(Time.time - timeFromThrownDices);
+            dicesActive = true;
+            throwDices = false;
+            for (int i = 0; i < nrDices; i++) {
+                // Check to see which blue dice is on start block HOLD them i.e put corresponding red in storage
+                // If not blue put green dice in storage and red in cup
+                if (goB[i].GetComponent<DiceScript>().isActive) {
+                    go[i].transform.position = go[i].GetComponent<DiceScript>().originalPosition;
+                } else {
+                    goG[i].transform.position = goG[i].GetComponent<DiceScript>().originalPosition;
+                    go[i].transform.position = go[i].GetComponent<DiceScript>().cupPosition + GameObject.Find("Empire_Cup").transform.position;
+                    go[i].transform.rotation = Quaternion.identity;
+                    rb = go[i].GetComponent<Rigidbody>();
+                    rb.angularVelocity = new Vector3(Random.Range (50, 80), Random.Range (50, 80), Random.Range (50, 80));
+                    go[i].GetComponent<DiceScript>().SetDiceNumber(0);
+                    diceResult[i] = 0;
+                }
+            }
+            
+            animatorCup.Play("move");
+            timeFromThrownDices = Time.time;
+            rethrow = false;
+        }
+    }
+
+    public void SetNrDices(string strNrDices) {
+        nrDices = int.Parse(strNrDices);
+        InitDices();
+    }
+    public void flutterMessage(String json) {
+        GameObject localGameObject = new GameObject();
+        Debug.Log(json);
+        JObject o = JObject.Parse(json);
+        Debug.Log(o);
+        string action = (string)o["actionUnity"];
+        if (action == "unityIdentifier") {
+            UnityMessageManager.Instance.SendMessageToFlutter(json);
+        } else if (action == "throwDices") {
+            throwDices = true;
+        } else if (action == "start") {
+            Debug.Log("start");
+            throwActive = true;
+        } else if (action == "reset") {
+            nrDices = (int)o["nrDices"];
+            nrThrows = (int)o["nrThrows"];
+            nrThrowsRemaining = nrThrows;
+            InitDices();
+            throwActive = false;
+        } else if (action == "setProperty") {
+            string property = (string)o["property"];
+            
+            localGameObject = GameObject.Find("CircleLight");
+            switch(property){
+                case "Color":
+                    localGameObject.GetComponent<CircularMotionScript>().myColor = new Color((float)o["colors"][0], (float)o["colors"][1], (float)o["colors"][2], (float)o["colors"][3]);
+                break;
+                case "Transparency":
+                    //localGameObject.GetComponent<CircularMotionScript>().transparentMode = (bool)o["bool"];
+                    Debug.Log((bool)o["bool"]);
+                    //Debug.Log(localGameObject.GetComponent<CircularMotionScript>().transparentMode);
+                break;
+                case "LightMotion":
+                    localGameObject.GetComponent<CircularMotionScript>().lightMotion = (bool)o["bool"];
+                    Debug.Log((bool)o["bool"]);
+                    Debug.Log(localGameObject.GetComponent<CircularMotionScript>().lightMotion);
+                break;
+                case "Dices":
+                    InitDices();
+                    var temp = (JArray)o["Dices"];
+                    Debug.Log(temp);
+                    List<int> gotDices = new List<int>(new int[temp.Count]);
+                    
+                    for(var i=0;i<temp.Count;i++){
+                        gotDices[i] = (int)o["Dices"][i];
+                    }
+                    Debug.Log(gotDices);
+                    SetDices(gotDices);
+                    break;
+                case "SnowEffect":
+                    
+                    goSnowActive = (bool)o["bool"];
+                    goSnow.SetActive(goSnowActive);
+                    break;
+
+            }
+           
+        }
+      
+    }
+
+   }
+</file>
+
+<file path="unity/yatzy/Assets/Scripts/ThrowDices.cs">
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class ThrowDices : MonoBehaviour
+{
+    GameObject gameManager;
+    // Start is called before the first frame update
+    void Awake()
+    {
+        gameManager = GameObject.Find("GameManager");
+    }
+    void OnMouseDown(){
+        Debug.Log("MouseDown");
+            
+        if (gameManager.GetComponent<GameManagerScript>().throwActive) {
+            gameManager.GetComponent<GameManagerScript>().throwDices = true;
+        }
+    }
+    // Update is called once per frame
+    void Update()
+    {
+        
+    }
+}
+</file>
+
+<file path="unity/yatzy/Assets/WebSocket/WebSocket.cs">
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.WebSockets;
+using System.Runtime.CompilerServices;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+
+using AOT;
+using System.Runtime.InteropServices;
+using UnityEngine;
+using System.Collections;
+
+public class MainThreadUtil : MonoBehaviour
+{
+    public static MainThreadUtil Instance { get; private set; }
+    public static SynchronizationContext synchronizationContext { get; private set; }
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    public static void Setup()
+    {
+        Instance = new GameObject("MainThreadUtil")
+            .AddComponent<MainThreadUtil>();
+        synchronizationContext = SynchronizationContext.Current;
+    }
+
+    public static void Run(IEnumerator waitForUpdate)
+    {
+        synchronizationContext.Post(_ => Instance.StartCoroutine(
+                    waitForUpdate), null);
+    }
+
+    void Awake()
+    {
+        gameObject.hideFlags = HideFlags.HideAndDontSave;
+        DontDestroyOnLoad(gameObject);
+    }
+}
+
+public class WaitForUpdate : CustomYieldInstruction
+{
+    public override bool keepWaiting
+    {
+        get { return false; }
+    }
+
+    public MainThreadAwaiter GetAwaiter()
+    {
+        var awaiter = new MainThreadAwaiter();
+        MainThreadUtil.Run(CoroutineWrapper(this, awaiter));
+        return awaiter;
+    }
+
+    public class MainThreadAwaiter : INotifyCompletion
+    {
+        Action continuation;
+
+        public bool IsCompleted { get; set; }
+
+        public void GetResult() { }
+
+        public void Complete()
+        {
+            IsCompleted = true;
+            continuation?.Invoke();
+        }
+
+        void INotifyCompletion.OnCompleted(Action continuation)
+        {
+            this.continuation = continuation;
+        }
+    }
+
+    public static IEnumerator CoroutineWrapper(IEnumerator theWorker, MainThreadAwaiter awaiter)
+    {
+        yield return theWorker;
+        awaiter.Complete();
+    }
+}
+
+namespace NativeWebSocket
+{
+    public delegate void WebSocketOpenEventHandler();
+    public delegate void WebSocketMessageEventHandler(byte[] data);
+    public delegate void WebSocketErrorEventHandler(string errorMsg);
+    public delegate void WebSocketCloseEventHandler(WebSocketCloseCode closeCode);
+
+    public enum WebSocketCloseCode
+    {
+        /* Do NOT use NotSet - it's only purpose is to indicate that the close code cannot be parsed. */
+        NotSet = 0,
+        Normal = 1000,
+        Away = 1001,
+        ProtocolError = 1002,
+        UnsupportedData = 1003,
+        Undefined = 1004,
+        NoStatus = 1005,
+        Abnormal = 1006,
+        InvalidData = 1007,
+        PolicyViolation = 1008,
+        TooBig = 1009,
+        MandatoryExtension = 1010,
+        ServerError = 1011,
+        TlsHandshakeFailure = 1015
+    }
+
+    public enum WebSocketState
+    {
+        Connecting,
+        Open,
+        Closing,
+        Closed
+    }
+
+    public interface IWebSocket
+    {
+        event WebSocketOpenEventHandler OnOpen;
+        event WebSocketMessageEventHandler OnMessage;
+        event WebSocketErrorEventHandler OnError;
+        event WebSocketCloseEventHandler OnClose;
+
+        WebSocketState State { get; }
+    }
+
+    public static class WebSocketHelpers
+    {
+        public static WebSocketCloseCode ParseCloseCodeEnum(int closeCode)
+        {
+
+            if (WebSocketCloseCode.IsDefined(typeof(WebSocketCloseCode), closeCode))
+            {
+                return (WebSocketCloseCode)closeCode;
+            }
+            else
+            {
+                return WebSocketCloseCode.Undefined;
+            }
+
+        }
+
+        public static WebSocketException GetErrorMessageFromCode(int errorCode, Exception inner)
+        {
+            switch (errorCode)
+            {
+                case -1:
+                    return new WebSocketUnexpectedException("WebSocket instance not found.", inner);
+                case -2:
+                    return new WebSocketInvalidStateException("WebSocket is already connected or in connecting state.", inner);
+                case -3:
+                    return new WebSocketInvalidStateException("WebSocket is not connected.", inner);
+                case -4:
+                    return new WebSocketInvalidStateException("WebSocket is already closing.", inner);
+                case -5:
+                    return new WebSocketInvalidStateException("WebSocket is already closed.", inner);
+                case -6:
+                    return new WebSocketInvalidStateException("WebSocket is not in open state.", inner);
+                case -7:
+                    return new WebSocketInvalidArgumentException("Cannot close WebSocket. An invalid code was specified or reason is too long.", inner);
+                default:
+                    return new WebSocketUnexpectedException("Unknown error.", inner);
+            }
+        }
+    }
+
+    public class WebSocketException : Exception
+    {
+        public WebSocketException() { }
+        public WebSocketException(string message) : base(message) { }
+        public WebSocketException(string message, Exception inner) : base(message, inner) { }
+    }
+
+    public class WebSocketUnexpectedException : WebSocketException
+    {
+        public WebSocketUnexpectedException() { }
+        public WebSocketUnexpectedException(string message) : base(message) { }
+        public WebSocketUnexpectedException(string message, Exception inner) : base(message, inner) { }
+    }
+
+    public class WebSocketInvalidArgumentException : WebSocketException
+    {
+        public WebSocketInvalidArgumentException() { }
+        public WebSocketInvalidArgumentException(string message) : base(message) { }
+        public WebSocketInvalidArgumentException(string message, Exception inner) : base(message, inner) { }
+    }
+
+    public class WebSocketInvalidStateException : WebSocketException
+    {
+        public WebSocketInvalidStateException() { }
+        public WebSocketInvalidStateException(string message) : base(message) { }
+        public WebSocketInvalidStateException(string message, Exception inner) : base(message, inner) { }
+    }
+
+    public class WaitForBackgroundThread
+    {
+        public ConfiguredTaskAwaitable.ConfiguredTaskAwaiter GetAwaiter()
+        {
+            return Task.Run(() => { }).ConfigureAwait(false).GetAwaiter();
+        }
+    }
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+
+  /// <summary>
+  /// WebSocket class bound to JSLIB.
+  /// </summary>
+  public class WebSocket : IWebSocket {
+
+    /* WebSocket JSLIB functions */
+    [DllImport ("__Internal")]
+    public static extern int WebSocketConnect (int instanceId);
+
+    [DllImport ("__Internal")]
+    public static extern int WebSocketClose (int instanceId, int code, string reason);
+
+    [DllImport ("__Internal")]
+    public static extern int WebSocketSend (int instanceId, byte[] dataPtr, int dataLength);
+
+    [DllImport ("__Internal")]
+    public static extern int WebSocketSendText (int instanceId, string message);
+
+    [DllImport ("__Internal")]
+    public static extern int WebSocketGetState (int instanceId);
+
+    protected int instanceId;
+
+    public event WebSocketOpenEventHandler OnOpen;
+    public event WebSocketMessageEventHandler OnMessage;
+    public event WebSocketErrorEventHandler OnError;
+    public event WebSocketCloseEventHandler OnClose;
+
+    public WebSocket (string url, Dictionary<string, string> headers = null) {
+      if (!WebSocketFactory.isInitialized) {
+        WebSocketFactory.Initialize ();
+      }
+
+      int instanceId = WebSocketFactory.WebSocketAllocate (url);
+      WebSocketFactory.instances.Add (instanceId, this);
+
+      this.instanceId = instanceId;
+    }
+
+    public WebSocket (string url, string subprotocol, Dictionary<string, string> headers = null) {
+      if (!WebSocketFactory.isInitialized) {
+        WebSocketFactory.Initialize ();
+      }
+
+      int instanceId = WebSocketFactory.WebSocketAllocate (url);
+      WebSocketFactory.instances.Add (instanceId, this);
+
+      WebSocketFactory.WebSocketAddSubProtocol(instanceId, subprotocol);
+
+      this.instanceId = instanceId;
+    }
+
+    public WebSocket (string url, List<string> subprotocols, Dictionary<string, string> headers = null) {
+      if (!WebSocketFactory.isInitialized) {
+        WebSocketFactory.Initialize ();
+      }
+
+      int instanceId = WebSocketFactory.WebSocketAllocate (url);
+      WebSocketFactory.instances.Add (instanceId, this);
+
+      foreach (string subprotocol in subprotocols) {
+        WebSocketFactory.WebSocketAddSubProtocol(instanceId, subprotocol);
+      }
+
+      this.instanceId = instanceId;
+    }
+
+    ~WebSocket () {
+      WebSocketFactory.HandleInstanceDestroy (this.instanceId);
+    }
+
+    public int GetInstanceId () {
+      return this.instanceId;
+    }
+
+    public Task Connect () {
+      int ret = WebSocketConnect (this.instanceId);
+
+      if (ret < 0)
+        throw WebSocketHelpers.GetErrorMessageFromCode (ret, null);
+
+      return Task.CompletedTask;
+    }
+
+	public void CancelConnection () {
+		if (State == WebSocketState.Open)
+			Close (WebSocketCloseCode.Abnormal);
+	}
+
+    public Task Close (WebSocketCloseCode code = WebSocketCloseCode.Normal, string reason = null) {
+      int ret = WebSocketClose (this.instanceId, (int) code, reason);
+
+      if (ret < 0)
+        throw WebSocketHelpers.GetErrorMessageFromCode (ret, null);
+
+      return Task.CompletedTask;
+    }
+
+    public Task Send (byte[] data) {
+      int ret = WebSocketSend (this.instanceId, data, data.Length);
+
+      if (ret < 0)
+        throw WebSocketHelpers.GetErrorMessageFromCode (ret, null);
+
+      return Task.CompletedTask;
+    }
+
+    public Task SendText (string message) {
+      int ret = WebSocketSendText (this.instanceId, message);
+
+      if (ret < 0)
+        throw WebSocketHelpers.GetErrorMessageFromCode (ret, null);
+
+      return Task.CompletedTask;
+    }
+
+    public WebSocketState State {
+      get {
+        int state = WebSocketGetState (this.instanceId);
+
+        if (state < 0)
+          throw WebSocketHelpers.GetErrorMessageFromCode (state, null);
+
+        switch (state) {
+          case 0:
+            return WebSocketState.Connecting;
+
+          case 1:
+            return WebSocketState.Open;
+
+          case 2:
+            return WebSocketState.Closing;
+
+          case 3:
+            return WebSocketState.Closed;
+
+          default:
+            return WebSocketState.Closed;
+        }
+      }
+    }
+
+    public void DelegateOnOpenEvent () {
+      this.OnOpen?.Invoke ();
+    }
+
+    public void DelegateOnMessageEvent (byte[] data) {
+      this.OnMessage?.Invoke (data);
+    }
+
+    public void DelegateOnErrorEvent (string errorMsg) {
+      this.OnError?.Invoke (errorMsg);
+    }
+
+    public void DelegateOnCloseEvent (int closeCode) {
+      this.OnClose?.Invoke (WebSocketHelpers.ParseCloseCodeEnum (closeCode));
+    }
+
+  }
+
+#else
+
+    public class WebSocket : IWebSocket
+    {
+        public event WebSocketOpenEventHandler OnOpen;
+        public event WebSocketMessageEventHandler OnMessage;
+        public event WebSocketErrorEventHandler OnError;
+        public event WebSocketCloseEventHandler OnClose;
+
+        private Uri uri;
+        private Dictionary<string, string> headers;
+        private List<string> subprotocols;
+        private ClientWebSocket m_Socket = new ClientWebSocket();
+
+        private CancellationTokenSource m_TokenSource;
+        private CancellationToken m_CancellationToken;
+
+        private readonly object OutgoingMessageLock = new object();
+        private readonly object IncomingMessageLock = new object();
+
+        private bool isSending = false;
+        private List<ArraySegment<byte>> sendBytesQueue = new List<ArraySegment<byte>>();
+        private List<ArraySegment<byte>> sendTextQueue = new List<ArraySegment<byte>>();
+
+        public WebSocket(string url, Dictionary<string, string> headers = null)
+        {
+            uri = new Uri(url);
+
+            if (headers == null)
+            {
+                this.headers = new Dictionary<string, string>();
+            }
+            else
+            {
+                this.headers = headers;
+            }
+
+            subprotocols = new List<string>();
+
+            string protocol = uri.Scheme;
+            if (!protocol.Equals("ws") && !protocol.Equals("wss"))
+                throw new ArgumentException("Unsupported protocol: " + protocol);
+        }
+
+        public WebSocket(string url, string subprotocol, Dictionary<string, string> headers = null)
+        {
+            uri = new Uri(url);
+
+            if (headers == null)
+            {
+                this.headers = new Dictionary<string, string>();
+            }
+            else
+            {
+                this.headers = headers;
+            }
+
+            subprotocols = new List<string> {subprotocol};
+
+            string protocol = uri.Scheme;
+            if (!protocol.Equals("ws") && !protocol.Equals("wss"))
+                throw new ArgumentException("Unsupported protocol: " + protocol);
+        }
+
+        public WebSocket(string url, List<string> subprotocols, Dictionary<string, string> headers = null)
+        {
+            uri = new Uri(url);
+
+            if (headers == null)
+            {
+                this.headers = new Dictionary<string, string>();
+            }
+            else
+            {
+                this.headers = headers;
+            }
+
+            this.subprotocols = subprotocols;
+
+            string protocol = uri.Scheme;
+            if (!protocol.Equals("ws") && !protocol.Equals("wss"))
+                throw new ArgumentException("Unsupported protocol: " + protocol);
+        }
+
+        public void CancelConnection()
+        {
+            m_TokenSource?.Cancel();
+        }
+
+        public async Task Connect()
+        {
+            try
+            {
+                m_TokenSource = new CancellationTokenSource();
+                m_CancellationToken = m_TokenSource.Token;
+
+                m_Socket = new ClientWebSocket();
+
+                foreach (var header in headers)
+                {
+                    m_Socket.Options.SetRequestHeader(header.Key, header.Value);
+                }
+
+                foreach (string subprotocol in subprotocols) {
+                    m_Socket.Options.AddSubProtocol(subprotocol);
+                }
+
+                await m_Socket.ConnectAsync(uri, m_CancellationToken);
+                OnOpen?.Invoke();
+
+                await Receive();
+            }
+            catch (Exception ex)
+            {
+                OnError?.Invoke(ex.Message);
+                OnClose?.Invoke(WebSocketCloseCode.Abnormal);
+            }
+            finally
+            {
+                if (m_Socket != null)
+                {
+                    m_TokenSource.Cancel();
+                    m_Socket.Dispose();
+                }
+            }
+        }
+
+        public WebSocketState State
+        {
+            get
+            {
+                switch (m_Socket.State)
+                {
+                    case System.Net.WebSockets.WebSocketState.Connecting:
+                        return WebSocketState.Connecting;
+
+                    case System.Net.WebSockets.WebSocketState.Open:
+                        return WebSocketState.Open;
+
+                    case System.Net.WebSockets.WebSocketState.CloseSent:
+                    case System.Net.WebSockets.WebSocketState.CloseReceived:
+                        return WebSocketState.Closing;
+
+                    case System.Net.WebSockets.WebSocketState.Closed:
+                        return WebSocketState.Closed;
+
+                    default:
+                        return WebSocketState.Closed;
+                }
+            }
+        }
+
+        public Task Send(byte[] bytes)
+        {
+            // return m_Socket.SendAsync(buffer, WebSocketMessageType.Binary, true, CancellationToken.None);
+            return SendMessage(sendBytesQueue, WebSocketMessageType.Binary, new ArraySegment<byte>(bytes));
+        }
+
+        public Task SendText(string message)
+        {
+            var encoded = Encoding.UTF8.GetBytes(message);
+
+            // m_Socket.SendAsync(buffer, WebSocketMessageType.Text, true, CancellationToken.None);
+            return SendMessage(sendTextQueue, WebSocketMessageType.Text, new ArraySegment<byte>(encoded, 0, encoded.Length));
+        }
+
+        private async Task SendMessage(List<ArraySegment<byte>> queue, WebSocketMessageType messageType, ArraySegment<byte> buffer)
+        {
+            // Return control to the calling method immediately.
+            // await Task.Yield ();
+
+            // Make sure we have data.
+            if (buffer.Count == 0)
+            {
+                return;
+            }
+
+            // The state of the connection is contained in the context Items dictionary.
+            bool sending;
+
+            lock (OutgoingMessageLock)
+            {
+                sending = isSending;
+
+                // If not, we are now.
+                if (!isSending)
+                {
+                    isSending = true;
+                }
+            }
+
+            if (!sending)
+            {
+                // Lock with a timeout, just in case.
+                if (!Monitor.TryEnter(m_Socket, 1000))
+                {
+                    // If we couldn't obtain exclusive access to the socket in one second, something is wrong.
+                    await m_Socket.CloseAsync(WebSocketCloseStatus.InternalServerError, string.Empty, m_CancellationToken);
+                    return;
+                }
+
+                try
+                {
+                    // Send the message synchronously.
+                    var t = m_Socket.SendAsync(buffer, messageType, true, m_CancellationToken);
+                    t.Wait(m_CancellationToken);
+                }
+                finally
+                {
+                    Monitor.Exit(m_Socket);
+                }
+
+                // Note that we've finished sending.
+                lock (OutgoingMessageLock)
+                {
+                    isSending = false;
+                }
+
+                // Handle any queued messages.
+                await HandleQueue(queue, messageType);
+            }
+            else
+            {
+                // Add the message to the queue.
+                lock (OutgoingMessageLock)
+                {
+                    queue.Add(buffer);
+                }
+            }
+        }
+
+        private async Task HandleQueue(List<ArraySegment<byte>> queue, WebSocketMessageType messageType)
+        {
+            var buffer = new ArraySegment<byte>();
+            lock (OutgoingMessageLock)
+            {
+                // Check for an item in the queue.
+                if (queue.Count > 0)
+                {
+                    // Pull it off the top.
+                    buffer = queue[0];
+                    queue.RemoveAt(0);
+                }
+            }
+
+            // Send that message.
+            if (buffer.Count > 0)
+            {
+                await SendMessage(queue, messageType, buffer);
+            }
+        }
+
+        private List<byte[]> m_MessageList = new List<byte[]>();
+
+        // simple dispatcher for queued messages.
+        public void DispatchMessageQueue()
+        {
+            if (m_MessageList.Count == 0)
+            {
+                return;
+            }
+
+            List<byte[]> messageListCopy;
+
+            lock (IncomingMessageLock)
+            {
+                messageListCopy = new List<byte[]>(m_MessageList);
+                m_MessageList.Clear();
+            }
+
+            var len = messageListCopy.Count;
+            for (int i = 0; i < len; i++)
+            {
+                OnMessage?.Invoke(messageListCopy[i]);
+            }
+        }
+
+        public async Task Receive()
+        {
+            WebSocketCloseCode closeCode = WebSocketCloseCode.Abnormal;
+            await new WaitForBackgroundThread();
+
+            ArraySegment<byte> buffer = new ArraySegment<byte>(new byte[8192]);
+            try
+            {
+                while (m_Socket.State == System.Net.WebSockets.WebSocketState.Open)
+                {
+                    WebSocketReceiveResult result = null;
+
+                    using (var ms = new MemoryStream())
+                    {
+                        do
+                        {
+                            result = await m_Socket.ReceiveAsync(buffer, m_CancellationToken);
+                            ms.Write(buffer.Array, buffer.Offset, result.Count);
+                        }
+                        while (!result.EndOfMessage);
+
+                        ms.Seek(0, SeekOrigin.Begin);
+
+                        if (result.MessageType == WebSocketMessageType.Text)
+                        {
+                            lock (IncomingMessageLock)
+                            {
+                              m_MessageList.Add(ms.ToArray());
+                            }
+
+                            //using (var reader = new StreamReader(ms, Encoding.UTF8))
+                            //{
+                            //	string message = reader.ReadToEnd();
+                            //	OnMessage?.Invoke(this, new MessageEventArgs(message));
+                            //}
+                        }
+                        else if (result.MessageType == WebSocketMessageType.Binary)
+                        {
+                            lock (IncomingMessageLock)
+                            {
+                              m_MessageList.Add(ms.ToArray());
+                            }
+                        }
+                        else if (result.MessageType == WebSocketMessageType.Close)
+                        {
+                            await Close();
+                            closeCode = WebSocketHelpers.ParseCloseCodeEnum((int)result.CloseStatus);
+                            break;
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                m_TokenSource.Cancel();
+            }
+            finally
+            {
+                await new WaitForUpdate();
+                OnClose?.Invoke(closeCode);
+            }
+        }
+
+        public async Task Close()
+        {
+            if (State == WebSocketState.Open)
+            {
+                await m_Socket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, m_CancellationToken);
+            }
+        }
+    }
+#endif
+
+    ///
+    /// Factory
+    ///
+
+    /// <summary>
+    /// Class providing static access methods to work with JSLIB WebSocket or WebSocketSharp interface
+    /// </summary>
+    public static class WebSocketFactory
+    {
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+    /* Map of websocket instances */
+    public static Dictionary<Int32, WebSocket> instances = new Dictionary<Int32, WebSocket> ();
+
+    /* Delegates */
+    public delegate void OnOpenCallback (int instanceId);
+    public delegate void OnMessageCallback (int instanceId, System.IntPtr msgPtr, int msgSize);
+    public delegate void OnErrorCallback (int instanceId, System.IntPtr errorPtr);
+    public delegate void OnCloseCallback (int instanceId, int closeCode);
+
+    /* WebSocket JSLIB callback setters and other functions */
+    [DllImport ("__Internal")]
+    public static extern int WebSocketAllocate (string url);
+
+    [DllImport ("__Internal")]
+    public static extern int WebSocketAddSubProtocol (int instanceId, string subprotocol);
+
+    [DllImport ("__Internal")]
+    public static extern void WebSocketFree (int instanceId);
+
+    [DllImport ("__Internal")]
+    public static extern void WebSocketSetOnOpen (OnOpenCallback callback);
+
+    [DllImport ("__Internal")]
+    public static extern void WebSocketSetOnMessage (OnMessageCallback callback);
+
+    [DllImport ("__Internal")]
+    public static extern void WebSocketSetOnError (OnErrorCallback callback);
+
+    [DllImport ("__Internal")]
+    public static extern void WebSocketSetOnClose (OnCloseCallback callback);
+
+    /* If callbacks was initialized and set */
+    public static bool isInitialized = false;
+
+    /*
+     * Initialize WebSocket callbacks to JSLIB
+     */
+    public static void Initialize () {
+
+      WebSocketSetOnOpen (DelegateOnOpenEvent);
+      WebSocketSetOnMessage (DelegateOnMessageEvent);
+      WebSocketSetOnError (DelegateOnErrorEvent);
+      WebSocketSetOnClose (DelegateOnCloseEvent);
+
+      isInitialized = true;
+
+    }
+
+    /// <summary>
+    /// Called when instance is destroyed (by destructor)
+    /// Method removes instance from map and free it in JSLIB implementation
+    /// </summary>
+    /// <param name="instanceId">Instance identifier.</param>
+    public static void HandleInstanceDestroy (int instanceId) {
+
+      instances.Remove (instanceId);
+      WebSocketFree (instanceId);
+
+    }
+
+    [MonoPInvokeCallback (typeof (OnOpenCallback))]
+    public static void DelegateOnOpenEvent (int instanceId) {
+
+      WebSocket instanceRef;
+
+      if (instances.TryGetValue (instanceId, out instanceRef)) {
+        instanceRef.DelegateOnOpenEvent ();
+      }
+
+    }
+
+    [MonoPInvokeCallback (typeof (OnMessageCallback))]
+    public static void DelegateOnMessageEvent (int instanceId, System.IntPtr msgPtr, int msgSize) {
+
+      WebSocket instanceRef;
+
+      if (instances.TryGetValue (instanceId, out instanceRef)) {
+        byte[] msg = new byte[msgSize];
+        Marshal.Copy (msgPtr, msg, 0, msgSize);
+
+        instanceRef.DelegateOnMessageEvent (msg);
+      }
+
+    }
+
+    [MonoPInvokeCallback (typeof (OnErrorCallback))]
+    public static void DelegateOnErrorEvent (int instanceId, System.IntPtr errorPtr) {
+
+      WebSocket instanceRef;
+
+      if (instances.TryGetValue (instanceId, out instanceRef)) {
+
+        string errorMsg = Marshal.PtrToStringAuto (errorPtr);
+        instanceRef.DelegateOnErrorEvent (errorMsg);
+
+      }
+
+    }
+
+    [MonoPInvokeCallback (typeof (OnCloseCallback))]
+    public static void DelegateOnCloseEvent (int instanceId, int closeCode) {
+
+      WebSocket instanceRef;
+
+      if (instances.TryGetValue (instanceId, out instanceRef)) {
+        instanceRef.DelegateOnCloseEvent (closeCode);
+      }
+
+    }
+#endif
+
+        /// <summary>
+        /// Create WebSocket client instance
+        /// </summary>
+        /// <returns>The WebSocket instance.</returns>
+        /// <param name="url">WebSocket valid URL.</param>
+        public static WebSocket CreateInstance(string url)
+        {
+            return new WebSocket(url);
+        }
+
+    }
+
+}
+</file>
+
+</files>
