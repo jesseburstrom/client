@@ -15,15 +15,24 @@ export const updateTopScore = {
     var results = [];
     try {
 
-      // --- Simplification: Validate game type ---
-    const requestedType = req.body.type as string;
-    if (!['Ordinary', 'Mini', 'Maxi'].includes(requestedType)) {
-        console.warn(`[updateTopScore Route] Invalid game type requested: ${requestedType}`);
-        return res.status(400).json({ message: `Invalid game type: ${requestedType}` });
-    }
-    // --- End Simplification ---
+      // --- MODIFIED: Validate game type ---
+      const requestedType = req.body.type as string;
+      const allowedTypes = ['Ordinary', 'Maxi']; // Only allow these
+      if (!allowedTypes.includes(requestedType)) {
+          console.warn(`[updateTopScore Route] Invalid game type requested: ${requestedType}`);
+          return res.status(400).json({ message: `Invalid game type: ${requestedType}` });
+      }
+      // --- End Modification ---
 
-    const collectionName = requestedType.charAt(0).toLowerCase() + requestedType.slice(1);
+    // Simplified logic
+    let collectionName = '';
+    if (requestedType === 'Ordinary') {
+        collectionName = 'ordinary';
+    } else if (requestedType === 'Maxi') {
+        collectionName = 'maxi';
+    }
+    // No else needed due to validation above
+
     const collection = db.collection(collectionName);
 
     await collection.insertOne({ name: req.body.name, score: req.body.score });
@@ -32,11 +41,7 @@ export const updateTopScore = {
         .sort({ score: -1 })
         .toArray();
 
-      // --- Simplification: Broadcasting should ideally happen via the Service ---
-        // If topScoreServiceInstance is available:
-        // await topScoreServiceInstance.broadcastTopScores();
-        // Otherwise, the broadcast won't happen via this HTTP route. Clients relying
-        // on the WebSocket update ('onTopScoresUpdate') are preferred.
+      // Broadcasting handled by TopScoreService ideally
       res.status(200).json(results);
     } catch (e) {
       console.log(e);

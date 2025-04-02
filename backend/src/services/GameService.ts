@@ -596,6 +596,16 @@ export class GameService {
 
   // Modified createOrJoinGame to handle logging
   createOrJoinGame(gameType: string, maxPlayers: number, player: Player): Game {
+    // --- ADDED Validation ---
+    const allowedTypes = ['Ordinary', 'Maxi'];
+    if (!allowedTypes.includes(gameType)) {
+        console.error(`[GameService] Attempt to create/join invalid game type: ${gameType}`);
+        // How to handle? Throw error? Return null? For now, log and default.
+        // Ideally, the controller should prevent this. Let's default to Ordinary.
+        gameType = 'Ordinary';
+        console.warn(`[GameService] Defaulting to 'Ordinary' game type.`);
+    }
+    // --- End Validation ---
     this.handlePlayerStartingNewGame(player.id); // Handle leaving old games
 
     let game = this.findAvailableGame(gameType, maxPlayers);

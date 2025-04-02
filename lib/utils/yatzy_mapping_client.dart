@@ -10,13 +10,6 @@ const Map<String, List<String>> _gameTypeMappingsClient = {
     'House', 'Small Straight', 'Large Straight',
     'Chance', 'Yatzy', 'Total'
   ],
-  'Mini': [
-    'Ones', 'Twos', 'Threes', 'Fours', 'Fives', 'Sixes',
-    'Sum', 'Bonus',
-    'Pair', 'Two Pairs', 'Three of Kind',
-    'Small Straight', 'Middle Straight', 'Large Straight',
-    'Chance', 'Yatzy', 'Total'
-  ],
   'Maxi': [ // Includes MaxiR3, MaxiE3, MaxiRE3
     'Ones', 'Twos', 'Threes', 'Fours', 'Fives', 'Sixes',
     'Sum', 'Bonus',
@@ -30,7 +23,6 @@ const Map<String, List<String>> _gameTypeMappingsClient = {
 
 String _getBaseGameTypeClient(String gameType) {
   if (gameType.startsWith('Maxi')) return 'Maxi';
-  if (gameType == 'Mini') return 'Mini';
   return 'Ordinary'; // Default
 }
 

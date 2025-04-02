@@ -151,12 +151,16 @@ class _WidgetDicesState extends State<WidgetDices>
     }
 
     // Roll button
-
     listings.add(AnimatedBuilder(
       animation: app.gameDices.animationController,
       builder: (BuildContext context, Widget? widget) {
-        final tmp = Listener(
-            onPointerDown: (e) {
+        // ***** FIX: Determine if rolling should be allowed *****
+        final bool canRoll = !app.gameFinished && // Game not finished
+            app.callbackCheckPlayerToMove() && // Is my turn
+            app.gameDices.nrRolls < app.gameDices.nrTotalRolls; // Have rolls left
+        // ***** END FIX *****
+        final rollButtonWidget = Listener(
+            onPointerDown: canRoll ? (e) {
               if (!app.callbackCheckPlayerToMove()) {
                 return;
               }
@@ -165,7 +169,7 @@ class _WidgetDicesState extends State<WidgetDices>
 
                 app.gameDices.setState();
               }
-            },
+            } : null,
             child: Container(
               width: diceWidthHeight * (1 - app.gameDices.sizeAnimation.value / 2),
               height: diceWidthHeight * (1 - app.gameDices.sizeAnimation.value / 2),
@@ -184,7 +188,7 @@ class _WidgetDicesState extends State<WidgetDices>
           top: top +
               diceWidthHeight * (app.gameDices.sizeAnimation.value / 4) +
               1.5 * diceWidthHeight,
-          child: tmp,
+          child: rollButtonWidget,
         );
       },
     ));

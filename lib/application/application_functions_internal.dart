@@ -143,6 +143,19 @@ extension ApplicationFunctionsInternal on Application {
      colorBoard(); // Update colors immediately for selection feedback
      gameDices.clearDices(); // Clear dice display
 
+     // ***** FIX: Trigger board animation if enabled *****
+     if (boardAnimation) { // Check the flag from settings
+       print('🎬 Triggering board animation');
+       try {
+         // Animate the row that was just selected
+         animation.animateBoard(); // Pass player index + 1 (for the player row)
+         // Optionally animate the header row too?
+         // animation.animateBoardRow(0);
+       } catch (e) {
+         print("Error starting animation: $e");
+       }
+     }
+     // ***** END FIX *****
      // Trigger UI update
      try {
        context.read<SetStateCubit>().setState();

@@ -164,9 +164,6 @@ extension ApplicationCalcDiceValues on Application {
     var diceNr = calcDiceNr();
     for (var i = 5; i >= 0; i--) {
       if (diceNr[i] == gameDices.nrDices) {
-        if (gameDices.nrDices == 4) {
-          value = 25;
-        }
         if (gameDices.nrDices == 5) {
           value = 50;
         }
@@ -264,14 +261,6 @@ extension ApplicationCalcDiceValues on Application {
         value = 1 + 2 + 3 + 4 + 5;
       }
     }
-    if (gameType == "Mini") {
-      if ((diceNr[0] > 0) &&
-          (diceNr[1] > 0) &&
-          (diceNr[2] > 0) &&
-          (diceNr[3] > 0)) {
-        value = 1 + 2 + 3 + 4;
-      }
-    }
     if (gameType.startsWith("Maxi")) {
       if ((diceNr[0] > 0) &&
           (diceNr[1] > 0) &&
@@ -296,14 +285,6 @@ extension ApplicationCalcDiceValues on Application {
         value = 2 + 3 + 4 + 5 + 6;
       }
     }
-    if (gameType == "Mini") {
-      if ((diceNr[2] > 0) &&
-          (diceNr[3] > 0) &&
-          (diceNr[4] > 0) &&
-          (diceNr[5] > 0)) {
-        value = 3 + 4 + 5 + 6;
-      }
-    }
     if (gameType.startsWith("Maxi")) {
       if ((diceNr[1] > 0) &&
           (diceNr[2] > 0) &&
@@ -311,20 +292,6 @@ extension ApplicationCalcDiceValues on Application {
           (diceNr[4] > 0) &&
           (diceNr[5] > 0)) {
         value = 2 + 3 + 4 + 5 + 6;
-      }
-    }
-    return value;
-  }
-
-  int calcMiddleLadder() {
-    var value = 0;
-    var diceNr = calcDiceNr();
-    if (gameType == "Mini") {
-      if ((diceNr[1] > 0) &&
-          (diceNr[2] > 0) &&
-          (diceNr[3] > 0) &&
-          (diceNr[4] > 0)) {
-        value = 2 + 3 + 4 + 5;
       }
     }
     return value;

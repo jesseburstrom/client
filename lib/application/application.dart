@@ -49,7 +49,7 @@ class Application with LanguagesApplication  {
 
   var stackedWidgets = <Widget>[];
 
-  // "Ordinary" , "Mini", "Maxi"
+  // "Ordinary" ,"Maxi"
   var gameType = "Ordinary";
   var nrPlayers = 1;
 
@@ -132,27 +132,7 @@ class Application with LanguagesApplication  {
   }
 
   setAppText() {
-    if (gameType == "Mini") {
-      appText[0] = [
-        ones_,
-        twos_,
-        threes_,
-        fours_,
-        fives_,
-        sixes_,
-        sum_,
-        "$bonus_ ( $bonusAmount )",
-        pair_,
-        twoPairs_,
-        threeOfKind_,
-        smallStraight_,
-        middleStraight_,
-        largeStraight_,
-        chance_,
-        yatzy_,
-        totalSum_
-      ];
-    } else if (gameType.startsWith("Maxi")) {
+   if (gameType.startsWith("Maxi")) {
       appText[0] = [
         ones_,
         twos_,
@@ -208,28 +188,7 @@ class Application with LanguagesApplication  {
     playerToMove = 0;
     winnerId = -1;
 
-    if (gameType == "Mini") {
-      totalFields = 17;
-      gameDices.initDices(4);
-      bonusSum = 50;
-      bonusAmount = 25;
-
-      yatzyFunctions =
-          [calcOnes, calcTwos, calcThrees, calcFours, calcFives, calcSixes] +
-              [
-                zero,
-                zero,
-                calcPair,
-                calcTwoPairs,
-                calcThreeOfKind,
-                calcSmallLadder,
-                calcMiddleLadder,
-                calcLargeLadder,
-                calcChance,
-                calcYatzy,
-                zero
-              ];
-    } else if (gameType.startsWith("Maxi")) {
+    if (gameType.startsWith("Maxi")) {
       totalFields = 23;
       gameDices.initDices(6);
       bonusSum = 84;

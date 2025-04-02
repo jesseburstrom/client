@@ -9,14 +9,7 @@ const gameTypeMappings = {
     'House', 'Small Straight', 'Large Straight',
     'Chance', 'Yatzy', 'Total'
   ],
-  Mini: [
-    'Ones', 'Twos', 'Threes', 'Fours', 'Fives', 'Sixes',
-    'Sum', 'Bonus',
-    'Pair', 'Two Pairs', 'Three of Kind',
-    'Small Straight', 'Middle Straight', 'Large Straight',
-    'Chance', 'Yatzy', 'Total'
-  ],
-  Maxi: [ // Includes MaxiR3, MaxiE3, MaxiRE3 as they share the board structure
+  Maxi: [
     'Ones', 'Twos', 'Threes', 'Fours', 'Fives', 'Sixes',
     'Sum', 'Bonus',
     'Pair', 'Two Pairs', 'Three Pairs',
@@ -29,7 +22,6 @@ const gameTypeMappings = {
 
 function getBaseGameType(gameType: string): keyof typeof gameTypeMappings {
   if (gameType.startsWith('Maxi')) return 'Maxi';
-  if (gameType === 'Mini') return 'Mini';
   return 'Ordinary'; // Default
 }
 

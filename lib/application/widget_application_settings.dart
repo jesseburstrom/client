@@ -176,12 +176,10 @@ extension WidgetApplicationSettings on Application {
                 inputItems.widgetStringRadioButton( // Use widgetStringRadioButton
                     state,
                     [ // Simplified list of values
-                      "Mini",
                       "Ordinary",
                       "Maxi",
                     ],
                     [ // Simplified list of translations
-                      gameTypeMini_,
                       gameTypeOrdinary_,
                       gameTypeMaxi_,
                     ],
@@ -295,60 +293,6 @@ extension WidgetApplicationSettings on Application {
   onChangeUserName(value) {
     userName = textEditingController.text;
   }
-
-  // **** Updated Widget to use topScore instance ****
-  Widget _buildTopScoresWidget() {
-    // Read data directly from the global topScore instance
-    if (topScore.topScores.isEmpty) { // Assuming the internal list is named topScores
-      return const Padding(
-        padding: EdgeInsets.all(16.0),
-        child: Center(child: Text("Top Scores for current game type will appear here...")),
-      );
-    }
-
-    List<Widget> scoreWidgets = [];
-    // Add header using the current gameType
-    scoreWidgets.add(
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
-        child: Text(
-          'Top Scores: $gameType', // Use app.gameType for the header
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blueGrey),
-        ),
-      )
-    );
-
-    // Limit display to top N scores
-    int count = 0;
-    // Iterate through the list in the topScore instance
-    for (var scoreEntry in topScore.topScores) { 
-      if (count >= 10) break; // Limit to top 10
-      
-      // Ensure scoreEntry is a Map before accessing keys
-      if (scoreEntry is Map) {
-          scoreWidgets.add(
-            ListTile(
-              dense: true,
-              leading: Text('${count + 1}.', style: const TextStyle(fontWeight: FontWeight.bold)),
-              title: Text('${scoreEntry['name'] ?? 'Unknown'}'),
-              trailing: Text('${scoreEntry['score'] ?? '-'}', style: const TextStyle(fontWeight: FontWeight.bold)),
-            )
-          );
-          count++;
-      } else {
-          print("⚠️ Invalid score entry format in topScore.topScores: $scoreEntry");
-      }
-    }
-    
-    // Add padding at the bottom
-    scoreWidgets.add(const SizedBox(height: 10));
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: scoreWidgets,
-    );
-  }
-  // **** END UPDATED WIDGET ****
 
   Widget widgetScaffoldSettings(BuildContext context, Function state) {
     // Define a consistent color scheme for better visibility
@@ -546,12 +490,7 @@ extension WidgetApplicationSettings on Application {
                             ] +
                             // Available Games List
                             widgetWaitingGame(context) +
-                            // **** ADD Top Scores Section ****
-                            [ 
-                              const SizedBox(height: 20), // Add some spacing
-                              _buildTopScoresWidget(),
-                              const SizedBox(height: 20), // Add some spacing
-                            ] +
+
                             // Spectator View (if active)
                             (isSpectating ? [
                               // Full-screen spectator view

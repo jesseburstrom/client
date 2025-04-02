@@ -26,21 +26,6 @@ export const GameConfig: { [key: string]: GameTypeConfig } = {
         diceCount: 5,
         maxRolls: 3,
     },
-    Mini: {
-        cellLabels: [
-            'Ones', 'Twos', 'Threes', 'Fours', 'Fives', 'Sixes',
-            'Sum', 'Bonus',
-            'Pair', 'Two Pairs', 'Three of Kind',
-            'Small Straight', 'Middle Straight', 'Large Straight',
-            'Chance', 'Yatzy', 'Total'
-        ],
-        nonNumericCells: ['Sum', 'Bonus', 'Total'],
-        upperSectionEndIndex: 5,
-        bonusThreshold: 50, // Value from frontend code
-        bonusAmount: 25,    // Value from frontend code
-        diceCount: 4,       // Value from frontend code
-        maxRolls: 3,
-    },
     Maxi: {
         cellLabels: [
             'Ones', 'Twos', 'Threes', 'Fours', 'Fives', 'Sixes',
@@ -64,6 +49,5 @@ export const GameConfig: { [key: string]: GameTypeConfig } = {
 // Function to get base type (could be moved here)
 export function getBaseGameType(gameType: string): keyof typeof GameConfig {
   if (gameType.startsWith('Maxi')) return 'Maxi';
-  if (gameType === 'Mini') return 'Mini';
   return 'Ordinary';
 }

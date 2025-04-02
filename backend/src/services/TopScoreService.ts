@@ -6,7 +6,7 @@ import { Server } from 'socket.io';
 const DB_NAME = 'top-scores';
 
 // Define the supported game types explicitly
-const SUPPORTED_GAME_TYPES = ["Mini", "Ordinary", "Maxi"];
+const SUPPORTED_GAME_TYPES = ["Ordinary", "Maxi"];
 
 interface TopScoreEntry {
   name: string;
@@ -24,7 +24,7 @@ export class TopScoreService {
     return getDbConnection(DB_NAME);
   }
 
-  private getCollection(gameType: string): Collection<TopScoreEntry> {
+  private getCollection(gameType: string): Collection<TopScoreEntry> | null { // Added null return possibility
 
     // --- Simplification: Check if type is supported ---
     if (!SUPPORTED_GAME_TYPES.includes(gameType)) {

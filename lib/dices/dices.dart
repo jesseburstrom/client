@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/cupertino.dart';
 import '../input_items/input_items.dart';
+import '../startup.dart';
 import 'unity_communication.dart';
 import 'package:flutter_unity_widget/flutter_unity_widget.dart';
 
@@ -109,6 +110,17 @@ class Dices extends LanguagesDices  {
   }
 
   bool rollDices(BuildContext context) {
+    // ***** FIX: Add checks for game state *****
+    if (app.gameFinished) { // Check if the game is globally finished
+      print("🎲 Roll blocked: Game is finished.");
+      return false;
+    }
+
+    if (!callbackCheckPlayerToMove()) { // Check if it's actually my turn
+      print("🎲 Roll blocked: Not my turn.");
+      return false;
+    }
+    // ***** END FIX *****
     if (nrRolls < nrTotalRolls) {
       nrRolls += 1;
       var randomNumberGenerator = Random(DateTime.now().millisecondsSinceEpoch);
@@ -128,6 +140,7 @@ class Dices extends LanguagesDices  {
 
       return true;
     }
+    print("🎲 Roll blocked: No rolls left ($nrRolls/$nrTotalRolls).");
     return false;
   }
 

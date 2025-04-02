@@ -312,7 +312,8 @@ class _WidgetDisplayGameStatusState extends State<WidgetDisplayGameStatus> with 
                           fontWeight: FontWeight.bold,
                           fontSize: width / 5,
                           color: Colors.blueGrey))),
-              if (app.myPlayerId != -1)
+              // ***** FIX: Add !app.gameFinished check *****
+              if (!app.gameFinished && app.myPlayerId != -1)
                 SizedBox(
                     width: width,
                     height: height * 0.2,
@@ -323,6 +324,7 @@ class _WidgetDisplayGameStatusState extends State<WidgetDisplayGameStatus> with 
                             style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                                 color: Colors.blueGrey))))
+              // ***** END FIX *****
             ]));
     return myWidget;
   }

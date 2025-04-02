@@ -66,15 +66,12 @@ export class GameController {
   // ... (handleRequestGame, handleRequestJoinGame, handleRemoveGame remain similar, ensure they use GameService correctly)
   handleRequestGame(socket: Socket, data: any): void {
     const { gameType, nrPlayers, userName } = data;
-    // --- Simplification: Validate gameType ---
-    if (!['Ordinary', 'Mini', 'Maxi'].includes(gameType)) {
-         console.warn(`[GameController] Invalid gameType requested: ${gameType}. Defaulting to Ordinary? Or reject.`);
-         // Decide how to handle invalid type - reject or default
-         // For now, reject:
-         socket.emit('onServerMsg', { action: 'error', message: `Invalid game type: ${gameType}` });
-         return;
-    }
-    // --- End Simplification ---
+    const allowedTypes = ['Ordinary', 'Maxi']; // Only allow these
+        if (!allowedTypes.includes(gameType)) {
+             console.warn(`[GameController] Invalid gameType requested: ${gameType}. Rejecting.`);
+             socket.emit('onServerMsg', { action: 'error', message: `Invalid game type: ${gameType}. Allowed types are Ordinary, Maxi.` });
+             return;
+        }
     const player = PlayerFactory.createPlayer(socket.id, userName, gameType); // Pass gameType
 
     const game = this.gameService.createOrJoinGame(gameType, nrPlayers, player);
