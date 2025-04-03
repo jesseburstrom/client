@@ -29,7 +29,7 @@ app.use(cors({
 
 const httpServer = createServer(app);
 
-let isOnline: boolean = false;
+let isOnline: boolean = true;
 
 const localFlutterDir: string = "C:/Users/J/StudioProjects/flutter_system";
 const localReactDir: string = "C:/Users/J/Desktop/proj";
@@ -38,7 +38,8 @@ console.log("Starting Server...");
 
 if (isOnline) {
   //app.use(express.static(path.join(__dirname, "/build")));
-  app.use(express.static(path.join(__dirname, "/web")));
+  app.use("/new", express.static(path.join(__dirname, "web")));
+
 } else {
   //app.use(express.static(localReactDir + "/build"));
   app.use(express.static(localFlutterDir + "/build/web"));
