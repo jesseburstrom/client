@@ -17,7 +17,7 @@ var isDebug = true;
 // This is important for Socket.IO connections to work properly
 var localhost = isOnline 
     ? isDebug 
-        ? "https://fluttersystems.com" 
+        ? "https://fluttersystems.com/new"
         : "https://clientsystem.net" 
     : "http://localhost:8000";
 
