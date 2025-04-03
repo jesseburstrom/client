@@ -17,14 +17,10 @@ import { PlayerController } from "./controllers/PlayerController";
 import { ChatController } from "./controllers/ChatController";
 import { spectateGameRoute, initializeSpectateRoute } from "./routes/spectateGameRoute"; // <-- Import spectate route and initializer
 
-const PORT: number = 8000;
+const PORT: number = 8002;
 
 const app = express();
 
-// Important client has local ip (like 192.168.0.168) not 127.0.0.1 or localhost in browser to work on local developement across different computers
-// Local client connect should look like : http://192.168.0.168:8080 , or your local network ip instead of 192.168.0.168
-// Also with port number this should not be there ssl online since all is taken care of with nginx or similar routing port 80 to prefeerably 8080
-// for Https, socket.io and WebSocket. Requirement of Google Platform app engine flex only one port and is possible! but also convinient!
 app.use(cors({
   origin: '*', // This allows all origins
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -33,9 +29,6 @@ app.use(cors({
 
 const httpServer = createServer(app);
 
-// All 4 systems NodeJS, Flutter, Unity and React has this flag to differ from local developement and online publish
-// One improvement could be global system flag all systems look at so avoid funny errors missing to reset flag... :)
-// Got idea from meetup to signal in running code visually if offline/online good idea!
 let isOnline: boolean = false;
 
 const localFlutterDir: string = "C:/Users/J/StudioProjects/flutter_system";
