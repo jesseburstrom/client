@@ -88,7 +88,7 @@ class SocketService {
     try {
       // Initialize socket with proper options
       socket = io.io(
-        localhost, 
+        localhost,
         <String, dynamic>{
           'transports': ['websocket', 'polling'],
           'autoConnect': false, // Control connection manually
@@ -97,7 +97,8 @@ class SocketService {
           'reconnectionDelay': 1000,
           'reconnectionDelayMax': 5000,
           'timeout': 20000,
-          'extraHeaders': {'Content-Type': 'application/json'}
+          'extraHeaders': {'Content-Type': 'application/json'},
+          'path': '/socket.io/',
         }
       );
       

@@ -10,19 +10,11 @@ import 'dices/dices.dart';
 import 'input_items/input_items.dart';
 
 var isOnline = true;
-var isDebug = true;
 
-// Updated localhost URL to ensure it works with the current network configuration
-// In local development, use your actual machine's IP address instead of 192.168.0.168
-// This is important for Socket.IO connections to work properly
-var localhost = isOnline 
-    ? isDebug 
-        ? "https://fluttersystems.com/new"
-        : "https://clientsystem.net" 
-    : "http://localhost:8000";
+var localhost = isOnline
+        ? "https://fluttersystems.com"
+    : "http://localhost:8002";
 
-var localhostNET = "https://localhost:44357/api/Values";
-var localhostNETIO = "wss://localhost:44357/ws";
 var applicationStarted = false;
 var userName = "Yatzy";
 var userNames = [];
