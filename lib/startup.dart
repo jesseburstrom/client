@@ -9,7 +9,7 @@ import 'chat/chat.dart';
 import 'dices/dices.dart';
 import 'input_items/input_items.dart';
 
-var isOnline = false;
+var isOnline = true;
 var isDebug = true;
 
 // Updated localhost URL to ensure it works with the current network configuration
