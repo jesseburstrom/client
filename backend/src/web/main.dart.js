@@ -94690,7 +94690,7 @@ A.V(r+"] Initiating connection to server: "+$.aEO)
 try{q=$.aEO
 p=t.N
 o=t.z
-n=A.n(["transports",A.b(["websocket","polling"],t.s),"autoConnect",!1,"forceNew",!0,"reconnectionAttempts",3,"reconnectionDelay",1000,"reconnectionDelayMax",5000,"timeout",2e4,"extraHeaders",A.n(["Content-Type","application/json"],p,p),"path","/socket.io/"],p,o)
+n=A.n(["transports",A.b(["websocket","polling"],t.s),"autoConnect",!1,"forceNew",!0,"reconnectionAttempts",3,"reconnectionDelay",1000,"reconnectionDelayMax",5000,"timeout",2e4,"extraHeaders",A.n(["Content-Type","application/json"],p,p),"path","/new/socket.io/"],p,o)
 m=A.dN(q)
 l=m.gej()+"://"+m.gkP(m)+":"+m.gpe(m)
 k=m.gcR(m)

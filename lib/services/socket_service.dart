@@ -98,7 +98,7 @@ class SocketService {
           'reconnectionDelayMax': 5000,
           'timeout': 20000,
           'extraHeaders': {'Content-Type': 'application/json'},
-          'path': '/socket.io/',
+          'path': '/new/socket.io/',
         }
       );
       
