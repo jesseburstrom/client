@@ -87,20 +87,37 @@ class SocketService {
     
     try {
       // Initialize socket with proper options
-      socket = io.io(
-        localhost,
-        <String, dynamic>{
-          'transports': ['websocket', 'polling'],
-          'autoConnect': false, // Control connection manually
-          'forceNew': true,     // Ensure a new connection instance
-          'reconnectionAttempts': 3,
-          'reconnectionDelay': 1000,
-          'reconnectionDelayMax': 5000,
-          'timeout': 20000,
-          'extraHeaders': {'Content-Type': 'application/json'},
-          'path': '/new/socket.io/',
-        }
-      );
+      if (isOnline) {
+        socket = io.io(
+            localhost,
+            <String, dynamic>{
+              'transports': ['websocket', 'polling'],
+              'autoConnect': false, // Control connection manually
+              'forceNew': true,     // Ensure a new connection instance
+              'reconnectionAttempts': 3,
+              'reconnectionDelay': 1000,
+              'reconnectionDelayMax': 5000,
+              'timeout': 20000,
+              'extraHeaders': {'Content-Type': 'application/json'},
+              'path': '/new/socket.io/',
+            }
+        );
+      } else {
+        socket = io.io(
+            localhost,
+            <String, dynamic>{
+              'transports': ['websocket', 'polling'],
+              'autoConnect': false, // Control connection manually
+              'forceNew': true,     // Ensure a new connection instance
+              'reconnectionAttempts': 3,
+              'reconnectionDelay': 1000,
+              'reconnectionDelayMax': 5000,
+              'timeout': 20000,
+              'extraHeaders': {'Content-Type': 'application/json'},
+            }
+        );
+      }
+
       
       // Clear existing handlers before setting new ones
       _clearEventHandlers(); 
