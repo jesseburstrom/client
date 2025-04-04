@@ -1,4985 +1,1842 @@
-Okay, here is a detailed technical description of the project, focusing on the Flutter frontend (`lib/`) and the Express backend (`backend/`), based on the provided codebase structure and file contents.
+Okay, here is a detailed technical description of the project, focusing on the Flutter frontend (`lib` folder) and the Express backend (`backend` folder), based on the provided file structure and code snippets.
 
-**1. Overall Project Overview**
+**Project Overview**
 
-This project is a multiplayer Yatzy game application. It features a Flutter frontend for user interaction, game display, and settings management, and an Express (Node.js with TypeScript) backend for handling game logic, real-time communication via WebSockets (Socket.IO), user management (potentially, though auth seems less integrated in the core game flow currently), and data persistence (top scores, game logs) using MongoDB. A Unity component is integrated into the Flutter app for rendering 3D dice, providing an enhanced visual experience.
+This project is a multiplayer Yatzy game application. It consists of:
 
-**2. Technology Stack**
+1.  **Flutter Frontend:** A cross-platform mobile/web application providing the user interface, game board display, dice interaction, chat, and settings management. It communicates with the backend via WebSockets (Socket.IO) for real-time game events and potentially HTTP for auxiliary actions like fetching top scores. It also integrates with a Unity project for optional 3D dice rendering.
+2.  **Express Backend:** A Node.js server using Express.js and TypeScript. It manages game logic, player connections, real-time communication via Socket.IO, game state persistence (logs), and top score persistence using MongoDB. It also provides a basic REST API for tasks like fetching top scores and potentially user authentication (though auth seems partially implemented or legacy).
+3.  **Unity Project (External):** A Unity application used for rendering 3D dice, communicating back roll results to the Flutter frontend via the `flutter_unity_widget` package integration.
 
-*   **Frontend:**
-    *   Framework: Flutter
-    *   Language: Dart
-    *   State Management: flutter_bloc (specifically `SetStateCubit` for general updates, `LanguageBloc`)
-    *   Routing: `auto_route`
-    *   HTTP Client: `http` package (`HttpService` wrapper)
-    *   WebSocket Client: `socket_io_client` (`SocketService` wrapper)
-    *   Dependency Injection: `get_it`, `injectable`
-    *   3D Integration: `flutter_unity_widget`
-*   **Backend:**
-    *   Framework: Express.js
-    *   Language: TypeScript
-    *   Real-time Communication: Socket.IO
-    *   Database: MongoDB (using `mongodb` driver)
-    *   Potentially Authentication: `bcrypt`, `jsonwebtoken` (routes exist but integration with game flow isn't fully shown)
-*   **Database:** MongoDB
-*   **3D Engine:** Unity (with C# scripting)
+**1. Backend (Express in `backend` folder)**
 
-**3. Frontend (Flutter - `lib/`)**
+The backend is built with Node.js, Express, and TypeScript, leveraging Socket.IO for real-time gameplay and MongoDB for data persistence.
 
-The frontend is built using Flutter and Dart, responsible for the user interface, local interactions, settings, communication with the backend, and integrating the Unity dice view.
+*   **Core Technologies:**
+    *   **Node.js:** Runtime environment.
+    *   **Express.js:** Web framework for handling HTTP requests (REST API) and serving static files (Flutter web build).
+    *   **TypeScript:** Language for static typing and improved maintainability.
+    *   **Socket.IO:** Library for real-time, bidirectional event-based communication (WebSockets with polling fallback). Used for game state synchronization, player actions, and chat.
+    *   **MongoDB:** NoSQL database used for storing game logs and top scores. Accessed via the official `mongodb` driver.
+    *   **JWT (JSON Web Tokens):** Appears to be used in some legacy/auth-related routes (`logInRoute`, `signUpRoute`, `logRoute`), though the primary game interaction doesn't seem to rely heavily on it.
 
-*   **Core Architecture:**
-    *   **State Management:** Primarily uses `flutter_bloc`. A simple `SetStateCubit` is used extensively for triggering UI rebuilds across the application. A dedicated `LanguageBloc` handles language changes. Core application state (game data, UI state) seems largely managed within the `Application` class (`lib/application/application.dart`), which acts as a central hub or controller, potentially leading to tight coupling.
-    *   **Dependency Injection:** Uses `get_it` and `injectable` (`lib/injection.dart`, `lib/injection.config.dart`) for managing dependencies like the router.
-    *   **Routing:** `auto_route` (`lib/router/`) manages navigation between the main `ApplicationView` and the `SettingsView`.
-    *   **Service Layer:** Services like `SocketService` (`lib/services/socket_service.dart`) and `HttpService` (`lib/services/http_service.dart`) encapsulate communication logic. `ServiceProvider` (`lib/services/service_provider.dart`) uses `InheritedWidget` to make these services accessible within the widget tree.
-    *   **Modularity:** The code is organized into folders like `application`, `chat`, `dices`, `top_score`, `views`, `services`, `states`, etc., indicating an attempt at modular design, although the `Application` class centralizes much logic.
-
-*   **Key Features & Modules:**
-    *   **Game Board UI (`lib/application/widget_application.dart`, `lib/views/application_view.dart`):** Dynamically renders the Yatzy scoreboard based on `gameType` and `nrPlayers`. Handles cell clicks (`cellClick` in `application_functions_internal.dart`) and updates UI based on game state received from the backend or local actions. Uses `AnimatedBuilder` for potential cell animations (`AnimationsApplication`).
-    *   **Dice Handling (`lib/dices/`):**
-        *   Manages both 2D dice display (`WidgetDices`) and the integrated Unity 3D dice (`UnityCommunication`, `UnityMessage`).
-        *   The `Dices` class encapsulates dice state (`diceValue`, `nrRolls`, `holdDices`) and logic (`rollDices`, `holdDice`).
-        *   Communicates with Unity via `UnityWidgetController.postMessage` sending JSON-formatted `UnityMessage` objects.
-        *   Receives messages from Unity (`onUnityMessage`) containing dice roll results.
-        *   Sends dice roll results (`sendDices` event) to the backend via `SocketService`.
-    *   **Settings (`lib/views/settings_view.dart`, `lib/application/widget_application_settings.dart`):** Allows users to configure username, game type (`Ordinary`, `Maxi`), number of players, language, and Unity-related settings (3D dice, light motion). Uses `shared_preferences` (`lib/shared_preferences.dart`) to persist settings locally. Displays available games and allows joining or creating new games. Includes a spectator view (`SpectatorGameBoard`).
-    *   **Chat (`lib/chat/`):** Implements a real-time chat interface (`WidgetChat`) allowing players within a game to communicate. Sends messages via `SocketService` (`chatMessage` event) and displays received messages.
-    *   **Top Scores (`lib/top_score/`):** Displays top scores fetched from the backend (`TopScore`, `WidgetTopScores`). Uses `HttpService` initially and potentially updates via WebSocket messages (`onTopScoresUpdate`).
-    *   **Spectator Mode (`lib/widgets/spectator_game_board.dart`, `widget_application_settings.dart`):** Allows users to view ongoing games without participating. Fetches game state via WebSocket (`spectateGame` action) and displays it using a dedicated `SpectatorGameBoard`.
-    *   **Communication (`lib/services/socket_service.dart`, `lib/services/http_service.dart`, `lib/application/communication_application.dart`):**
-        *   `HttpService`: Handles REST requests (e.g., fetching initial top scores).
-        *   `SocketService`: Manages the persistent WebSocket connection using `socket_io_client`. Handles connection logic, event emission (`sendToServer`, `sendToClients`), and listener registration (`onConnect`, `onDisconnect`, `onServerMsg`, `onClientMsg`). The `Application` class contains the `callbackOnServerMsg` and `callbackOnClientMsg` handlers which parse incoming messages and update the application state (`gameData`, `playerToMove`, triggering UI rebuilds).
-
-*   **Data Flow (Gameplay Example - Roll & Select):**
-    1.  Player taps roll button (Unity or 2D).
-    2.  If Unity: Unity simulates roll -> sends result (`onUnityMessage`) -> Flutter `Dices` class updates state.
-    3.  If 2D: Flutter `Dices.rollDices` calculates results -> updates state.
-    4.  Flutter `Application` updates potential scores (`updateDiceValues`).
-    5.  Flutter `Application` sends `sendDices` event via `SocketService`.
-    6.  Backend receives `sendDices`, validates, logs, updates its game state, broadcasts `sendDices` (`onClientMsg`) to others, and sends a full `onGameUpdate` (`onServerMsg`) to all (including sender and spectators).
-    7.  Player clicks a valid cell (`cellClick`).
-    8.  Flutter `Application` optimistically updates UI (`applyLocalSelection`).
-    9.  Flutter `Application` sends `sendSelection` (with label and score) via `SocketService`.
-    10. Backend receives `sendSelection`, validates, logs, updates game state (applies score, advances turn), sends `onGameUpdate` (`onServerMsg`) to all. It might also forward the raw `sendSelection` via `onClientMsg`.
-    11. Flutter receives `onGameUpdate`, updates its `gameData`, recalculates sums/totals, updates `playerToMove`, resets dice for the next player, and refreshes the UI via `SetStateCubit`.
-
-**4. Backend (Express - `backend/`)**
-
-The backend is built using Node.js with Express and TypeScript, managing game instances, real-time communication, and database interactions.
-
-*   **Core Architecture:**
-    *   **MVC-like Structure:** Code is organized into `controllers`, `services`, and `models`, promoting separation of concerns. `routes` define API and WebSocket entry points.
-    *   **Server Setup (`server.ts`):** Initializes Express, CORS, Socket.IO server, connects to the database (`initializeDbConnection`), sets up middleware, defines REST routes, and registers Socket.IO event handlers via controllers.
-    *   **Routing (`routes/`):** Defines REST endpoints (e.g., `/GetTopScores`, `/UpdateTopScore`, `/api/spectate/:gameId`) and links them to handler functions. Also includes potentially unused auth/log routes (`logInRoute`, `signUpRoute`, `logRoute`).
+*   **Architecture & Components:**
+    *   **`server.ts`:** The main entry point.
+        *   Initializes Express app and HTTP server.
+        *   Sets up Socket.IO server with CORS configuration.
+        *   Initializes and wires services (`GameService`, `GameLogService`, `TopScoreService`) and controllers (`GameController`, `PlayerController`, `ChatController`). This follows a basic dependency injection pattern.
+        *   Connects to MongoDB via `initializeDbConnection`.
+        *   Registers Express routes defined in the `routes/` directory. Includes a specific route for spectating (`spectateGameRoute`).
+        *   Listens for Socket.IO connections (`io.on('connect', ...)`).
+        *   Delegates specific Socket.IO events (`sendToServer`, `sendToClients`) to the corresponding controllers based on the `action` field in the data payload.
+        *   Handles global events like disconnections via `GameService.handlePlayerDisconnect`.
+        *   Serves static files (likely the Flutter web build).
+    *   **`db.ts`:** Manages the MongoDB connection using the `mongodb` driver. Provides `initializeDbConnection` and `getDbConnection` functions. Connects to `mongodb://127.0.0.1:27017`. Mentions databases `yatzy-game-log-db`, `top-scores`, and potentially legacy `react-auth-db`.
     *   **Controllers (`controllers/`):**
-        *   `GameController`: Handles game-related Socket.IO events (`requestGame`, `requestJoinGame`, `sendDices`, `sendSelection`, `spectateGame`). Interacts primarily with `GameService`.
-        *   `ChatController`: Handles chat message events (`chatMessage` via `sendToServer` or `sendToClients`), forwarding messages to relevant players in a game via `GameService` or room broadcasting.
-        *   `PlayerController`: Handles basic player connection events like `getId`. Game creation/joining is delegated to `GameController`.
+        *   `GameController.ts`: Handles game-related Socket.IO events like `requestGame`, `requestJoinGame`, `sendDices`, `sendSelection`, and `spectateGame`. Interacts with `GameService` to modify game state and `GameLogService` to record actions.
+        *   `PlayerController.ts`: Primarily handles initial player connection events like `getId`. Most game actions are delegated elsewhere.
+        *   `ChatController.ts`: Manages `chatMessage` events received via `sendToServer` or `sendToClients`, using `GameService` to identify recipients within the same game and broadcasting messages via `io.to(playerId).emit`.
     *   **Services (`services/`):**
-        *   `GameService`: Central service for managing game lifecycle and state. Holds active games in memory (`games` Map). Handles creating, joining, removing games, player disconnections, processing dice rolls and selections, managing spectators, and broadcasting game state updates via Socket.IO. Interacts with `GameLogService` and `TopScoreService`.
-        *   `GameLogService`: Responsible for persisting game events (start, moves, end, spectate) to the `yatzy-game-log-db.game_moves` MongoDB collection. Defines the `GameMove` and `GameLog` interfaces.
-        *   `TopScoreService`: Manages reading and writing top scores to the `top-scores` MongoDB database (using separate collections like `ordinary`, `maxi`). Handles fetching scores and broadcasting updates (`onTopScoresUpdate`) via Socket.IO when scores change.
-    *   **Models (`models/`):** Define the data structures and core logic for game entities:
-        *   `Game`: Represents a single Yatzy game instance, holding players, state (started, finished, playerToMove), dice values, roll count, etc. Includes methods for adding/removing players, advancing turns, applying selections, calculating scores via Player methods, and checking finish conditions. Uses `toJSON` for serialization.
-        *   `Player`: Represents a player with ID, username, score (`cells`, `score`, `upperSum`), and active status. Includes methods for calculating scores (`calculateScores`) based on `gameType` and checking completion (`hasCompletedGame`). Uses `toJSON`. `PlayerFactory` creates instances.
-        *   `BoardCell`: Represents a single cell on the scorecard (index, label, value, fixed status).
-        *   `Dice`: (Seems less used directly by services, maybe internal helper) Model for dice rolling logic.
+        *   `GameService.ts`: The core service for managing active games.
+            *   Holds game state in memory (`games: Map<number, Game>`).
+            *   Manages game lifecycle (creation, joining, removal).
+            *   Handles player connections, disconnections (including logging via `GameLogService`), and aborts.
+            *   Processes player actions (dice rolls, selections) received from `GameController`, updates the `Game` model state, advances turns, and logs moves.
+            *   Uses Socket.IO (`this.io`) to broadcast game list updates (`broadcastGameList`), game state changes (`notifyGameUpdate`), and game finished events (`notifyGameFinished`) to relevant players and spectators.
+            *   Manages spectators (`spectators: Map<number, Set<string>>`), adding/removing them and sending game updates.
+            *   Interacts with `TopScoreService` when a game finishes.
+        *   `GameLogService.ts`: Handles persistence of game events.
+            *   Interacts with the `game_moves` collection in the `yatzy-game-log-db` MongoDB database.
+            *   Logs game start (`logGameStart`), player moves (`logMove` - roll, select, disconnect, spectate), and game end (`logGameEnd`) with final scores.
+            *   Provides `getGameLog` to retrieve historical game data, crucial for spectators joining mid-game.
+        *   `TopScoreService.ts`: Manages top score lists.
+            *   Interacts with the `top-scores` MongoDB database, using separate collections for different game types (`ordinary`, `maxi`).
+            *   Provides methods to get (`getTopScores`, `getAllTopScores`) and update (`updateTopScore`) scores.
+            *   Crucially, it receives the `io` instance in its constructor and uses it to *broadcast* top score updates (`broadcastTopScores`) to all connected clients via Socket.IO when scores change.
+    *   **Models (`models/`):**
+        *   `Game.ts`: Represents the state of a single game instance (ID, type, players, max players, status flags, current player index, dice values, roll count, turn number). Includes `toJSON`/`fromJSON` for serialization and methods for state manipulation (e.g., `addPlayer`, `applySelection`, `advanceToNextActivePlayer`, `isGameFinished`).
+        *   `Player.ts`: Represents a player's state (ID, username, active status, scorecard represented by `cells: BoardCell[]`). Contains the `calculateScores` logic based on the `gameType` and `GameConfig`. `toJSON`/`fromJSON`.
+        *   `BoardCell.ts`: Represents a single cell on the scorecard (index, label, value, fixed status, non-score flag). `toJSON`/`fromJSON`.
+        *   `Dice.ts`: A simple model for server-side dice logic (potentially unused if client/Unity handles rolls).
+    *   **Routes (`routes/`):** Define REST API endpoints.
+        *   Auth: `logInRoute.ts`, `signUpRoute.ts`.
+        *   Logging: `logRoute.ts`, `getLogRoute.ts`. (Seems tied to the auth system).
+        *   Top Scores: `getTopScores.ts` (GET), `updateTopScore.ts` (POST). Takes `type` query/body parameter.
+        *   Spectating: `spectateGameRoute.ts` (GET): Provides a way to fetch game state and logs via HTTP, complementing the Socket.IO spectate mechanism. Initialized with `GameService` and `GameLogService` instances.
+    *   **Utilities (`utils/`):**
+        *   `gameConfig.ts`: Defines game parameters (cell labels, bonus rules, dice count) for 'Ordinary' and 'Maxi' types. Used by `Player` model for score calculation.
+        *   `yatzyMapping.ts`: Provides utility functions (`getSelectionLabel`, `getSelectionIndex`) to map between numerical cell indices and their string representations based on `gameType`. Used by `GameController` to interpret client selections and `GameService` to forward selection info.
+        *   `index.ts`: General utility functions (random, delay, etc.).
 
-*   **Real-time Communication (Socket.IO):**
-    *   The `server.ts` initializes Socket.IO attached to the HTTP server.
-    *   Connection handling includes assigning a unique `socket.id`.
-    *   Events are handled by controllers:
-        *   `sendToServer`: Client sends commands like `requestGame`, `requestJoinGame`, `requestTopScores`, `spectateGame`.
-        *   `sendToClients`: Client sends data to be forwarded to other clients (e.g., `sendDices`, `sendSelection`, `chatMessage`). The server validates/processes these and then broadcasts/forwards.
-    *   Server emits messages back to clients:
-        *   `onServerMsg`: Used for sending structured game state updates (`onGameStart`, `onGameUpdate`, `onGameFinished`), game lists (`onRequestGames`), top scores (`onTopScoresUpdate`), and potentially errors. Targeted using `io.to(playerId).emit` or broadcast using `io.emit`.
-        *   `onClientMsg`: Used for forwarding messages that originated from one client to others (e.g., `sendDices`, `sendSelection`, `chatMessage`). Typically skips the original sender.
-    *   `GameService` heavily relies on `this.io` to notify players and spectators of state changes. Spectators are managed in a separate map (`spectators`) and receive the same `onServerMsg` updates as players.
+*   **Communication Flow:**
+    1.  Client connects via Socket.IO.
+    2.  Client sends `getId` action via `sendToServer`. `PlayerController` responds with the socket ID.
+    3.  Client sends `requestGame` or `requestJoinGame` via `sendToServer`.
+    4.  `GameController` receives the request, uses `GameService` to create/find/join a game.
+    5.  `GameService` updates game state, potentially starts the game if full, logs events (`GameLogService`), and broadcasts updates (`onGameStart`, `onGameUpdate`, game list) via Socket.IO.
+    6.  During gameplay:
+        *   Client (or Unity via Flutter) determines dice roll results.
+        *   Client sends dice values (`sendDices` action) via `sendToClients`.
+        *   `GameController` receives, validates turn, calls `GameService.processDiceRoll`.
+        *   `GameService` logs the roll, updates game state (dice values, roll count), and broadcasts the update (`onGameUpdate` via `notifyGameUpdate`) and potentially forwards the raw `sendDices` event via `onClientMsg`.
+        *   Client displays potential scores. Player taps a cell.
+        *   Client sends selection (`sendSelection` action with *label* and score) via `sendToClients`.
+        *   `GameController` receives, validates turn, uses `yatzyMapping` to understand the label, calls `GameService.processSelection`.
+        *   `GameService` logs selection, applies it to the `Game` model (which updates `Player` cells/scores), checks for game end, advances turn, and broadcasts the full updated game state (`onGameUpdate` via `notifyGameUpdate`).
+    7.  Chat messages are sent via `sendToServer` or `sendToClients` with `chatMessage` action, handled by `ChatController`, which broadcasts to players in the same game.
+    8.  Spectators connect via `spectateGame` action (`GameController`) or potentially the HTTP route. `GameService` adds them, sends current state (potentially reconstructed using `GameLogService`), and includes them in future `notifyGameUpdate` broadcasts.
+    9.  Game finishes (all cells filled or players disconnect). `GameService` logs end state, updates top scores via `TopScoreService` (which then broadcasts updates), notifies clients (`onGameFinished`), and removes the game from memory.
 
-*   **Database Interaction (`db.ts`, services):**
-    *   `db.ts`: Establishes and provides access to the MongoDB connection.
-    *   `GameLogService`: Uses the connection to insert/update/find documents in the `game_moves` collection. Logs game start, individual moves (roll, select, disconnect, spectate), and game end with final scores. Provides `getGameLog` to retrieve historical data, used by spectate functionality.
-    *   `TopScoreService`: Uses the connection to interact with collections in the `top-scores` database. Inserts new scores and fetches sorted lists.
+**2. Frontend (Flutter in `lib` folder)**
 
-*   **Game Logic and State:**
-    *   `GameService` maintains the state of all *active* games in memory (`games` map).
-    *   The `Game` model enforces turn order (`playerToMove`), roll limits (`rollCount`), and determines game end (`isGameFinished`).
-    *   Scoring rules are implicitly handled within the `Player` model's `calculateScores` method and the client-side calculation functions (`application_functions_internal_calc_dice_values.dart`). The server seems to trust the client-calculated score for selections but logs it.
-    *   Player disconnection (`handlePlayerDisconnect`) correctly marks players as inactive, advances turns if necessary, logs the event, and potentially finishes the game if only one player remains.
+The frontend is a Flutter application responsible for rendering the game interface, handling user input, interacting with the Unity component for dice rolling, and communicating with the backend via Socket.IO and HTTP.
 
-**5. Key Interactions & Data Flow Summary**
+*   **Core Technologies:**
+    *   **Flutter:** UI framework for building cross-platform applications.
+    *   **Dart:** Programming language.
+    *   **`socket_io_client`:** Package for Socket.IO communication.
+    *   **`http`:** Package for making HTTP requests.
+    *   **`auto_route`:** Package for declarative routing and navigation.
+    *   **`flutter_bloc` / `bloc`:** Packages for state management (BLoC pattern and Cubits). `SetStateCubit` is used extensively as a general UI refresh trigger.
+    *   **`shared_preferences`:** For storing local user settings.
+    *   **`flutter_unity_widget`:** Package for embedding and communicating with the Unity project.
+    *   **`get_it` / `injectable`:** For dependency injection.
 
-1.  **Client Connects:** Flutter `SocketService` connects -> Backend assigns ID -> Backend sends `welcome`/`getId`.
-2.  **Game Creation/Join:** Flutter `SettingsView` -> sends `requestGame`/`requestJoinGame` -> Backend `GameService` manages game instance -> Backend sends `onGameStart`/`onGameUpdate` to involved players.
-3.  **Gameplay (Roll/Select):** Mediated by `GameService` using `processDiceRoll` and `processSelection`, involving client events (`sendDices`/`sendSelection`) and server broadcasts (`onGameUpdate`/`onClientMsg`). State is primarily updated on the backend and pushed to clients.
-4.  **Chat:** Flutter sends `chatMessage` -> Backend `ChatController` broadcasts to other players in the same game via `onClientMsg`.
-5.  **Game End:** Backend `GameService` detects end condition -> updates `TopScoreService` -> logs game end via `GameLogService` -> sends `onGameFinished` to players/spectators -> removes game from memory.
-6.  **Spectate:** Flutter sends `spectateGame` -> Backend `GameController` fetches *current* game state from `GameService` AND historical moves from `GameLogService`, potentially reconciles them, sends combined state (`onGameStart`/`onGameUpdate` with `spectator: true`), and adds spectator ID to receive future `onGameUpdate` messages.
+*   **Architecture & Components:**
+    *   **`main.dart`:** Application entry point. Initializes BLoC providers (`LanguageBloc`, `SetStateCubit`), loads shared preferences, configures dependency injection (`getIt`), and runs `AppWidget`.
+    *   **`core/app_widget.dart`:** The root widget.
+        *   Initializes core application singletons/managers (`TopScore`, `AnimationsScroll`, `Tutorial`, `Dices`, `Application`, `Chat`).
+        *   Sets up `ServiceProvider` to provide services down the widget tree.
+        *   Initiates the `SocketService` connection after the first frame.
+        *   Connects `Application` instance to `SocketService`.
+    *   **`services/service_provider.dart`:** An `InheritedWidget` providing access to `SocketService` and `GameService`.
+    *   **`services/socket_service.dart`:** Manages the Socket.IO connection.
+        *   Uses `socket_io_client` to connect to the backend server (`localhost` variable).
+        *   Handles connection lifecycle events (`onConnect`, `onDisconnect`, `onConnectError`).
+        *   Sets up listeners for server events (`onClientMsg`, `onServerMsg`, `userId`, `gameUpdate`, `chatMessage`, `welcome`).
+        *   Crucially, it delegates the processing of these events to callbacks within the `Application` instance (`app.callbackOnServerMsg`, `app.callbackOnClientMsg`).
+        *   Provides methods (`sendToServer`, `sendToClients`) for sending data to the backend.
+        *   Manages connection state (`isConnected`, `socketId`).
+        *   Uses `SetStateCubit` to trigger UI updates upon receiving messages or connection status changes.
+    *   **`services/game_service.dart` (Frontend):** Acts as a wrapper around `SocketService` for game-specific actions (`createGame`, `joinGame`, `rollDice`, `selectCell`). It *does not* hold the primary game state but facilitates communication. It includes client-side score calculation (`calculateScoreForCell`) likely for displaying potential scores or optimistic updates.
+    *   **`services/http_service.dart`:** A utility class using the `http` package to make REST API calls to the backend (e.g., for `GetTopScores`, potentially login/signup).
+    *   **`application/application.dart`:** The central class holding the UI state and coordinating logic.
+        *   Stores game state variables received from the server (`gameId`, `myPlayerId`, `playerToMove`, `gameType`, `nrPlayers`, `cellValue`, `fixedCell`, `appText`, `appColors`, `gameData`, `userNames`, `playerIds`, `playerActive`, `gameStarted`, `gameFinished`, `isSpectating`, `spectatedGameId`).
+        *   Manages instances of `Dices`, `AnimationsApplication`, and `InputItems`.
+        *   `setup()`: Initializes the game board UI state based on `gameType` and `nrPlayers`.
+        *   `updateDiceValues()`: Called after a dice roll (local or from Unity) to calculate and display potential scores in unfilled cells using `application_functions_internal_calc_dice_values.dart`.
+        *   Relies heavily on `context.read<SetStateCubit>().setState()` to trigger UI rebuilds when its state changes.
+        *   Holds the reference to the initialized `SocketService`.
+    *   **`application/communication_application.dart`:** Extension methods for `Application` handling message processing.
+        *   `callbackOnServerMsg`: Handles messages like `onGetId`, `onGameStart`, `onRequestGames`, `onGameUpdate`, `onGameAborted`, `onGameFinished`, `onTopScoresUpdate`. Updates the `Application` state variables based on the received data. Navigates using `AppRouter` (e.g., to `ApplicationView` on game start). Handles spectator data updates.
+        *   `callbackOnClientMsg`: Handles messages forwarded by the server, such as other players' selections (`sendSelection`) and dice rolls (`sendDices`), and chat messages (`chatMessage`). Updates the UI to reflect these actions.
+        *   `chatCallbackOnSubmitted`: Sends the typed chat message to the server via `SocketService`.
+        *   `_checkIfPlayerAborted`: Logic to detect and handle player disconnects/aborts based on `onRequestGames` updates.
+        *   `_processGameUpdate`: Core logic for applying game state updates received from the server.
+    *   **`application/application_functions_internal.dart`:** Extension methods for `Application` handling internal UI logic.
+        *   `cellClick()`: Triggered when a player taps a score cell. Sends `sendSelection` message (including the cell's string *label* obtained via `yatzy_mapping_client.dart`) to the server via `SocketService`. Calls `applyLocalSelection` for immediate UI feedback.
+        *   `applyLocalSelection()`: Performs optimistic UI update: marks cell as fixed, updates color, recalculates local Sum/Bonus/Total, clears dice display, and optionally triggers board animation. *Does not* advance the turn.
+        *   `colorBoard()`: Updates the visual appearance (colors) of the game board cells based on the current player, fixed status, and player activity.
+    *   **`application/application_functions_internal_calc_dice_values.dart`:** Extension methods containing pure functions to calculate the score for every possible Yatzy category based on the current dice values held in `gameDices`.
+    *   **`dices/dices.dart`:** Manages the state of the dice (values, held status, rolls remaining). Contains logic for `rollDices()` (2D version) and methods for interacting with Unity (`initDices`, `clearDices`).
+    *   **`dices/unity_communication.dart`:** Extension for `Dices`. Uses `flutter_unity_widget`'s `unityWidgetController.postMessage` to send commands/data (reset, start, dice values, colors, settings) to the Unity project. Implements `onUnityMessage` to receive messages *from* Unity (primarily dice roll results after a 3D roll).
+    *   **`dices/widget_dices.dart`:** The UI widget responsible for displaying dice. It conditionally renders either 2D dice images (with tap-to-hold functionality) or embeds the `UnityWidget`. Handles the "Roll" button press, calling `app.gameDices.rollDices()` for 2D or triggering the roll in Unity.
+    *   **`chat/`:** Contains `chat.dart` (logic and state for chat messages) and `widget_chat.dart` (the UI component for displaying messages and the input field).
+    *   **`top_score/`:** Contains `top_score.dart` (logic for fetching/updating/storing top scores) and `widget_top_scores.dart` (UI widget to display the scores). Fetches initial scores via HTTP (`HttpService`) and receives real-time updates via `onTopScoresUpdate` WebSocket message.
+    *   **`views/`:**
+        *   `application_view.dart`: The main game screen. Builds the UI using `app.widgetScaffold`. Listens for `app.gameFinished` to show a completion dialog and navigate back to settings.
+        *   `settings_view.dart`: Screen for configuring game settings (type, players, username), viewing available games, joining games, spectating, and starting new games. Calls `app.widgetScaffoldSettings`. Displays the `SpectatorGameBoard` if `app.isSpectating` is true.
+    *   **`widgets/spectator_game_board.dart`:** A dedicated widget that takes `gameData` (received from the server when spectating) and renders a read-only view of the game board, including scores and current dice. Displays a "Game Over" overlay when the spectated game finishes.
+    *   **`states/`:**
+        *   `SetStateCubit`: A simple Cubit used throughout the app (`app`, `SocketService`, views) to trigger UI rebuilds by emitting an incrementing integer state.
+        *   `LanguageBloc`: Manages the application's language state, persisting the choice using `shared_preferences`.
+    *   **`utils/yatzy_mapping_client.dart`:** Client-side utility matching the backend's `yatzyMapping.ts`. Provides `getSelectionLabel` and `getSelectionIndex` to convert between cell indices and string labels for communication with the server.
+    *   **`shared_preferences.dart`:** Utility class for interacting with `SharedPreferences` to save/load user settings.
+    *   **`startup.dart`:** Defines global constants/variables (`localhost`, `isOnline`, `userName`, language settings) and initializes singleton instances used across the app (`inputItems`, `topScore`, `app`, `chat`, `dices`, etc.).
 
-**6. Database Schema (Inferred)**
+*   **Communication Flow:**
+    1.  `AppWidget` initializes `SocketService` and connects.
+    2.  `SocketService` receives connection confirmation and ID, requests games list.
+    3.  `SettingsView` displays available games received via `onServerMsg` -> `app.callbackOnServerMsg`.
+    4.  User configures settings and clicks "Create Game" or joins an existing game.
+    5.  Action triggers `SocketService.sendToServer` (`requestGame` or `requestJoinGame`).
+    6.  Backend processes, `GameService` updates state and broadcasts `onGameStart` or `onGameUpdate`.
+    7.  `SocketService` receives the message, calls `app.callbackOnServerMsg`.
+    8.  `Application` updates its state (`gameId`, `myPlayerId`, etc.), calls `setup()`, triggers `SetStateCubit`, and navigates to `ApplicationView`.
+    9.  Gameplay:
+        *   If Unity is used, player interaction triggers Unity roll; Unity sends results back via `onUnityMessage` -> `Dices` -> `app.callbackUpdateDiceValues`. If 2D, `WidgetDices` roll button calls `app.gameDices.rollDices()` -> `app.callbackUpdateDiceValues`.
+        *   `app.updateDiceValues()` calculates potential scores and updates UI via `SetStateCubit`.
+        *   `Dices` or `Application` sends the dice results to others via `SocketService.sendToClients`.
+        *   Player taps a cell -> `app.cellClick()` -> sends `sendSelection` (with label) via `SocketService.sendToClients`. `applyLocalSelection` updates UI optimistically.
+        *   Backend processes selection, broadcasts `onGameUpdate`.
+        *   `SocketService` receives update -> `app.callbackOnServerMsg` -> `_processGameUpdate` updates `Application` state, including advancing `playerToMove` and applying the score definitively. `SetStateCubit` triggers UI rebuild.
+    10. Chat messages are sent/received via `SocketService` and handled by `Application` and `Chat` classes.
+    11. Top scores are fetched initially via `HttpService` and updated in real-time via `onTopScoresUpdate` from `SocketService`.
 
-*   `yatzy-game-log-db`
-    *   `game_moves`: Stores documents representing a single game (`GameLog` interface), including game info (type, players), an array of moves (`GameMove` interface: turn, player, action, dice, selection, score, timestamp), start/end times, and final scores.
-    *   `db_test`: Used for initial connection verification.
-*   `top-scores`
-    *   `ordinary`: Collection storing `{ name: string, score: number }` for Ordinary Yatzy.
-    *   `maxi`: Collection storing `{ name: string, score: number }` for Maxi Yatzy.
-*   `react-auth-db` (Potentially unused for core game)
-    *   `users`: Stores user credentials (`email`, `passwordHash`).
-    *   `logs`: Stores user activity logs.
+**Key Interaction Points & Design Choices:**
 
-**7. Unity Integration (`unity/`)**
+*   **Client-Server State Sync:** The backend holds the authoritative game state. The frontend primarily reflects this state, receiving updates via Socket.IO (`onGameUpdate`). Client-side calculations (potential scores) and optimistic UI updates (`applyLocalSelection`) enhance responsiveness.
+*   **Socket.IO Events:** Communication relies heavily on custom Socket.IO events (`sendToServer`, `sendToClients`) with an `action` payload determining the message type, supplemented by specific events (`onGameStart`, `onGameUpdate`, etc.).
+*   **Label-Based Selection:** The client sends the *string label* of the selected cell (e.g., "House") rather than just the index, using `yatzy_mapping_client.dart`. The backend uses `yatzyMapping.ts` to interpret this.
+*   **Unity Integration:** Unity is used optionally for 3D dice rendering. Communication is bidirectional via `flutter_unity_widget`. Flutter sends commands (start, reset, colors), Unity sends back dice results.
+*   **State Management:** Primarily uses `SetStateCubit` for broad UI refreshes triggered by state changes in `Application` or `SocketService`. `LanguageBloc` handles language state specifically.
+*   **Service Layer:** Both frontend and backend utilize service layers (`GameService`, `SocketService`, etc.) to encapsulate logic and manage dependencies.
+*   **Persistence:** Backend uses MongoDB for logs and top scores. Frontend uses `shared_preferences` for local settings.
+*   **Spectator Mode:** Implemented on both ends, allowing users to view ongoing games in read-only mode, receiving state updates via Socket.IO or fetching initial state via REST.
 
-*   **Role:** Primarily responsible for rendering the 3D dice and handling the physics simulation for rolling.
-*   **Communication:** Uses `FlutterUnityIntegration` assets. `GameManagerScript.cs` likely receives messages from Flutter (via `UnityMessageManager`) to start rolls, reset dice (`flutterMessage` method). `DiceCheckZoneScript.cs` determines the final value of stationary dice. `DiceScript.cs` holds dice state. Results are sent back to Flutter using `UnityMessageManager.Instance.SendMessageToFlutter`.
-
-**8. Potential Considerations**
-
-*   **State Management (Flutter):** The large `Application` class could benefit from refactoring to smaller, more focused state management units (e.g., dedicated Blocs/Cubits for game state, settings, etc.).
-*   **Error Handling:** Robust error handling on both client and server (e.g., network issues, invalid data, failed database operations) is crucial for a stable application.
-*   **Scalability:** The current in-memory storage of active games in `GameService` might become a bottleneck with a large number of concurrent games. A more scalable solution might involve a distributed cache (like Redis) or more frequent database interaction.
-*   **Security:** Input validation on the backend is critical to prevent cheating or exploits (e.g., validating scores, moves, player turns). Authentication/Authorization for game actions could be strengthened.
-*   **Redundancy:** The dual `onServerMsg` and `onClientMsg` pattern for updates, especially for selections, could potentially be simplified.
+This description covers the main technical aspects of the Flutter frontend and Express backend based on the provided code structure and snippets.
 
 ```yaml
-ANALYSIS_SCHEMA_VERSION: 1.0
-REPORT_TIME: 2024-07-26T10:00:00Z
-
-FILES:
-  - FILE: backend/src/controllers/ChatController.ts
-    LANGUAGE: TypeScript
-    CLASSES:
-      - CLASS: ChatController
-        - METHODS:
-            - METHOD: constructor(io: Server, gameService?: GameService)
-              - DEPENDS_ON:
-                - Server FROM socket.io
-                - GameService FROM ../services/GameService
-            - METHOD: registerSocketHandlers(socket: Socket)
-              - DEPENDS_ON:
-                - Socket FROM socket.io
-              - CALLS:
-                - console.log
-                - socket.on('sendToClients', handler) [EVENT_HANDLER]
-                - this.handleChatMessage ON this
-                - socket.on('sendToServer', handler) [EVENT_HANDLER]
-                - this.handleServerChatMessage ON this
-            - METHOD: handleChatMessage(socket: Socket, data: any)
-              - DEPENDS_ON:
-                - Socket FROM socket.io
-              - CALLS:
-                - console.log
-                - this.gameService.getGame ON this.gameService
-                - Array.isArray
-                - this.io.to(...).emit('onClientMsg') ON this.io [EVENT]
-            - METHOD: handleServerChatMessage(socket: Socket, data: any)
-              - DEPENDS_ON:
-                - Socket FROM socket.io
-              - CALLS:
-                - console.log
-                - this.gameService.getGame ON this.gameService
-                - this.io.to(...).emit('onClientMsg') ON this.io [EVENT]
-                - socket.to(...).emit('onClientMsg') ON socket [EVENT]
-            - METHOD: broadcastToPlayersInSameGame(socket: Socket, data: any)
-              - DEPENDS_ON:
-                - Socket FROM socket.io
-              - CALLS:
-                - console.log
-                - this.gameService.getAllGames ON this.gameService
-                - Array.prototype.some
-                - this.io.to(...).emit('onClientMsg') ON this.io [EVENT]
-    IMPORTS:
-      - Socket, Server FROM socket.io
-      - GameService FROM ../services/GameService
-
-  - FILE: backend/src/controllers/GameController.ts
-    LANGUAGE: TypeScript
-    CLASSES:
-      - CLASS: GameController
-        - METHODS:
-            - METHOD: constructor(gameService: GameService, gameLogService: GameLogService)
-              - DEPENDS_ON:
-                - GameService FROM ../services/GameService
-                - GameLogService FROM ../services/GameLogService
-            - METHOD: registerSocketHandlers(socket: Socket)
-              - DEPENDS_ON:
-                - Socket FROM socket.io
-              - CALLS:
-                - socket.on('sendToServer', handler) [EVENT_HANDLER]
-                - this.handleRequestGame ON this
-                - this.handleRequestJoinGame ON this
-                - this.handleRemoveGame ON this
-                - this.handleSpectateGame ON this
-                - socket.on('sendToClients', handler) [EVENT_HANDLER]
-                - this.handleSendDices ON this
-                - this.handleSendSelection ON this
-            - METHOD: handleRequestGame(socket: Socket, data: any)
-              - DEPENDS_ON:
-                - Socket FROM socket.io
-                - PlayerFactory FROM ../models/Player
-              - CALLS:
-                - console.warn
-                - socket.emit('onServerMsg') ON socket [EVENT]
-                - PlayerFactory.createPlayer
-                - this.gameService.createOrJoinGame ON this.gameService
-            - METHOD: handleRequestJoinGame(socket: Socket, data: any)
-              - DEPENDS_ON:
-                - Socket FROM socket.io
-                - PlayerFactory FROM ../models/Player
-                - Game FROM ../models/Game
-              - CALLS:
-                - this.gameService.getGame ON this.gameService
-                - socket.emit('onServerMsg') ON socket [EVENT]
-                - game.isGameFull ON game
-                - PlayerFactory.createPlayer
-                - this.gameService.joinGame ON this.gameService
-                - this.gameService.notifyGameUpdate ON this.gameService
-                - joinedGame.toJSON ON joinedGame
-                - this.gameService['io'].to(...).emit('onServerMsg') ON this.gameService['io'] [EVENT]
-                - this.gameService.broadcastGameList ON this.gameService
-            - METHOD: handleRemoveGame(socket: Socket, data: any)
-              - DEPENDS_ON:
-                - Socket FROM socket.io
-                - Game FROM ../models/Game
-              - CALLS:
-                - console.log
-                - this.gameService.getGame ON this.gameService
-                - this.gameService.removeGame ON this.gameService
-                - this.gameService.broadcastGameList ON this.gameService
-            - METHOD: handleSendDices(socket: Socket, data: any)
-              - DEPENDS_ON:
-                - Socket FROM socket.io
-                - Game FROM ../models/Game
-              - CALLS:
-                - console.error
-                - this.gameService.getGame ON this.gameService
-                - game.findPlayerIndex ON game
-                - console.log
-                - this.gameService.processDiceRoll ON this.gameService
-            - METHOD: handleSendSelection(socket: Socket, data: any)
-              - DEPENDS_ON:
-                - Socket FROM socket.io
-                - Game FROM ../models/Game
-              - CALLS:
-                - console.error
-                - this.gameService.getGame ON this.gameService
-                - game.findPlayerIndex ON game
-                - console.warn
-                - console.log
-                - this.gameService.processSelection ON this.gameService
-                - this.gameService.forwardSelectionToPlayers ON this.gameService
-            - METHOD: handleSpectateGame(socket: Socket, data: any)
-              - DEPENDS_ON:
-                - Socket FROM socket.io
-                - Game FROM ../models/Game
-                - Player FROM ../models/Player
-                - GameLogService FROM ../services/GameLogService
-              - CALLS:
-                - console.error
-                - socket.emit('onServerMsg') ON socket [EVENT]
-                - console.log
-                - this.gameService.getGame ON this.gameService
-                - this.gameLogService.getGameLog ON this.gameLogService
-                - Array.prototype.filter
-                - Array.prototype.forEach
-                - game.applySelection ON game
-                - player.calculateScores ON player
-                - player.cells.find ON player.cells
-                - game.toJSON ON game
-                - this.gameLogService.logSpectate ON this.gameLogService
-                - this.gameService.addSpectator ON this.gameService
-    IMPORTS:
-      - Socket FROM socket.io
-      - GameService FROM ../services/GameService
-      - PlayerFactory, Player FROM ../models/Player
-      - GameLogService, GameMove FROM ../services/GameLogService
-      - getSelectionLabel FROM ../utils/yatzyMapping
-      - Game FROM ../models/Game
-
-  - FILE: backend/src/controllers/PlayerController.ts
-    LANGUAGE: TypeScript
-    CLASSES:
-      - CLASS: PlayerController
-        - PROPERTIES:
-          - playerRegistry: Map<string, boolean>
-        - METHODS:
-            - METHOD: constructor(gameService: GameService, gameLogService: GameLogService)
-              - DEPENDS_ON:
-                - GameService FROM ../services/GameService
-                - GameLogService FROM ../services/GameLogService
-            - METHOD: registerSocketHandlers(socket: Socket)
-              - DEPENDS_ON:
-                - Socket FROM socket.io
-              - CALLS:
-                - socket.on('sendToServer', handler) [EVENT_HANDLER]
-                - console.log
-                - console.error
-                - this.handleGetId ON this
-                - Array.prototype.includes
-            - METHOD: handleGetId(socket: Socket)
-              - DEPENDS_ON:
-                - Socket FROM socket.io
-              - CALLS:
-                - this.playerRegistry.has ON this.playerRegistry
-                - console.log
-                - socket.emit('onServerMsg') ON socket [EVENT]
-                - this.playerRegistry.set ON this.playerRegistry
-                - socket.emit('userId') ON socket [EVENT]
-    IMPORTS:
-      - Socket FROM socket.io
-      - GameService FROM ../services/GameService
-      - PlayerFactory FROM ../models/Player
-      - GameLogService FROM ../services/GameLogService
-
-  - FILE: backend/src/db.ts
-    LANGUAGE: TypeScript
-    FUNCTIONS:
-      - FUNCTION: initializeDbConnection()
-        - DEPENDS_ON:
-          - MongoClient FROM mongodb
-        - CALLS:
-          - console.log
-          - MongoClient.connect
-          - console.error
-          - client.db
-          - db.collection
-          - collection.insertOne
-          - collection.countDocuments
-      - FUNCTION: getDbConnection(dbName: string)
-        - DEPENDS_ON:
-          - Db FROM mongodb
-        - CALLS:
-          - console.error
-          - Error
-          - client.db
-    IMPORTS:
-      - MongoClient, Db FROM mongodb
-
-  - FILE: backend/src/models/BoardCell.ts
-    LANGUAGE: TypeScript
-    CLASSES:
-      - CLASS: BoardCell
-        - PROPERTIES:
-          - index: number
-          - label: string
-          - value: number
-          - fixed: boolean
-          - isNonScoreCell: boolean
-        - METHODS:
-            - METHOD: constructor(index: number, label: string, isNonScoreCell?: boolean)
-            - METHOD: toJSON()
-            - METHOD: fromJson(data: any, defaultLabel?: string) [STATIC]
-              - INSTANTIATES:
-                - BoardCell
-
-  - FILE: backend/src/models/Dice.ts
-    LANGUAGE: TypeScript
-    CLASSES:
-      - CLASS: Dice
-        - PROPERTIES:
-          - values: number[]
-          - diceCount: number
-        - METHODS:
-            - METHOD: constructor(diceCount?: number)
-              - CALLS:
-                - this.reset ON this
-            - METHOD: roll()
-              - CALLS:
-                - Math.floor
-                - Math.random
-                - this.getValues ON this
-            - METHOD: rollSelected(keptDice: boolean[])
-              - CALLS:
-                - Math.floor
-                - Math.random
-                - this.getValues ON this
-            - METHOD: getValues()
-            - METHOD: setValues(values: number[])
-            - METHOD: reset()
-              - INSTANTIATES:
-                - Array
-
-  - FILE: backend/src/models/Game.ts
-    LANGUAGE: TypeScript
-    CLASSES:
-      - CLASS: Game
-        - PROPERTIES:
-          - id: number
-          - gameType: string
-          - players: Player[]
-          - maxPlayers: number
-          - connectedPlayers: number
-          - gameStarted: boolean
-          - gameFinished: boolean
-          - playerToMove: number
-          - diceValues: number[]
-          - userNames: string[]
-          - gameId: number
-          - playerIds: string[]
-          - abortedPlayers: boolean[]
-          - rollCount: number
-          - turnNumber: number
-        - METHODS:
-            - METHOD: constructor(id: number, gameType: string, maxPlayers: number)
-              - DEPENDS_ON:
-                - PlayerFactory FROM ./Player
-              - INSTANTIATES:
-                - Array
-              - CALLS:
-                - Array.prototype.map
-                - PlayerFactory.createEmptyPlayer
-            - METHOD: addPlayer(player: Player, position?: number)
-              - DEPENDS_ON:
-                - Player FROM ./Player
-              - CALLS:
-                - this.findEmptySlot ON this
-            - METHOD: removePlayer(playerId: string)
-              - DEPENDS_ON:
-                - Player FROM ./Player
-              - CALLS:
-                - this.findPlayerIndex ON this
-                - console.log
-                - Array.prototype.filter
-                - this.advanceToNextActivePlayer ON this
-            - METHOD: markPlayerAborted(playerId: string)
-              - DEPENDS_ON:
-                - Player FROM ./Player
-              - CALLS:
-                - this.findPlayerIndex ON this
-                - Array.prototype.filter
-                - this.advanceToNextActivePlayer ON this
-            - METHOD: findPlayerIndex(playerId: string)
-              - DEPENDS_ON:
-                - Player FROM ./Player
-              - CALLS:
-                - Array.prototype.findIndex
-            - METHOD: findEmptySlot()
-              - DEPENDS_ON:
-                - Player FROM ./Player
-              - CALLS:
-                - Array.prototype.findIndex
-            - METHOD: isGameFull()
-            - METHOD: getCurrentTurnNumber()
-            - METHOD: incrementRollCount()
-            - METHOD: advanceToNextActivePlayer()
-              - DEPENDS_ON:
-                - Player FROM ./Player
-              - CALLS:
-                - console.log
-                - Array.prototype.filter
-            - METHOD: applySelection(playerIndex: number, selectionLabel: string, score: number)
-              - DEPENDS_ON:
-                - getSelectionIndex FROM ../utils/yatzyMapping
-                - Player FROM ./Player
-                - BoardCell FROM ./BoardCell
-              - CALLS:
-                - getSelectionIndex
-                - console.log
-                - player.calculateScores ON player
-                - console.warn
-                - console.error
-            - METHOD: isGameFinished()
-              - DEPENDS_ON:
-                - Player FROM ./Player
-              - CALLS:
-                - Array.prototype.filter
-                - Array.prototype.every
-                - player.hasCompletedGame ON player
-            - METHOD: setDiceValues(values: number[])
-              - CALLS:
-                - console.error
-            - METHOD: toJSON()
-              - DEPENDS_ON:
-                - Player FROM ./Player
-              - CALLS:
-                - Array.prototype.map
-                - player.toJSON ON player
-                - this.isGameFinished ON this
-            - METHOD: fromJSON(data: any) [STATIC]
-              - DEPENDS_ON:
-                - Player FROM ./Player
-                - PlayerFactory FROM ./Player
-              - INSTANTIATES:
-                - Game
-                - Array
-              - CALLS:
-                - Array.isArray
-                - Player.fromJSON
-                - PlayerFactory.createEmptyPlayer
-                - PlayerFactory.createPlayer
-                - Array.prototype.filter
-    IMPORTS:
-      - Player, PlayerFactory FROM ./Player
-      - v4 as uuidv4 FROM uuid
-      - getSelectionIndex FROM ../utils/yatzyMapping
-
-  - FILE: backend/src/models/Player.ts
-    LANGUAGE: TypeScript
-    CLASSES:
-      - CLASS: Player
-        - PROPERTIES:
-          - id: string
-          - username: string
-          - isActive: boolean
-          - cells: BoardCell[]
-          - score: number
-          - upperSum: number
-          - bonusAchieved: boolean
-          - gameType: string
-        - METHODS:
-            - METHOD: constructor(id: string, username: string, gameType?: string, isActive?: boolean, cells?: BoardCell[], score?: number, upperSum?: number, bonusAchieved?: boolean)
-              - DEPENDS_ON:
-                - BoardCell FROM ./BoardCell
-                - GameConfig, getBaseGameType FROM ../utils/gameConfig
-              - CALLS:
-                - getBaseGameType
-                - GameConfig[...]
-                - Array.prototype.map
-            - METHOD: calculateScores()
-              - DEPENDS_ON:
-                - GameConfig, getBaseGameType FROM ../utils/gameConfig
-                - BoardCell FROM ./BoardCell
-              - CALLS:
-                - getBaseGameType
-                - GameConfig[...]
-                - Array.prototype.findIndex
-                - Array.prototype.slice
-                - Array.prototype.every
-                - console.log
-            - METHOD: hasCompletedGame()
-              - DEPENDS_ON:
-                - BoardCell FROM ./BoardCell
-              - CALLS:
-                - Array.prototype.every
-            - METHOD: getScore()
-            - METHOD: toJSON()
-              - DEPENDS_ON:
-                - BoardCell FROM ./BoardCell
-              - CALLS:
-                - Array.prototype.map
-                - cell.toJSON ON cell
-            - METHOD: fromJSON(data: any, gameType?: string) [STATIC]
-              - DEPENDS_ON:
-                - BoardCell FROM ./BoardCell
-                - GameConfig, getBaseGameType FROM ../utils/gameConfig
-              - INSTANTIATES:
-                - Player
-              - CALLS:
-                - getBaseGameType
-                - GameConfig[...]
-                - Array.prototype.map
-                - BoardCell.fromJson
-      - CLASS: PlayerFactory
-        - METHODS:
-            - METHOD: createPlayer(id: string, username: string, gameType?: string) [STATIC]
-              - DEPENDS_ON:
-                - Player FROM ./Player
-                - getBaseGameType FROM ../utils/gameConfig
-              - INSTANTIATES:
-                - Player
-              - CALLS:
-                - getBaseGameType
-                - console.warn
-                - Array.prototype.includes
-            - METHOD: createEmptyPlayer(gameType?: string) [STATIC]
-              - DEPENDS_ON:
-                - Player FROM ./Player
-                - BoardCell FROM ./BoardCell
-                - GameConfig, getBaseGameType FROM ../utils/gameConfig
-              - INSTANTIATES:
-                - Player
-                - BoardCell
-              - CALLS:
-                - getBaseGameType
-                - console.warn
-                - Array.prototype.includes
-                - GameConfig[...]
-                - Array.prototype.map
-    IMPORTS:
-      - BoardCell FROM ./BoardCell
-      - GameConfig, getBaseGameType FROM ../utils/gameConfig
-
-  - FILE: backend/src/routes/getLogRoute.ts
-    LANGUAGE: TypeScript
-    OBJECTS:
-      - OBJECT: getLogRoute
-        - PROPERTIES:
-          - path: string
-          - method: string
-          - handler: async function
-            - DEPENDS_ON:
-              - jwt FROM jsonwebtoken
-              - getDbConnection FROM ../db
-              - process.env.JWT_SECRET
-            - CALLS:
-              - console.log
-              - res.status(...).json(...) ON res
-              - authorization.split
-              - jwt.verify
-              - getDbConnection
-              - db.collection
-              - collection.find
-              - cursor.toArray
-
-  - FILE: backend/src/routes/getTopScores.ts
-    LANGUAGE: TypeScript
-    OBJECTS:
-      - OBJECT: getTopScores
-        - PROPERTIES:
-          - path: string
-          - method: string
-          - handler: async function
-            - DEPENDS_ON:
-              - getDbConnection FROM ../db
-            - CALLS:
-              - getDbConnection
-              - console.warn
-              - res.status(...).json(...) ON res
-              - Array.prototype.includes
-              - console.log
-              - db.collection
-              - collection.find(...).sort(...).toArray
-              - res.status(...).json(...) ON res
-              - res.sendStatus ON res
-
-  - FILE: backend/src/routes/index.ts
-    LANGUAGE: TypeScript
-    FUNCTIONS:
-      - FUNCTION: routes()
-        - DEPENDS_ON:
-          - logInRoute FROM ./logInRoute
-          - logRoute FROM ./logRoute
-          - getLogRoute FROM ./getLogRoute
-          - signUpRoute FROM ./signUpRoute
-          - getTopScores FROM ./getTopScores
-          - updateTopScore FROM ./updateTopScore
-        - RETURNS: Array of routes
-    IMPORTS:
-      - logInRoute FROM ./logInRoute
-      - logRoute FROM ./logRoute
-      - getLogRoute FROM ./getLogRoute
-      - signUpRoute FROM ./signUpRoute
-      - getTopScores FROM ./getTopScores
-      - updateTopScore FROM ./updateTopScore
-
-  - FILE: backend/src/routes/logInRoute.ts
-    LANGUAGE: TypeScript
-    OBJECTS:
-      - OBJECT: logInRoute
-        - PROPERTIES:
-          - path: string
-          - method: string
-          - handler: async function
-            - DEPENDS_ON:
-              - bcrypt FROM bcrypt
-              - jwt FROM jsonwebtoken
-              - getDbConnection FROM ../db
-              - process.env.JWT_SECRET
-            - CALLS:
-              - getDbConnection
-              - db.collection
-              - collection.findOne
-              - res.sendStatus ON res
-              - bcrypt.compare
-              - jwt.sign
-              - res.status(...).json(...) ON res
-
-  - FILE: backend/src/routes/logRoute.ts
-    LANGUAGE: TypeScript
-    OBJECTS:
-      - OBJECT: logRoute
-        - PROPERTIES:
-          - path: string
-          - method: string
-          - handler: async function
-            - DEPENDS_ON:
-              - jwt FROM jsonwebtoken
-              - getDbConnection FROM ../db
-              - process.env.JWT_SECRET
-            - CALLS:
-              - console.log
-              - res.status(...).json(...) ON res
-              - authorization.split
-              - jwt.verify
-              - getDbConnection
-              - db.collection
-              - collection.findOneAndUpdate
-              - res.status(...).json(...) ON res
-
-  - FILE: backend/src/routes/signUpRoute.ts
-    LANGUAGE: TypeScript
-    OBJECTS:
-      - OBJECT: signUpRoute
-        - PROPERTIES:
-          - path: string
-          - method: string
-          - handler: async function
-            - DEPENDS_ON:
-              - bcrypt FROM bcrypt
-              - jwt FROM jsonwebtoken
-              - getDbConnection FROM ../db
-              - process.env.JWT_SECRET
-            - CALLS:
-              - getDbConnection
-              - db.collection
-              - collection.findOne
-              - console.log
-              - res.sendStatus ON res
-              - bcrypt.hash
-              - db.collection.insertOne
-              - jwt.sign
-              - res.status(...).send(...) ON res
-              - res.status(...).json(...) ON res
-
-  - FILE: backend/src/routes/spectateGameRoute.ts
-    LANGUAGE: TypeScript
-    VARIABLES:
-      - VARIABLE: gameServiceInstance: GameService
-      - VARIABLE: gameLogServiceInstance: GameLogService
-    FUNCTIONS:
-      - FUNCTION: initializeSpectateRoute(gs: GameService, gls: GameLogService)
-        - DEPENDS_ON:
-          - GameService FROM ../services/GameService
-          - GameLogService FROM ../services/GameLogService
-      - OBJECT: spectateGameRoute
-        - PROPERTIES:
-          - path: string
-          - method: string
-          - handler: async function (req: Request, res: Response)
-            - DEPENDS_ON:
-              - Request, Response FROM express
-              - gameServiceInstance
-              - gameLogServiceInstance
-            - CALLS:
-              - parseInt
-              - console.log
-              - console.error
-              - res.status(...).json(...) ON res
-              - isNaN
-              - gameServiceInstance.getGame
-              - player.calculateScores ON player
-              - game.toJSON
-              - gameLogServiceInstance.getGameLog
-              - Array.prototype.filter
-              - Array.prototype.forEach
-    IMPORTS:
-      - Request, Response FROM express
-      - GameService FROM ../services/GameService
-      - GameLogService FROM ../services/GameLogService
-      - getDbConnection FROM ../db
-
-  - FILE: backend/src/routes/updateTopScore.ts
-    LANGUAGE: TypeScript
-    OBJECTS:
-      - OBJECT: updateTopScore
-        - PROPERTIES:
-          - path: string
-          - method: string
-          - handler: async function
-            - DEPENDS_ON:
-              - getDbConnection FROM ../db
-            - CALLS:
-              - getDbConnection
-              - console.warn
-              - res.status(...).json(...) ON res
-              - Array.prototype.includes
-              - db.collection
-              - collection.insertOne
-              - collection.find(...).sort(...).toArray
-              - res.status(...).json(...) ON res
-              - console.log
-              - res.sendStatus ON res
-    IMPORTS:
-      - getDbConnection FROM ../db
-
-  - FILE: backend/src/server.ts
-    LANGUAGE: TypeScript
-    VARIABLES:
-      - VARIABLE: PORT: number
-      - VARIABLE: app: express.Application
-      - VARIABLE: httpServer: http.Server
-      - VARIABLE: isOnline: boolean
-      - VARIABLE: localFlutterDir: string
-      - VARIABLE: localReactDir: string
-      - VARIABLE: io: socket.io.Server
-      - VARIABLE: gameLogService: GameLogService
-      - VARIABLE: topScoreService: TopScoreService
-      - VARIABLE: gameService: GameService
-      - VARIABLE: gameController: GameController
-      - VARIABLE: playerController: PlayerController
-      - VARIABLE: chatController: ChatController
-    SETUP:
-      - Express app created
-      - CORS enabled
-      - HTTP server created from Express app
-      - Static file serving configured (based on isOnline)
-      - JSON middleware enabled
-      - Routes added from './routes/index' and 'spectateGameRoute'
-      - Socket.IO server created and configured with CORS, transport, timeout, etc.
-      - Socket.IO middleware added for logging
-      - Service instances created (GameLogService, TopScoreService, GameService) injecting dependencies
-      - Controller instances created (GameController, PlayerController, ChatController) injecting dependencies
-      - Spectate route initialized with services
-      - Socket.IO connection handler (`io.on('connect', ...)`):
-        - Logs connection
-        - Emits 'welcome' message
-        - Sets up 'echo' listener
-        - Registers handlers from GameController, PlayerController, ChatController
-        - Sets up 'sendToServer' listener (handles 'requestTopScores', logs 'chatMessage')
-        - Sets up 'sendToClients' listener (logs 'chatMessage')
-        - Sets up 'disconnect' listener (calls gameService.handlePlayerDisconnect)
-      - Express route '/flutter' configured
-      - Express wildcard route '*' configured
-      - Database initialized via `initializeDbConnection`
-      - Server started (`httpServer.listen`) after DB connection
-    IMPORTS:
-      - express FROM express
-      - routes FROM ./routes/index
-      - initializeDbConnection FROM ./db
-      - path FROM path
-      - cors FROM cors
-      - Server FROM socket.io
-      - createServer FROM http
-      - GameService FROM ./services/GameService
-      - GameLogService FROM ./services/GameLogService
-      - TopScoreService FROM ./services/TopScoreService
-      - GameController FROM ./controllers/GameController
-      - PlayerController FROM ./controllers/PlayerController
-      - ChatController FROM ./controllers/ChatController
-      - spectateGameRoute, initializeSpectateRoute FROM ./routes/spectateGameRoute
-
-  - FILE: backend/src/services/GameLogService.ts
-    LANGUAGE: TypeScript
-    INTERFACES:
-      - INTERFACE: GameMove
-      - INTERFACE: GameLog
-    CLASSES:
-      - CLASS: GameLogService
-        - METHODS:
-            - METHOD: getCollection()
-              - DEPENDS_ON:
-                - getDbConnection FROM ../db
-                - Collection FROM mongodb
-                - GameLog
-              - CALLS:
-                - getDbConnection
-                - db.collection
-            - METHOD: getDatabaseName()
-            - METHOD: getCollectionName()
-            - METHOD: logGameStart(game: Game)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-                - GameLog
-              - CALLS:
-                - console.log
-                - this.getCollection ON this
-                - Array.prototype.map
-                - Date
-                - collection.replaceOne
-                - console.error
-            - METHOD: logMove(gameId: number, move: GameMove)
-              - DEPENDS_ON:
-                - GameMove
-                - GameLog
-                - getDbConnection FROM ../db
-              - CALLS:
-                - console.log
-                - getDbConnection
-                - console.error
-                - this.getCollection ON this
-                - collection.findOne
-                - Date
-                - collection.insertOne
-                - JSON.stringify
-                - collection.updateOne
-            - METHOD: logGameEnd(gameId: number, finalScores: { username: string; score: number }[])
-              - DEPENDS_ON:
-                - GameLog
-              - CALLS:
-                - console.log
-                - this.getCollection ON this
-                - Date
-                - collection.updateOne
-                - console.error
-            - METHOD: getGameLog(gameId: number)
-              - DEPENDS_ON:
-                - GameLog
-              - CALLS:
-                - console.log
-                - this.getCollection ON this
-                - collection.findOne
-                - console.error
-            - METHOD: logSpectate(gameId: number, spectatorId: string, spectatorName: string)
-              - DEPENDS_ON:
-                - GameMove
-                - GameLog
-              - CALLS:
-                - console.log
-                - this.getGameLog ON this
-                - console.error
-                - Date
-                - this.getCollection ON this
-                - collection.updateOne
-    IMPORTS:
-      - Collection FROM mongodb
-      - getDbConnection FROM ../db
-      - Game FROM ../models/Game
-
-  - FILE: backend/src/services/GameService.ts
-    LANGUAGE: TypeScript
-    CLASSES:
-      - CLASS: GameService
-        - PROPERTIES:
-          - games: Map<number, Game>
-          - spectators: Map<number, Set<string>>
-          - gameIdCounter: number
-          - io: Server
-          - gameLogService: GameLogService
-          - topScoreService: TopScoreService
-        - METHODS:
-            - METHOD: constructor(io: Server, gameLogService: GameLogService, topScoreService: TopScoreService)
-              - DEPENDS_ON:
-                - Server FROM socket.io
-                - GameLogService FROM ./GameLogService
-                - TopScoreService FROM ./TopScoreService
-            - METHOD: addSpectator(gameId: number, spectatorId: string)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-              - CALLS:
-                - this.games.get ON this.games
-                - console.log
-                - this.spectators.has ON this.spectators
-                - this.spectators.set ON this.spectators
-                - this.spectators.get ON this.spectators
-                - Set.prototype.has
-                - Set.prototype.add
-                - game.toJSON ON game
-                - this.io.to(...).emit('onServerMsg') ON this.io [EVENT]
-            - METHOD: removeSpectator(spectatorId: string)
-              - CALLS:
-                - Set.prototype.delete
-                - console.log
-                - this.spectators.delete ON this.spectators
-            - METHOD: createGame(gameType: string, maxPlayers: number)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-              - INSTANTIATES:
-                - Game
-              - CALLS:
-                - this.games.set ON this.games
-                - console.log
-                - this.gameLogService.logGameStart ON this.gameLogService
-                - console.error
-            - METHOD: findAvailableGame(gameType: string, maxPlayers: number)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-              - CALLS:
-                - game.isGameFull ON game
-            - METHOD: getGame(gameId: number)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-              - CALLS:
-                - this.games.get ON this.games
-            - METHOD: getAllGames()
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-              - CALLS:
-                - Array.from
-            - METHOD: removeGame(gameId: number)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-                - Player FROM ../models/Player
-              - CALLS:
-                - this.games.get ON this.games
-                - Array.prototype.filter
-                - Array.prototype.map
-                - player.getScore ON player
-                - console.log
-                - this.gameLogService.logGameEnd ON this.gameLogService
-                - console.error
-                - this.games.delete ON this.games
-            - METHOD: joinGame(gameId: number, player: Player)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-                - Player FROM ../models/Player
-              - CALLS:
-                - this.games.get ON this.games
-                - game.isGameFull ON game
-                - game.addPlayer ON game
-                - console.log
-                - this.gameLogService.logGameStart ON this.gameLogService
-                - console.error
-            - METHOD: handlePlayerDisconnect(playerId: string)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-                - GameMove FROM ./GameLogService
-              - CALLS:
-                - game.findPlayerIndex ON game
-                - console.log
-                - game.getCurrentTurnNumber ON game
-                - Date
-                - this.gameLogService.logMove ON this.gameLogService
-                - console.error
-                - game.markPlayerAborted ON game
-                - this.handleGameFinished ON this
-                - this.notifyGameUpdate ON this
-                - this.broadcastGameList ON this
-                - this.removeSpectator ON this
-            - METHOD: broadcastGameList()
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-              - CALLS:
-                - Array.from
-                - Array.prototype.filter
-                - Array.prototype.map
-                - game.toJSON ON game
-                - this.io.emit('onServerMsg') ON this.io [EVENT]
-                - console.log
-            - METHOD: broadcastGameListToPlayer(playerId: string)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-              - CALLS:
-                - Array.from
-                - Array.prototype.filter
-                - Array.prototype.map
-                - game.toJSON ON game
-                - this.io.to(...).emit('onServerMsg') ON this.io [EVENT]
-                - console.log
-            - METHOD: notifyGameUpdate(game: Game)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-                - Player FROM ../models/Player
-              - CALLS:
-                - game.toJSON ON game
-                - console.log
-                - this.io.to(...).emit('onServerMsg') ON this.io [EVENT]
-                - this.spectators.get ON this.spectators
-            - METHOD: handlePlayerStartingNewGame(playerId: string)
-              - CALLS:
-                - console.log
-                - this.handlePlayerDisconnect ON this
-            - METHOD: handlePlayerAbort(playerId: string)
-              - CALLS:
-                - console.log
-                - this.handlePlayerDisconnect ON this
-            - METHOD: handleGameFinished(game: Game)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-                - Player FROM ../models/Player
-                - TopScoreService FROM ./TopScoreService
-              - CALLS:
-                - console.log
-                - Array.prototype.filter
-                - Array.prototype.map
-                - player.getScore ON player
-                - this.gameLogService.logGameEnd ON this.gameLogService
-                - console.error
-                - this.topScoreService.updateTopScore ON this.topScoreService
-                - Promise.all
-                - this.notifyGameFinished ON this
-                - this.games.delete ON this.games
-                - this.spectators.has ON this.spectators
-                - this.spectators.delete ON this.spectators
-                - this.broadcastGameList ON this
-            - METHOD: notifyGameFinished(game: Game)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-                - Player FROM ../models/Player
-              - CALLS:
-                - game.toJSON ON game
-                - console.log
-                - this.io.to(...).emit('onServerMsg') ON this.io [EVENT]
-                - this.spectators.get ON this.spectators
-            - METHOD: processDiceRoll(gameId: number, playerId: string, diceValues: number[], keptDice: boolean[], isRegret?: boolean, isExtra?: boolean)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-                - GameMove FROM ./GameLogService
-                - Player FROM ../models/Player
-              - CALLS:
-                - this.games.get ON this.games
-                - console.error
-                - game.findPlayerIndex ON game
-                - game.getCurrentTurnNumber ON game
-                - Date
-                - console.log
-                - this.gameLogService.logMove ON this.gameLogService
-                - game.setDiceValues ON game
-                - game.incrementRollCount ON game
-                - this.io.to(...).emit('onClientMsg') ON this.io [EVENT]
-                - this.notifyGameUpdate ON this
-                - this.spectators.get ON this.spectators
-            - METHOD: processSelection(gameId: number, playerId: string, selectionLabel: string, score: number)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-                - GameMove FROM ./GameLogService
-                - Player FROM ../models/Player
-              - CALLS:
-                - this.games.get ON this.games
-                - console.error
-                - game.findPlayerIndex ON game
-                - console.log
-                - game.getCurrentTurnNumber ON game
-                - Date
-                - this.gameLogService.logMove ON this.gameLogService
-                - this.gameLogService.getGameLog ON this.gameLogService
-                - Array.prototype.filter
-                - game.applySelection ON game
-                - game.isGameFinished ON game
-                - this.handleGameFinished ON this
-                - game.setDiceValues ON game
-                - game.advanceToNextActivePlayer ON game
-                - this.notifyGameUpdate ON this
-                - game.toJSON ON game
-                - this.io.to(...).emit('onServerMsg') ON this.io [EVENT]
-                - this.spectators.get ON this.spectators
-            - METHOD: forwardSelectionToPlayers(gameId: number, senderId: string, selectionData: any)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-                - getSelectionLabel FROM ../utils/yatzyMapping
-                - Player FROM ../models/Player
-              - CALLS:
-                - this.games.get ON this.games
-                - console.log
-                - console.error
-                - getSelectionLabel
-                - game.findPlayerIndex ON game
-                - this.io.to(...).emit('onClientMsg') ON this.io [EVENT]
-            - METHOD: createOrJoinGame(gameType: string, maxPlayers: number, player: Player)
-              - DEPENDS_ON:
-                - Game FROM ../models/Game
-                - Player FROM ../models/Player
-              - CALLS:
-                - console.error
-                - console.warn
-                - Array.prototype.includes
-                - this.handlePlayerStartingNewGame ON this
-                - this.findAvailableGame ON this
-                - console.log
-                - this.createGame ON this
-                - game.addPlayer ON game
-                - this.gameLogService.logGameStart ON this.gameLogService
-                - Array.prototype.filter
-                - game.isGameFull ON game
-                - game.toJSON ON game
-                - this.io.to(...).emit('onServerMsg') ON this.io [EVENT]
-                - this.notifyGameUpdate ON this
-                - this.broadcastGameList ON this
-    IMPORTS:
-      - Game FROM ../models/Game
-      - Player, PlayerFactory FROM ../models/Player
-      - Server, Socket FROM socket.io
-      - GameLogService, GameMove FROM ./GameLogService
-      - TopScoreService FROM ./TopScoreService
-      - getSelectionLabel FROM ../utils/yatzyMapping
-
-  - FILE: backend/src/services/TopScoreService.ts
-    LANGUAGE: TypeScript
-    VARIABLES:
-      - VARIABLE: DB_NAME: string
-      - VARIABLE: SUPPORTED_GAME_TYPES: string[]
-    INTERFACES:
-      - INTERFACE: TopScoreEntry
-    CLASSES:
-      - CLASS: TopScoreService
-        - PROPERTIES:
-          - io: Server
-        - METHODS:
-            - METHOD: constructor(io: Server)
-              - DEPENDS_ON:
-                - Server FROM socket.io
-            - METHOD: getDb()
-              - DEPENDS_ON:
-                - getDbConnection FROM ../db
-                - Db FROM mongodb
-              - CALLS:
-                - getDbConnection
-            - METHOD: getCollection(gameType: string)
-              - DEPENDS_ON:
-                - SUPPORTED_GAME_TYPES
-                - Collection FROM mongodb
-                - TopScoreEntry
-              - CALLS:
-                - Array.prototype.includes
-                - console.warn
-                - this.getDb ON this
-                - String.prototype.charAt
-                - String.prototype.slice
-                - db.collection
-            - METHOD: getTopScores(gameType: string, limit?: number)
-              - DEPENDS_ON:
-                - SUPPORTED_GAME_TYPES
-                - TopScoreEntry
-              - CALLS:
-                - Array.prototype.includes
-                - console.warn
-                - this.getCollection ON this
-                - collection.find(...).sort(...).limit(...).toArray
-                - console.log
-                - console.error
-            - METHOD: getAllTopScores()
-              - DEPENDS_ON:
-                - SUPPORTED_GAME_TYPES
-                - TopScoreEntry
-              - CALLS:
-                - console.log
-                - this.getTopScores ON this
-            - METHOD: broadcastTopScores()
-              - DEPENDS_ON:
-                - TopScoreEntry
-              - CALLS:
-                - this.getAllTopScores ON this
-                - this.io.emit('onTopScoresUpdate') ON this.io [EVENT]
-                - console.log
-                - console.error
-            - METHOD: updateTopScore(gameType: string, name: string, score: number)
-              - DEPENDS_ON:
-                - SUPPORTED_GAME_TYPES
-              - CALLS:
-                - console.warn
-                - Array.prototype.includes
-                - this.getCollection ON this
-                - collection.insertOne
-                - console.log
-                - console.error
-    IMPORTS:
-      - Collection, Db FROM mongodb
-      - getDbConnection FROM ../db
-      - Server FROM socket.io
-
-  - FILE: backend/src/utils/gameConfig.ts
-    LANGUAGE: TypeScript
-    INTERFACES:
-      - INTERFACE: GameTypeConfig
-    VARIABLES:
-      - VARIABLE: GameConfig: { [key: string]: GameTypeConfig }
-    FUNCTIONS:
-      - FUNCTION: getBaseGameType(gameType: string)
-        - CALLS:
-          - String.prototype.startsWith
-
-  - FILE: backend/src/utils/index.ts
-    LANGUAGE: TypeScript
-    FUNCTIONS:
-      - FUNCTION: randomInt(min: number, max: number)
-        - CALLS:
-          - Math.floor
-          - Math.random
-      - FUNCTION: delay(ms: number)
-        - INSTANTIATES:
-          - Promise
-        - CALLS:
-          - setTimeout
-      - FUNCTION: isDefined<T>(value: T | undefined | null)
-      - FUNCTION: deepCopy<T>(obj: T)
-        - CALLS:
-          - JSON.parse
-          - JSON.stringify
-
-  - FILE: backend/src/utils/yatzyMapping.ts
-    LANGUAGE: TypeScript
-    VARIABLES:
-      - VARIABLE: gameTypeMappings: object
-    FUNCTIONS:
-      - FUNCTION: getBaseGameType(gameType: string)
-        - CALLS:
-          - String.prototype.startsWith
-      - FUNCTION: getSelectionLabel(gameType: string, index: number)
-        - CALLS:
-          - getBaseGameType
-          - console.error
-      - FUNCTION: getSelectionIndex(gameType: string, label: string)
-        - CALLS:
-          - getBaseGameType
-          - Array.prototype.indexOf
-          - console.error
-
-  - FILE: lib/application/animations_application.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: AnimationsApplication
-        - PROPERTIES:
-          - animationControllers: List<AnimationController>
-          - animationDurations: List<Duration>
-          - cellAnimationControllers: List<dynamic>
-          - cellAnimation: List<dynamic>
-          - players: int
-          - boardXAnimationPos: List<dynamic>
-          - boardYAnimationPos: List<dynamic>
-        - METHODS:
-            - METHOD: animateBoard()
-              - CALLS:
-                - cellAnimationControllers[i][0].forward
-            - METHOD: setupAnimation(TickerProvider ticket, int nrPlayers, int maxNrPlayers, int maxTotalFields)
-              - DEPENDS_ON:
-                - AnimationController FROM flutter/animation.dart
-                - TickerProvider FROM flutter/animation.dart
-                - Duration
-                - CurveTween FROM flutter/animation.dart
-                - Curves FROM flutter/animation.dart
-              - INSTANTIATES:
-                - AnimationController
-                - CurveTween
-              - CALLS:
-                - animationControllers.add
-                - animationControllers[0].addStatusListener
-                - animationControllers[0].reverse
-                - cellAnimationControllers.add
-                - cellAnimation.add
-                - cellAnimationControllers[i][j].addListener
-                - cellAnimationControllers[i][j+1].forward
-                - cellAnimationControllers[i][j].addStatusListener
-                - cellAnimationControllers[i][j].reverse
-    IMPORTS:
-      - flutter/animation.dart
-
-  - FILE: lib/application/application_functions_internal_calc_dice_values.dart
-    LANGUAGE: Dart
-    EXTENSIONS:
-      - EXTENSION: ApplicationCalcDiceValues ON Application
-        - METHODS:
-          - METHOD: zero()
-          - METHOD: calcOnes()
-          - METHOD: calcTwos()
-          - METHOD: calcThrees()
-          - METHOD: calcFours()
-          - METHOD: calcFives()
-          - METHOD: calcSixes()
-          - METHOD: calcDiceNr()
-            - INSTANTIATES:
-              - List.filled
-          - METHOD: calcPair()
-            - CALLS:
-              - calcDiceNr ON this
-          - METHOD: calcTwoPairs()
-            - CALLS:
-              - calcDiceNr ON this
-          - METHOD: calcThreePairs()
-            - CALLS:
-              - calcDiceNr ON this
-          - METHOD: calcThreeOfKind()
-            - CALLS:
-              - calcDiceNr ON this
-          - METHOD: calcFourOfKind()
-            - CALLS:
-              - calcDiceNr ON this
-          - METHOD: calcFiveOfKind()
-            - CALLS:
-              - calcDiceNr ON this
-          - METHOD: calcYatzy()
-            - CALLS:
-              - calcDiceNr ON this
-          - METHOD: calcHouse()
-            - CALLS:
-              - calcDiceNr ON this
-          - METHOD: calcTower()
-            - CALLS:
-              - calcDiceNr ON this
-          - METHOD: calcVilla()
-            - CALLS:
-              - calcDiceNr ON this
-          - METHOD: calcSmallLadder()
-            - CALLS:
-              - calcDiceNr ON this
-              - String.startsWith
-          - METHOD: calcLargeLadder()
-            - CALLS:
-              - calcDiceNr ON this
-              - String.startsWith
-          - METHOD: calcFullLadder()
-            - CALLS:
-              - calcDiceNr ON this
-              - String.startsWith
-          - METHOD: calcChance()
-    IMPORTS:
-      - ./application.dart
-
-  - FILE: lib/application/application_functions_internal.dart
-    LANGUAGE: Dart
-    EXTENSIONS:
-      - EXTENSION: ApplicationFunctionsInternal ON Application
-        - METHODS:
-          - METHOD: clearFocus()
-            - INSTANTIATES:
-              - List.filled
-          - METHOD: cellClick(int player, int cell)
-            - DEPENDS_ON:
-              - getSelectionLabel FROM ../utils/yatzy_mapping_client.dart
-            - CALLS:
-              - getSelectionLabel
-              - print
-              - this.socketService?.sendToClients ON this.socketService
-              - this.applyLocalSelection ON this
-          - METHOD: applyLocalSelection(int player, int cell, int score)
-            - DEPENDS_ON:
-              - Colors FROM flutter/material.dart
-              - SetStateCubit FROM ../states/cubit/state/state_cubit.dart
-              - Provider FROM provider/provider.dart
-            - CALLS:
-              - gameDices.sendResetToUnity ON gameDices
-              - Colors.green.withAlpha
-              - List.sublist
-              - List.contains
-              - clearFocus ON this
-              - colorBoard ON this
-              - gameDices.clearDices ON gameDices
-              - print
-              - animation.animateBoard ON animation
-              - context.read<SetStateCubit>().setState
-          - METHOD: colorBoard()
-            - DEPENDS_ON:
-              - Colors FROM flutter/material.dart
-            - CALLS:
-              - Colors.greenAccent.withAlpha
-              - Colors.grey.withAlpha
-              - Colors.black.withAlpha
-              - Colors.blue.withAlpha
-              - Colors.green.withAlpha
-              - Colors.blueAccent.withAlpha
-              - Colors.white.withAlpha
-    IMPORTS:
-      - flutter/material.dart
-      - yatzy/dices/unity_communication.dart
-      - ../startup.dart
-      - ./application.dart
-      - ../utils/yatzy_mapping_client.dart
-      - ../states/cubit/state/state_cubit.dart
-      - provider/provider.dart
-
-  - FILE: lib/application/application.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: Application WITH LanguagesApplication
-        - PROPERTIES:
-          - context: BuildContext
-          - inputItems: InputItems
-          - isSpectating: bool
-          - spectatedGameId: int
-          - tabController: dynamic
-          - textEditingController: TextEditingController
-          - focusNode: FocusNode
-          - animation: AnimationsApplication
-          - games: List
-          - presentations: List
-          - boardAnimation: bool
-          - stackedWidgets: List<Widget>
-          - gameType: String
-          - nrPlayers: int
-          - maxNrPlayers: int
-          - maxTotalFields: int
-          - gameData: Map<String, dynamic>
-          - gameId: int
-          - playerIds: List
-          - playerActive: List
-          - totalFields: int
-          - bonusSum: int
-          - bonusAmount: int
-          - myPlayerId: int
-          - playerToMove: int
-          - winnerId: int
-          - gameStarted: bool
-          - gameFinished: bool
-          - boardXPos, boardYPos, boardWidth, boardHeight, cellValue, fixedCell, appText, appColors, focusStatus: List
-          - listenerKey: GlobalKey
-          - gameDices: Dices
-          - yatzyFunctions: List<YatzyFunctions>
-          - serverId: String
-          - cellKeys: List
-          - socketService: SocketService?
-        - METHODS:
-            - METHOD: constructor({required BuildContext context, required Dices gameDices, required InputItems inputItems})
-              - CALLS:
-                - gameDices.setCallbacks ON gameDices
-                - languagesSetup ON this
-                - getChosenLanguage ON this
-                - getStandardLanguage ON this
-            - METHOD: getChosenLanguage()
-            - METHOD: getStandardLanguage()
-            - METHOD: callbackCheckPlayerToMove()
-            - METHOD: callbackUnityCreated()
-              - CALLS:
-                - gameDices.sendStartToUnity ON gameDices
-            - METHOD: callbackUpdateDiceValues()
-              - CALLS:
-                - updateDiceValues ON this
-                - print
-                - this.socketService?.sendToClients ON this.socketService
-            - METHOD: updateDiceValues()
-              - DEPENDS_ON:
-                - SetStateCubit FROM ../states/cubit/state/state_cubit.dart
-              - CALLS:
-                - clearFocus ON this
-                - yatzyFunctions[i]()
-                - context.read<SetStateCubit>().setState
-            - METHOD: setAppText()
-              - CALLS:
-                - String.startsWith
-            - METHOD: setup()
-              - DEPENDS_ON:
-                - SetStateCubit FROM ../states/cubit/state/state_cubit.dart
-              - CALLS:
-                - topScore.loadTopScoreFromServer ON topScore
-                - context.read<SetStateCubit>()
-                - String.startsWith
-                - gameDices.initDices ON gameDices
-                - List.filled
-                - setAppText ON this
-                - clearFocus ON this
-                - Colors.white.withValues
-                - Colors.blueAccent.withValues
-                - Colors.greenAccent.withValues
-                - Colors.blue.withValues
-                - Colors.grey.withValues
-                - gameDices.sendResetToUnity ON gameDices
-                - gameDices.sendStartToUnity ON gameDices
-                - GlobalKey
-            - METHOD: setSocketService(SocketService service)
-              - CALLS:
-                - print
-    IMPORTS:
-      - flutter/material.dart
-      - flutter_bloc/flutter_bloc.dart
-      - yatzy/application/application_functions_internal.dart
-      - yatzy/dices/unity_communication.dart
-      - yatzy/services/socket_service.dart
-      - ./application_functions_internal_calc_dice_values.dart
-      - ../dices/dices.dart
-      - ../input_items/input_items.dart
-      - ../startup.dart
-      - ../states/cubit/state/state_cubit.dart
-      - ./animations_application.dart
-      - ./languages_application.dart
-
-  - FILE: lib/application/communication_application.dart
-    LANGUAGE: Dart
-    EXTENSIONS:
-      - EXTENSION: CommunicationApplication ON Application
-        - METHODS:
-          - METHOD: resetDices()
-            - CALLS:
-              - gameDices.clearDices ON gameDices
-              - clearFocus ON this
-          - METHOD: handlePlayerAbort(int abortedPlayerIndex)
-            - DEPENDS_ON:
-              - Colors FROM flutter/material.dart
-            - CALLS:
-              - print
-              - Colors.black.withValues
-              - advanceToNextActivePlayer ON this
-              - colorBoard ON this
-          - METHOD: advanceToNextActivePlayer()
-            - CALLS:
-              - print
-              - colorBoard ON this
-              - resetDices ON this
-              - gameDices.sendResetToUnity ON gameDices
-              - gameDices.sendStartToUnity ON gameDices
-          - METHOD: callbackOnServerMsg(dynamic data)
-            - DEPENDS_ON:
-              - getIt FROM ../injection.dart
-              - AppRouter FROM ../router/router.dart
-              - ApplicationView FROM ../router/router.gr.dart
-              - SettingsView FROM ../router/router.gr.dart
-              - SharedPrefProvider FROM ../shared_preferences.dart
-              - ServiceProvider FROM ../services/service_provider.dart
-              - SetStateCubit FROM ../states/cubit/state/state_cubit.dart
-            - CALLS:
-              - print
-              - Map.map
-              - ServiceProvider.of
-              - SharedPrefProvider.fetchPrefObject
-              - gameDices.sendResetToUnity ON gameDices
-              - gameDices.sendStartToUnity ON gameDices
-              - context.read<SetStateCubit>().setState
-              - router.pushAndPopUntil
-              - List.from
-              - _checkIfPlayerAborted ON this
-              - _processGameUpdate ON this
-              - topScore.updateScoresFromData ON topScore
-          - METHOD: _checkIfPlayerAborted()
-            - CALLS:
-              - print
-              - handlePlayerAbort ON this
-              - _advanceToNextActivePlayer ON this
-              - colorBoard ON this
-              - context.read<SetStateCubit>().setState
-          - METHOD: _advanceToNextActivePlayer()
-            - CALLS:
-              - print
-              - resetDices ON this
-              - gameDices.sendResetToUnity ON gameDices
-              - gameDices.sendStartToUnity ON gameDices
-          - METHOD: _processGameUpdate(dynamic data)
-            - DEPENDS_ON:
-              - getIt FROM ../injection.dart
-              - AppRouter FROM ../router/router.dart
-              - ApplicationView FROM ../router/router.gr.dart
-            - CALLS:
-              - print
-              - Map.from
-              - List.from
-              - setup ON this
-              - router.pop
-              - router.pushAndPopUntil
-              - List.isNotEmpty
-              - handlePlayerAbort ON this
-              - resetDices ON this
-              - gameDices.sendResetToUnity ON gameDices
-              - gameDices.sendStartToUnity ON gameDices
-              - colorBoard ON this
-          - METHOD: chatCallbackOnSubmitted(String text)
-            - DEPENDS_ON:
-              - Curves FROM flutter/material.dart
-            - CALLS:
-              - print
-              - String.trim
-              - chat.scrollController.animateTo
-              - this.socketService?.sendToClients ON this.socketService
-          - METHOD: updateChat(String text)
-            - DEPENDS_ON:
-              - ChatMessage FROM ../chat/chat.dart
-              - Future FROM dart:async
-              - Curves FROM flutter/material.dart
-            - INSTANTIATES:
-              - ChatMessage
-            - CALLS:
-              - chat.messages.add
-              - Future.delayed
-              - chat.scrollController.animateTo
-          - METHOD: callbackOnClientMsg(var data)
-            - DEPENDS_ON:
-              - getIt FROM ../injection.dart
-              - AppRouter FROM ../router/router.dart
-              - SettingsView FROM ../router/router.gr.dart
-            - CALLS:
-              - print
-              - List.cast
-              - gameDices.updateDiceImages ON gameDices
-              - gameDices.sendDicesToUnity ON gameDices
-              - updateChat ON this
-              - router.push
-    IMPORTS:
-      - flutter/material.dart
-      - flutter_bloc/flutter_bloc.dart
-      - yatzy/application/application_functions_internal.dart
-      - yatzy/dices/unity_communication.dart
-      - ../chat/chat.dart
-      - ../injection.dart
-      - ../router/router.dart
-      - ../router/router.gr.dart
-      - ../services/service_provider.dart
-      - ../shared_preferences.dart
-      - ../startup.dart
-      - ../states/cubit/state/state_cubit.dart
-      - ./application.dart
-
-  - FILE: lib/application/languages_application.dart
-    LANGUAGE: Dart
-    MIXINS:
-      - MIXIN: LanguagesApplication
-        - PROPERTIES:
-          - _getChosenLanguage: Function
-          - _standardLanguage: String
-          - _ones, _twos, ..., _useTutorial: Map<String, String>
-        - METHODS:
-            - METHOD: languagesSetup(Function getChosenLanguage, String standardLanguage)
-            - METHOD: getText(var textVariable)
-
-  - FILE: lib/application/widget_application_scaffold.dart
-    LANGUAGE: Dart
-    EXTENSIONS:
-      - EXTENSION: WidgetApplicationScaffold ON Application
-        - METHODS:
-          - METHOD: widgetScaffold(BuildContext context, Function state)
-            - DEPENDS_ON:
-              - AutoRouter FROM auto_route/auto_route.dart
-              - SettingsView FROM ../router/router.gr.dart
-              - WidgetDices FROM ../dices/widget_dices.dart
-              - WidgetTopScore FROM ../top_score/widget_top_scores.dart
-              - WidgetSetupGameBoard FROM ./widget_application.dart
-              - WidgetDisplayGameStatus FROM ./widget_application.dart
-              - WidgetChat FROM ../chat/widget_chat.dart
-              - WidgetAnimationsScroll FROM ../scroll/widget_scroll.dart
-              - FloatingActionButton FROM flutter/material.dart
-              - Icons FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-              - Image FROM flutter/material.dart
-              - BoxDecoration FROM flutter/material.dart
-              - BoxShadow FROM flutter/material.dart
-            - INSTANTIATES:
-              - Stack
-              - Positioned
-              - SizedBox
-              - FittedBox
-              - FloatingActionButton
-              - Image
-              - WidgetDices
-              - WidgetTopScore
-              - WidgetSetupGameBoard
-              - WidgetDisplayGameStatus
-              - WidgetChat
-              - WidgetAnimationsScroll
-            - CALLS:
-              - MediaQuery.of(...).size.width
-              - MediaQuery.of(...).size.height
-              - MediaQuery.of(...).devicePixelRatio
-              - AutoRouter.of(...).push
-              - callbackCheckPlayerToMove ON this
-              - tutorial.widgetArrow ON tutorial
-              - tutorial.animationController1.repeat
-              - tutorial.animationController2.repeat
-              - tutorial.animationController3.repeat
-    IMPORTS:
-      - auto_route/auto_route.dart
-      - flutter/material.dart
-      - flutter_bloc/flutter_bloc.dart
-      - yatzy/application/communication_application.dart
-      - yatzy/chat/widget_chat.dart
-      - yatzy/dices/unity_communication.dart
-      - yatzy/dices/widget_dices.dart
-      - yatzy/top_score/widget_top_scores.dart
-      - ../router/router.gr.dart
-      - ../scroll/widget_scroll.dart
-      - ../services/service_provider.dart
-      - ../startup.dart
-      - ../states/cubit/state/state_cubit.dart
-      - ./application.dart
-      - ./widget_application.dart
-
-  - FILE: lib/application/widget_application_settings.dart
-    LANGUAGE: Dart
-    EXTENSIONS:
-      - EXTENSION: WidgetApplicationSettings ON Application
-        - METHODS:
-          - METHOD: widgetWaitingGame(BuildContext context)
-            - DEPENDS_ON:
-              - ServiceProvider FROM ../services/service_provider.dart
-            - CALLS:
-              - inputItems.widgetButton ON inputItems
-              - onAttemptJoinGame ON this
-              - onSpectateGame ON this
-              - Text
-              - ServiceProvider.of
-          - METHOD: onSpectateGame(BuildContext context, int gameId)
-            - DEPENDS_ON:
-              - ServiceProvider FROM ../services/service_provider.dart
-              - SetStateCubit FROM ../states/cubit/state/state_cubit.dart
-              - ScaffoldMessenger FROM flutter/material.dart
-              - SnackBar FROM flutter/material.dart
-            - CALLS:
-              - print
-              - ServiceProvider.of
-              - serviceProvider.socketService.sendToServer
-              - context.read<SetStateCubit>().setState
-              - ScaffoldMessenger.of(...).showSnackBar
-          - METHOD: onAttemptJoinGame(BuildContext context, int i)
-            - DEPENDS_ON:
-              - ServiceProvider FROM ../services/service_provider.dart
-            - CALLS:
-              - print
-              - ServiceProvider.of
-              - serviceProvider.socketService.sendToServer
-          - METHOD: _buildGameTypeSelection(Function state)
-            - DEPENDS_ON:
-              - Padding FROM flutter/material.dart
-              - Card FROM flutter/material.dart
-              - RoundedRectangleBorder FROM flutter/material.dart
-              - Container FROM flutter/material.dart
-              - BoxDecoration FROM flutter/material.dart
-              - LinearGradient FROM flutter/material.dart
-              - Column FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - SizedBox FROM flutter/material.dart
-            - INSTANTIATES:
-              - Padding
-              - Card
-              - RoundedRectangleBorder
-              - Container
-              - BoxDecoration
-              - LinearGradient
-              - Column
-              - Text
-              - SizedBox
-            - CALLS:
-              - inputItems.widgetStringRadioButton ON inputItems
-          - METHOD: onStartGameButton(BuildContext context, Function state)
-            - DEPENDS_ON:
-              - ServiceProvider FROM ../services/service_provider.dart
-              - SharedPrefProvider FROM ../shared_preferences.dart
-              - SetStateCubit FROM ../states/cubit/state/state_cubit.dart
-              - AutoRouter FROM auto_route/auto_route.dart
-              - ApplicationView FROM ../router/router.gr.dart
-            - CALLS:
-              - ServiceProvider.of
-              - List.filled
-              - print
-              - serviceProvider.socketService.sendToServer
-              - SharedPrefProvider.setPrefObject
-              - setup ON this
-              - gameDices.sendResetToUnity ON gameDices
-              - gameDices.sendStartToUnity ON gameDices
-              - context.read<SetStateCubit>().setState
-              - AutoRouter.of(...).pop
-              - AutoRouter.of(...).pushAndPopUntil
-          - METHOD: onChangeUserName(value)
-            - CALLS:
-              - textEditingController.text
-          - METHOD: widgetScaffoldSettings(BuildContext context, Function state)
-            - DEPENDS_ON:
-              - Theme FROM flutter/material.dart
-              - TabController FROM flutter/material.dart
-              - AppBar FROM flutter/material.dart
-              - TabBar FROM flutter/material.dart
-              - Tab FROM flutter/material.dart
-              - TabBarView FROM flutter/material.dart
-              - Container FROM flutter/material.dart
-              - BoxDecoration FROM flutter/material.dart
-              - LinearGradient FROM flutter/material.dart
-              - Scrollbar FROM flutter/material.dart
-              - ListView FROM flutter/material.dart
-              - Card FROM flutter/material.dart
-              - Column FROM flutter/material.dart
-              - Row FROM flutter/material.dart
-              - SizedBox FROM flutter/material.dart
-              - Center FROM flutter/material.dart
-              - ElevatedButton FROM flutter/material.dart
-              - ConstrainedBox FROM flutter/material.dart
-              - BoxConstraints FROM flutter/material.dart
-              - BoxShadow FROM flutter/material.dart
-              - Icon FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - SpectatorGameBoard FROM ../widgets/spectator_game_board.dart
-              - Divider FROM flutter/material.dart
-              - CheckboxThemeData FROM flutter/material.dart
-              - MaterialStateProperty FROM flutter/material.dart
-              - LanguageBloc FROM ../states/bloc/language/language_bloc.dart
-              - LanguageChanged FROM ../states/bloc/language/language_event.dart
-            - INSTANTIATES:
-              - DefaultTabController
-              - Scaffold
-              - AppBar
-              - TabBar
-              - Tab
-              - TabBarView
-              - Container
-              - BoxDecoration
-              - LinearGradient
-              - Scrollbar
-              - ListView
-              - Card
-              - Column
-              - Row
-              - SizedBox
-              - Center
-              - ElevatedButton
-              - ConstrainedBox
-              - BoxConstraints
-              - SpectatorGameBoard
-              - Icon
-              - Text
-              - Divider
-              - Theme
-              - CheckboxThemeData
-              - Padding
-            - CALLS:
-              - _buildGameTypeSelection ON this
-              - inputItems.widgetIntRadioButton ON inputItems
-              - inputItems.widgetInputText ON inputItems
-              - onStartGameButton ON this
-              - widgetWaitingGame ON this
-              - context.read<SetStateCubit>().setState
-              - inputItems.widgetCheckbox ON inputItems
-              - inputItems.widgetDropDownList ON inputItems
-              - context.read<LanguageBloc>().add
-              - gameDices.widgetUnitySettings ON gameDices
-    IMPORTS:
-      - auto_route/auto_route.dart
-      - flutter/material.dart
-      - flutter_bloc/flutter_bloc.dart
-      - yatzy/dices/unity_communication.dart
-      - ../router/router.gr.dart
-      - ../services/service_provider.dart
-      - ../shared_preferences.dart
-      - ../startup.dart
-      - ../states/bloc/language/language_bloc.dart
-      - ../states/bloc/language/language_event.dart
-      - ../states/cubit/state/state_cubit.dart
-      - ../widgets/spectator_game_board.dart
-      - ./application.dart
-
-  - FILE: lib/application/widget_application.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: WidgetSetupGameBoard EXTENDS StatefulWidget
-        - PROPERTIES:
-          - width: double
-          - height: double
-        - METHODS:
-          - METHOD: createState() -> _WidgetSetupGameBoardState
-            - INSTANTIATES:
-              - _WidgetSetupGameBoardState
-      - CLASS: _WidgetSetupGameBoardState EXTENDS State<WidgetSetupGameBoard> WITH TickerProviderStateMixin, LanguagesApplication
-        - METHODS:
-          - METHOD: initState()
-          - METHOD: build(BuildContext context)
-            - DEPENDS_ON:
-              - Colors FROM flutter/material.dart
-              - BoxDecoration FROM flutter/material.dart
-              - Border FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - Shadow FROM flutter/material.dart
-              - AnimatedBuilder FROM flutter/material.dart
-              - Positioned FROM flutter/material.dart
-              - Container FROM flutter/material.dart
-              - FittedBox FROM flutter/material.dart
-              - GestureDetector FROM flutter/material.dart
-              - SetStateCubit FROM ../states/cubit/state/state_cubit.dart
-            - INSTANTIATES:
-              - Positioned
-              - Container
-              - FittedBox
-              - Text
-              - TextStyle
-              - Shadow
-              - AnimatedBuilder
-              - GestureDetector
-              - SizedBox
-              - Stack
-            - CALLS:
-              - min FROM dart:math
-              - app.setup ON app
-              - app.setAppText ON app
-              - app.clearFocus ON app
-              - context.read<SetStateCubit>().setState
-              - app.cellClick ON app
-      - CLASS: WidgetDisplayGameStatus EXTENDS StatefulWidget
-        - PROPERTIES:
-          - width: double
-          - height: double
-        - METHODS:
-          - METHOD: createState() -> _WidgetDisplayGameStatusState
-            - INSTANTIATES:
-              - _WidgetDisplayGameStatusState
-      - CLASS: _WidgetDisplayGameStatusState EXTENDS State<WidgetDisplayGameStatus> WITH LanguagesApplication
-        - METHODS:
-          - METHOD: initState()
-            - CALLS:
-              - languagesSetup ON this
-              - app.getChosenLanguage ON app
-              - app.getStandardLanguage ON app
-          - METHOD: build(BuildContext context)
-            - DEPENDS_ON:
-              - Container FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-              - Column FROM flutter/material.dart
-              - SizedBox FROM flutter/material.dart
-              - AutoSizeText FROM auto_size_text/auto_size_text.dart
-              - Text FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-            - INSTANTIATES:
-              - Container
-              - Column
-              - SizedBox
-              - AutoSizeText
-              - Text
-              - TextStyle
-            - CALLS:
-              - app.gameDices.sendResetToUnity ON app.gameDices
-    IMPORTS:
-      - dart:math
-      - auto_size_text/auto_size_text.dart
-      - flutter/material.dart
-      - flutter_bloc/flutter_bloc.dart
-      - yatzy/application/application_functions_internal.dart
-      - yatzy/dices/unity_communication.dart
-      - ../startup.dart
-      - ../states/cubit/state/state_cubit.dart
-      - ./languages_application.dart
-
-  - FILE: lib/chat/chat.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: ChatMessage
-        - PROPERTIES:
-          - messageContent: String
-          - messageType: String
-        - METHODS:
-          - METHOD: constructor(this.messageContent, this.messageType)
-      - CLASS: Chat
-        - PROPERTIES:
-          - _getChosenLanguage: Function
-          - _standardLanguage: String
-          - setState: Function
-          - inputItems: InputItems
-          - callbackOnSubmitted: Function
-          - chatTextController: TextEditingController
-          - scrollController: ScrollController
-          - focusNode: FocusNode
-          - listenerKey: GlobalKey
-          - messages: List<ChatMessage>
-        - METHODS:
-          - METHOD: constructor({required Function getChosenLanguage, required String standardLanguage, required Function callback, required this.setState, required this.inputItems})
-          - METHOD: getChosenLanguage()
-          - METHOD: standardLanguage()
-          - METHOD: onSubmitted(String value, BuildContext context)
-            - DEPENDS_ON:
-              - Future FROM dart:async
-              - Duration
-              - Curves FROM flutter/cupertino.dart
-            - CALLS:
-              - chatTextController.text
-              - chatTextController.clear
-              - messages.add
-              - callbackOnSubmitted ON this
-              - setState ON this
-              - Future.delayed
-              - scrollController.animateTo
-    IMPORTS:
-      - flutter/cupertino.dart
-      - ../input_items/input_items.dart
-
-  - FILE: lib/chat/languages_chat.dart
-    LANGUAGE: Dart
-    MIXINS:
-      - MIXIN: LanguagesChat
-        - PROPERTIES:
-          - _getChosenLanguage: Function
-          - _standardLanguage: String
-          - _sendMessage: Map<String, String>
-        - METHODS:
-          - METHOD: languagesSetup(Function getChosenLanguage, String standardLanguage)
-          - METHOD: getText(var textVariable)
-
-  - FILE: lib/chat/widget_chat.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: WidgetChat EXTENDS StatefulWidget
-        - PROPERTIES:
-          - width: double
-          - height: double
-        - METHODS:
-          - METHOD: createState() -> _WidgetChatState
-            - INSTANTIATES:
-              - _WidgetChatState
-      - CLASS: _WidgetChatState EXTENDS State<WidgetChat> WITH LanguagesChat
-        - METHODS:
-          - METHOD: initState()
-            - CALLS:
-              - languagesSetup ON this
-              - chat.getChosenLanguage ON chat
-              - chat.standardLanguage ON chat
-          - METHOD: build(BuildContext context)
-            - DEPENDS_ON:
-              - Padding FROM flutter/material.dart
-              - TextField FROM flutter/material.dart
-              - InputDecoration FROM flutter/material.dart
-              - OutlineInputBorder FROM flutter/material.dart
-              - BorderSide FROM flutter/material.dart
-              - IconButton FROM flutter/material.dart
-              - Icon FROM flutter/material.dart
-              - Container FROM flutter/material.dart
-              - BoxDecoration FROM flutter/material.dart
-              - BorderRadius FROM flutter/material.dart
-              - LinearGradient FROM flutter/material.dart
-              - Border FROM flutter/material.dart
-              - ListView FROM flutter/material.dart
-              - Align FROM flutter/material.dart
-              - Alignment FROM flutter/material.dart
-              - BoxConstraints FROM flutter/material.dart
-              - BoxShadow FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - SizedBox FROM flutter/material.dart
-              - Column FROM flutter/material.dart
-              - Expanded FROM flutter/material.dart
-              - ClipRRect FROM flutter/material.dart
-              - Row FROM flutter/material.dart
-              - Icons FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-            - INSTANTIATES:
-              - Padding
-              - TextField
-              - InputDecoration
-              - OutlineInputBorder
-              - BorderSide
-              - IconButton
-              - Icon
-              - Container
-              - BoxDecoration
-              - BorderRadius
-              - LinearGradient
-              - Border
-              - ListView
-              - Align
-              - BoxConstraints
-              - BoxShadow
-              - Text
-              - TextStyle
-              - SizedBox
-              - Column
-              - Expanded
-              - ClipRRect
-              - Row
-            - CALLS:
-              - chat.onSubmitted ON chat
-              - Colors.white.withValues
-              - Colors.blue.shade...
-              - Colors.grey.shade...
-              - Colors.black.withValues
-              - BorderRadius.only
-    IMPORTS:
-      - flutter/material.dart
-      - yatzy/chat/languages_chat.dart
-      - ../startup.dart
-
-  - FILE: lib/core/app_widget.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: AppWidget EXTENDS StatelessWidget
-        - PROPERTIES:
-          - _appRouter: AppRouter
-        - METHODS:
-          - METHOD: constructor({super.key})
-          - METHOD: getChosenLanguage() -> String
-          - METHOD: build(BuildContext context)
-            - DEPENDS_ON:
-              - TopScore FROM ../top_score/top_score.dart
-              - AnimationsScroll FROM ../scroll/animations_scroll.dart
-              - Tutorial FROM ../tutorial/tutorial.dart
-              - Dices FROM ../dices/dices.dart
-              - Application FROM ../application/application.dart
-              - Chat FROM ../chat/chat.dart
-              - ServiceProvider FROM ../services/service_provider.dart
-              - SetStateCubit FROM ../states/cubit/state/state_cubit.dart
-              - MaterialApp FROM flutter/material.dart
-              - ThemeData FROM flutter/material.dart
-              - VisualDensity FROM flutter/material.dart
-              - WidgetsBinding FROM flutter/material.dart
-            - INSTANTIATES:
-              - TopScore
-              - AnimationsScroll
-              - Tutorial
-              - Dices
-              - Application
-              - Chat
-              - ServiceProvider
-              - MaterialApp
-              - ThemeData
-            - CALLS:
-              - getIt<AppRouter>()
-              - context.read<SetStateCubit>().setState
-              - ServiceProvider.initialize
-              - ServiceProvider.of
-              - print
-              - service.socketService.connect
-              - app.setSocketService ON app
-              - WidgetsBinding.instance.addPostFrameCallback
-    IMPORTS:
-      - flutter/material.dart
-      - flutter_bloc/flutter_bloc.dart
-      - yatzy/application/communication_application.dart
-      - yatzy/dices/dices.dart
-      - yatzy/services/service_provider.dart
-      - ../application/application.dart
-      - ../chat/chat.dart
-      - ../injection.dart
-      - ../router/router.dart
-      - ../scroll/animations_scroll.dart
-      - ../startup.dart
-      - ../states/cubit/state/state_cubit.dart
-      - ../top_score/top_score.dart
-      - ../tutorial/tutorial.dart
-
-  - FILE: lib/core/injectable_modules.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: InjectableModule [ABSTRACT]
-        - METHODS:
-            - METHOD: router -> AppRouter [GETTER]
-              - INSTANTIATES:
-                - AppRouter
-    ATTRIBUTES:
-      - @module
-    IMPORTS:
-      - injectable/injectable.dart
-      - ../router/router.dart
-
-  - FILE: lib/dices/dices.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: Dices EXTENDS LanguagesDices
-        - PROPERTIES:
-          - setState: Function
-          - inputItems: InputItems
-          - holdDices, holdDiceText, holdDiceOpacity: List
-          - nrRolls: int
-          - nrTotalRolls: int
-          - nrDices: int
-          - diceValue: List<int>
-          - diceRef: List<String>
-          - diceFile: List<String>
-          - rollDiceKey: GlobalKey
-          - holdDiceKey: List
-          - callbackUpdateDiceValues: Function
-          - callbackUnityCreated: Function
-          - callbackCheckPlayerToMove: Function
-          - animationController: AnimationController
-          - sizeAnimation: Animation<double>
-          - unityWidgetController: UnityWidgetController
-          - unityCreated: bool
-          - unityColors: List<double>
-          - unityDices: bool
-          - unityTransparent: bool
-          - unityLightMotion: bool
-          - unityFun: bool
-          - unitySnowEffect: bool
-          - unityId: String
-        - METHODS:
-            - METHOD: constructor({required Function getChosenLanguage, required String standardLanguage, required this.setState, required this.inputItems})
-              - CALLS:
-                - languagesSetup ON this
-                - GlobalKey
-            - METHOD: setCallbacks(cbUpdateDiceValues, cbUnityCreated, cbCheckPlayerToMove)
-            - METHOD: clearDices()
-              - CALLS:
-                - List.filled
-            - METHOD: initDices(int nrdices)
-              - CALLS:
-                - sendResetToUnity ON this
-                - List.filled
-            - METHOD: holdDice(int dice)
-            - METHOD: updateDiceImages()
-            - METHOD: rollDices(BuildContext context)
-              - DEPENDS_ON:
-                - Random FROM dart:math
-              - INSTANTIATES:
-                - Random
-              - CALLS:
-                - print
-                - callbackCheckPlayerToMove ON this
-                - randomNumberGenerator.nextInt
-                - callbackUpdateDiceValues ON this
-            - METHOD: widgetUnitySettings(Function state)
-              - DEPENDS_ON:
-                - inputItems FROM ../input_items/input_items.dart
-              - CALLS:
-                - inputItems.widgetCheckbox ON inputItems
-                - sendLightMotionChangedToUnity ON this
-                - sendFunChangedToUnity ON this
-                - sendSnowEffectChangedToUnity ON this
-    IMPORTS:
-      - dart:math
-      - flutter/cupertino.dart
-      - ../input_items/input_items.dart
-      - ../startup.dart
-      - ./unity_communication.dart
-      - flutter_unity_widget/flutter_unity_widget.dart
-      - ./languages_dices.dart
-
-  - FILE: lib/dices/languages_dices.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: LanguagesDices
-        - PROPERTIES:
-          - _getChosenLanguage: Function
-          - _standardLanguage: String
-          - _hold, ..., _pressToHold: Map<String, String>
-        - METHODS:
-          - METHOD: languagesSetup(Function getChosenLanguage, String standardLanguage)
-          - METHOD: getText(var textVariable)
-
-  - FILE: lib/dices/unity_communication.dart
-    LANGUAGE: Dart
-    EXTENSIONS:
-      - EXTENSION: UnityCommunication ON Dices
-        - METHODS:
-          - METHOD: sendResetToUnity()
-            - DEPENDS_ON:
-              - UnityMessage FROM ./unity_message.dart
-              - jsonEncode FROM dart:convert
-            - INSTANTIATES:
-              - UnityMessage.reset
-            - CALLS:
-              - msg.toJson
-              - jsonEncode
-              - unityWidgetController.postMessage ON unityWidgetController
-          - METHOD: sendStartToUnity()
-            - DEPENDS_ON:
-              - UnityMessage FROM ./unity_message.dart
-              - jsonEncode FROM dart:convert
-            - INSTANTIATES:
-              - UnityMessage.start
-            - CALLS:
-              - msg.toJson
-              - jsonEncode
-              - unityWidgetController.postMessage ON unityWidgetController
-          - METHOD: sendDicesToUnity()
-            - DEPENDS_ON:
-              - UnityMessage FROM ./unity_message.dart
-              - jsonEncode FROM dart:convert
-            - INSTANTIATES:
-              - UnityMessage.updateDices
-            - CALLS:
-              - msg.toJson
-              - jsonEncode
-              - unityWidgetController.postMessage ON unityWidgetController
-          - METHOD: sendColorsToUnity()
-            - DEPENDS_ON:
-              - UnityMessage FROM ./unity_message.dart
-              - jsonEncode FROM dart:convert
-            - INSTANTIATES:
-              - UnityMessage.updateColors
-            - CALLS:
-              - msg.toJson
-              - jsonEncode
-              - unityWidgetController.postMessage ON unityWidgetController
-          - METHOD: sendTransparencyChangedToUnity()
-            - DEPENDS_ON:
-              - UnityMessage FROM ./unity_message.dart
-              - jsonEncode FROM dart:convert
-            - INSTANTIATES:
-              - UnityMessage.changeBool
-            - CALLS:
-              - msg.toJson
-              - jsonEncode
-              - unityWidgetController.postMessage ON unityWidgetController
-          - METHOD: sendLightMotionChangedToUnity()
-            - DEPENDS_ON:
-              - UnityMessage FROM ./unity_message.dart
-              - jsonEncode FROM dart:convert
-            - INSTANTIATES:
-              - UnityMessage.changeBool
-            - CALLS:
-              - msg.toJson
-              - jsonEncode
-              - unityWidgetController.postMessage ON unityWidgetController
-          - METHOD: sendFunChangedToUnity()
-            - DEPENDS_ON:
-              - UnityMessage FROM ./unity_message.dart
-              - jsonEncode FROM dart:convert
-            - INSTANTIATES:
-              - UnityMessage.changeBool
-            - CALLS:
-              - msg.toJson
-              - jsonEncode
-              - unityWidgetController.postMessage ON unityWidgetController
-          - METHOD: sendSnowEffectChangedToUnity()
-            - DEPENDS_ON:
-              - UnityMessage FROM ./unity_message.dart
-              - jsonEncode FROM dart:convert
-            - INSTANTIATES:
-              - UnityMessage.changeBool
-            - CALLS:
-              - msg.toJson
-              - jsonEncode
-              - unityWidgetController.postMessage ON unityWidgetController
-          - METHOD: onUnityMessage(message)
-            - DEPENDS_ON:
-              - jsonDecode FROM dart:convert
-            - CALLS:
-              - print
-              - jsonDecode
-              - List.cast
-              - callbackUpdateDiceValues ON this
-              - sendSnowEffectChangedToUnity ON this
-              - sendFunChangedToUnity ON this
-              - sendLightMotionChangedToUnity ON this
-              - sendResetToUnity ON this
-              - callbackCheckPlayerToMove ON this
-              - sendStartToUnity ON this
-          - METHOD: onUnityUnloaded()
-          - METHOD: onUnityCreated(controller)
-            - CALLS:
-              - sendResetToUnity ON this
-              - callbackUnityCreated ON this
-              - print
-          - METHOD: onUnitySceneLoaded(SceneLoaded? sceneInfo)
-    IMPORTS:
-      - dart:convert
-      - ./unity_message.dart
-      - flutter_unity_widget/flutter_unity_widget.dart
-      - ./dices.dart
-
-  - FILE: lib/dices/unity_message.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: UnityMessage
-        - PROPERTIES:
-          - actionUnity: String
-          - property: String
-          - dices: List
-          - unityColors: List<double>
-          - flag: bool
-          - nrDices: int
-          - nrThrows: int
-        - METHODS:
-            - METHOD: constructor(this.actionUnity)
-            - METHOD: reset(this.nrDices, this.nrThrows) [CONSTRUCTOR]
-            - METHOD: start() [CONSTRUCTOR]
-            - METHOD: updateDices(this.dices) [CONSTRUCTOR]
-            - METHOD: updateColors(this.unityColors) [CONSTRUCTOR]
-            - METHOD: changeBool(this.property, this.flag) [CONSTRUCTOR]
-            - METHOD: fromJson(Map<String, dynamic> json) [FACTORY]
-            - METHOD: toJson()
-
-  - FILE: lib/dices/widget_dices.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: WidgetDices EXTENDS StatefulWidget
-        - PROPERTIES:
-          - width: double
-          - height: double
-        - METHODS:
-          - METHOD: createState() -> _WidgetDicesState
-            - INSTANTIATES:
-              - _WidgetDicesState
-      - CLASS: _WidgetDicesState EXTENDS State<WidgetDices> WITH TickerProviderStateMixin
-        - METHODS:
-          - METHOD: setupAnimation(TickerProvider ticket)
-            - DEPENDS_ON:
-              - AnimationController FROM flutter/material.dart
-              - Duration
-              - CurveTween FROM flutter/material.dart
-              - Curves FROM flutter/material.dart
-            - INSTANTIATES:
-              - AnimationController
-              - CurveTween
-            - CALLS:
-              - app.gameDices.animationController.addStatusListener
-              - app.gameDices.animationController.reverse
-          - METHOD: initState()
-            - CALLS:
-              - super.initState
-              - setupAnimation ON this
-          - METHOD: dispose()
-            - CALLS:
-              - super.dispose
-              - app.gameDices.animationController.dispose
-          - METHOD: build(BuildContext context)
-            - DEPENDS_ON:
-              - min FROM dart:math
-              - Positioned FROM flutter/material.dart
-              - SizedBox FROM flutter/material.dart
-              - UnityWidget FROM flutter_unity_widget/flutter_unity_widget.dart
-              - BorderRadius FROM flutter/material.dart
-              - Stack FROM flutter/material.dart
-              - Container FROM flutter/material.dart
-              - BoxDecoration FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-              - Image FROM flutter/material.dart
-              - GestureDetector FROM flutter/material.dart
-              - FittedBox FROM flutter/material.dart
-              - Alignment FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - AnimatedBuilder FROM flutter/material.dart
-              - Listener FROM flutter/material.dart
-            - INSTANTIATES:
-              - Positioned
-              - SizedBox
-              - UnityWidget
-              - Stack
-              - Container
-              - BoxDecoration
-              - Image
-              - GestureDetector
-              - FittedBox
-              - Text
-              - TextStyle
-              - AnimatedBuilder
-              - Listener
-            - CALLS:
-              - app.gameDices.onUnityCreated ON app.gameDices
-              - app.gameDices.onUnityMessage ON app.gameDices
-              - app.gameDices.onUnityUnloaded ON app.gameDices
-              - app.gameDices.onUnitySceneLoaded ON app.gameDices
-              - app.gameDices.holdDice ON app.gameDices
-              - app.gameDices.setState ON app.gameDices
-              - Colors.red.withValues
-              - Colors.grey.withValues
-              - Colors.black87.withValues
-              - app.callbackCheckPlayerToMove ON app
-              - app.gameDices.rollDices ON app.gameDices
-              - app.gameDices.animationController.forward
-    IMPORTS:
-      - dart:math
-      - flutter/material.dart
-      - flutter_unity_widget/flutter_unity_widget.dart
-      - ../startup.dart
-      - ./unity_communication.dart
-
-  - FILE: lib/injection.config.dart
-    LANGUAGE: Dart
-    EXTENSIONS:
-      - EXTENSION: GetItInjectableX ON GetIt
-        - METHODS:
-          - METHOD: init(...) -> GetIt
-            - DEPENDS_ON:
-              - GetItHelper FROM injectable/injectable.dart
-              - LanguageBloc FROM ../states/bloc/language/language_bloc.dart
-              - SetStateCubit FROM ../states/cubit/state/state_cubit.dart
-              - InjectableModule FROM ../core/injectable_modules.dart
-              - AppRouter FROM ../router/router.dart
-            - INSTANTIATES:
-              - GetItHelper
-              - LanguageBloc
-              - SetStateCubit
-              - InjectableModule
-    CLASSES:
-      - CLASS: _$InjectableModule EXTENDS InjectableModule
-    IMPORTS:
-      - get_it/get_it.dart
-      - injectable/injectable.dart
-      - ../core/injectable_modules.dart
-      - ../router/router.dart
-      - ../states/bloc/language/language_bloc.dart
-      - ../states/cubit/state/state_cubit.dart
-
-  - FILE: lib/injection.dart
-    LANGUAGE: Dart
-    VARIABLES:
-      - VARIABLE: getIt: GetIt
-    FUNCTIONS:
-      - FUNCTION: configureInjection(final String environment) [ASYNC]
-        - DEPENDS_ON:
-          - getIt
-        - CALLS:
-          - getIt.init
-    ATTRIBUTES:
-      - @InjectableInit
-    IMPORTS:
-      - get_it/get_it.dart
-      - injectable/injectable.dart
-      - ./injection.config.dart
-
-  - FILE: lib/input_items/input_items.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: InputItems
-        - METHODS:
-          - METHOD: widgetImage(double width, double height, String image)
-            - DEPENDS_ON:
-              - Padding FROM flutter/material.dart
-              - Center FROM flutter/material.dart
-              - SizedBox FROM flutter/material.dart
-              - Image FROM flutter/material.dart
-            - INSTANTIATES:
-              - Padding
-              - Center
-              - SizedBox
-              - Image
-          - METHOD: widgetInputDBEntry(String hintText, TextEditingController controller)
-            - DEPENDS_ON:
-              - Padding FROM flutter/material.dart
-              - TextField FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - InputDecoration FROM flutter/material.dart
-              - OutlineInputBorder FROM flutter/material.dart
-              - BorderSide FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-            - INSTANTIATES:
-              - Padding
-              - TextField
-              - TextStyle
-              - InputDecoration
-              - OutlineInputBorder
-              - BorderSide
-          - METHOD: widgetInputText(String hintText, Function onSubmitted, Function onChanged, TextEditingController controller, FocusNode focusNode, [int maxLength = 12])
-            - DEPENDS_ON:
-              - Padding FROM flutter/material.dart
-              - TextField FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - InputDecoration FROM flutter/material.dart
-              - OutlineInputBorder FROM flutter/material.dart
-              - BorderSide FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-            - INSTANTIATES:
-              - Padding
-              - TextField
-              - TextStyle
-              - InputDecoration
-              - OutlineInputBorder
-              - BorderSide
-          - METHOD: widgetTextLink(Function onPressed, String text)
-            - DEPENDS_ON:
-              - TextButton FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-            - INSTANTIATES:
-              - TextButton
-              - Text
-              - TextStyle
-          - METHOD: widgetButton(Function onPressed, String text)
-            - DEPENDS_ON:
-              - Container FROM flutter/material.dart
-              - EdgeInsets FROM flutter/material.dart
-              - Alignment FROM flutter/material.dart
-              - ElevatedButton FROM flutter/material.dart
-              - ElevatedButton.styleFrom
-              - Size FROM flutter/material.dart
-              - RoundedRectangleBorder FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-            - INSTANTIATES:
-              - Container
-              - ElevatedButton
-              - Text
-              - TextStyle
-          - METHOD: widgetSizedBox(double height)
-            - DEPENDS_ON:
-              - SizedBox FROM flutter/material.dart
-            - INSTANTIATES:
-              - SizedBox
-          - METHOD: widgetIntRadioButton(Function state, List<String> values, Function onChanged, int radioValue)
-            - DEPENDS_ON:
-              - Radio FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - Row FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-              - WidgetStateProperty FROM flutter/material.dart
-            - INSTANTIATES:
-              - Radio
-              - Text
-              - TextStyle
-              - Row
-          - METHOD: widgetStringRadioButtonSplit(Function state, List<String> values, List<String> translations, Function onChanged, String radioValue, int splitPoint)
-            - DEPENDS_ON:
-              - Radio FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - Column FROM flutter/material.dart
-              - Padding FROM flutter/material.dart
-              - Row FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-              - WidgetStateProperty FROM flutter/material.dart
-            - INSTANTIATES:
-              - Radio
-              - Text
-              - TextStyle
-              - Column
-              - Padding
-              - Row
-          - METHOD: widgetStringRadioButton(Function state, List<String> values, List<String> translations, Function onChanged, String radioValue)
-            - DEPENDS_ON:
-              - Radio FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - Row FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-              - WidgetStateProperty FROM flutter/material.dart
-            - INSTANTIATES:
-              - Radio
-              - Text
-              - TextStyle
-              - Row
-          - METHOD: getColor(Set<WidgetState> states)
-            - DEPENDS_ON:
-              - WidgetState FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-          - METHOD: widgetCheckbox(Function onChanged, String text, bool toggles)
-            - DEPENDS_ON:
-              - SizedBox FROM flutter/material.dart
-              - Checkbox FROM flutter/material.dart
-              - RoundedRectangleBorder FROM flutter/material.dart
-              - Padding FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - Row FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-            - INSTANTIATES:
-              - SizedBox
-              - Checkbox
-              - Padding
-              - Text
-              - TextStyle
-              - Row
-            - CALLS:
-              - getColor ON this
-          - METHOD: widgetSlider(BuildContext context, Function state, String text, Function onChanged, double slider)
-            - DEPENDS_ON:
-              - SliderTheme FROM flutter/material.dart
-              - SliderThemeData FROM flutter/material.dart
-              - RectangularSliderTrackShape FROM flutter/material.dart
-              - RoundSliderThumbShape FROM flutter/material.dart
-              - RoundSliderOverlayShape FROM flutter/material.dart
-              - SizedBox FROM flutter/material.dart
-              - Slider FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - Row FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-            - INSTANTIATES:
-              - SliderTheme
-              - SizedBox
-              - Slider
-              - Text
-              - Row
-            - CALLS:
-              - SliderTheme.of(...).copyWith
-          - METHOD: widgetDropDownList(Function state, String text, List<String> items, Function onChanged, String choice)
-            - DEPENDS_ON:
-              - Padding FROM flutter/material.dart
-              - SizedBox FROM flutter/material.dart
-              - DropdownButtonFormField<String> FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - InputDecoration FROM flutter/material.dart
-              - OutlineInputBorder FROM flutter/material.dart
-              - BorderSide FROM flutter/material.dart
-              - Icon FROM flutter/material.dart
-              - Icons FROM flutter/material.dart
-              - DropdownMenuItem<String> FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - Row FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-            - INSTANTIATES:
-              - Padding
-              - SizedBox
-              - DropdownButtonFormField
-              - TextStyle
-              - InputDecoration
-              - OutlineInputBorder
-              - BorderSide
-              - Icon
-              - DropdownMenuItem
-              - Text
-              - Row
-            - CALLS:
-              - List.map
-              - List.toList
-          - METHOD: widgetParagraph(String text)
-            - DEPENDS_ON:
-              - Text FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - FontStyle FROM flutter/material.dart
-              - Divider FROM flutter/material.dart
-              - Column FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-            - INSTANTIATES:
-              - Text
-              - TextStyle
-              - Divider
-              - Column
-    IMPORTS:
-      - flutter/material.dart
-
-  - FILE: lib/main.dart
-    LANGUAGE: Dart
-    FUNCTIONS:
-      - FUNCTION: main() [ASYNC]
-        - DEPENDS_ON:
-          - WidgetsFlutterBinding FROM flutter/material.dart
-          - SharedPrefProvider FROM ./shared_preferences.dart
-          - configureInjection FROM ./injection.dart
-          - Environment FROM injectable/injectable.dart
-          - MultiBlocProvider FROM flutter_bloc/flutter_bloc.dart
-          - BlocProvider FROM flutter_bloc/flutter_bloc.dart
-          - LanguageBloc FROM ./states/bloc/language/language_bloc.dart
-          - SetStateCubit FROM ./states/cubit/state/state_cubit.dart
-          - AppWidget FROM ./core/app_widget.dart
-        - CALLS:
-          - WidgetsFlutterBinding.ensureInitialized
-          - SharedPrefProvider.loadPrefs
-          - configureInjection
-          - runApp
-        - INSTANTIATES:
-          - MultiBlocProvider
-          - BlocProvider
-          - LanguageBloc
-          - SetStateCubit
-          - AppWidget
-    IMPORTS:
-      - flutter/material.dart
-      - flutter_bloc/flutter_bloc.dart
-      - yatzy/states/bloc/language/language_bloc.dart
-      - yatzy/states/cubit/state/state_cubit.dart
-      - injectable/injectable.dart
-      - ./core/app_widget.dart
-      - ./injection.dart
-      - ./shared_preferences.dart
-
-  - FILE: lib/models/board_cell.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: BoardCell
-        - PROPERTIES:
-          - index: int
-          - label: String
-          - value: int
-          - fixed: bool
-          - xPos: double
-          - yPos: double
-          - width: double
-          - height: double
-          - textColor: Color
-          - backgroundColor: Color
-          - hasFocus: bool
-        - METHODS:
-          - METHOD: constructor({required this.index, required this.label, this.value = -1, this.fixed = false})
-          - METHOD: setPosition(double x, double y, double w, double h)
-          - METHOD: displayText -> String [GETTER]
-          - METHOD: isEmpty -> bool [GETTER]
-          - METHOD: clear()
-          - METHOD: setValue(int newValue)
-          - METHOD: fix()
-          - METHOD: setFocus(bool focused)
-          - METHOD: copyWith({int? index, String? label, int? value, bool? fixed})
-            - INSTANTIATES:
-              - BoardCell
-    IMPORTS:
-      - flutter/material.dart
-
-  - FILE: lib/models/game.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: Game
-        - PROPERTIES:
-          - gameId: int
-          - gameType: String
-          - maxPlayers: int
-          - players: List<Player>
-          - gameStarted: bool
-          - gameFinished: bool
-          - playerToMove: int
-          - diceValues: List<int>
-          - rollCount: int
-          - maxRolls: int
-          - bonusThreshold: int
-          - bonusAmount: int
-          - upperSectionEndIndex: int
-          - cellLabels: List<String>
-          - myPlayerIndex: int
-          - boardAnimation: bool
-          - onPlayerTurnChanged: VoidCallback?
-          - onDiceValuesChanged: VoidCallback?
-        - METHODS:
-          - METHOD: constructor({required this.gameId, ..., this.onDiceValuesChanged})
-          - METHOD: isMyTurn -> bool [GETTER]
-          - METHOD: canRoll -> bool [GETTER]
-          - METHOD: currentPlayer -> Player [GETTER]
-          - METHOD: myPlayer -> Player [GETTER]
-          - METHOD: calculateScores()
-            - CALLS:
-              - player.calculateScores ON player
-          - METHOD: advanceToNextPlayer()
-            - CALLS:
-              - onPlayerTurnChanged?() ON this
-          - METHOD: setDiceValues(List<int> values)
-            - CALLS:
-              - List.from
-              - onDiceValuesChanged?() ON this
-          - METHOD: resetDice()
-            - CALLS:
-              - List.filled
-              - onDiceValuesChanged?() ON this
-          - METHOD: selectCell(int cellIndex)
-            - CALLS:
-              - calculateScores ON this
-              - checkGameFinished ON this
-              - advanceToNextPlayer ON this
-          - METHOD: checkGameFinished()
-          - METHOD: fromJson(Map<String, dynamic> json) [FACTORY]
-            - CALLS:
-              - _getCellLabelsForGameType
-              - List.generate
-              - BoardCell
-              - Player
-            - INSTANTIATES:
-              - Game
-              - List<int>.from
-              - List.filled
-          - METHOD: toJson()
-            - CALLS:
-              - List.map
-              - List.toList
-              - List.where
-          - METHOD: _getCellLabelsForGameType(String gameType) [STATIC]
-    IMPORTS:
-      - flutter/foundation.dart
-      - ./board_cell.dart
-      - ./player.dart
-
-  - FILE: lib/models/player.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: Player
-        - PROPERTIES:
-          - id: String
-          - username: String
-          - isActive: bool
-          - cells: List<BoardCell>
-          - _totalScore: int
-          - _upperSectionSum: int
-        - METHODS:
-          - METHOD: constructor({required this.id, required this.username, this.isActive = true, required this.cells})
-          - METHOD: totalScore -> int [GETTER]
-          - METHOD: upperSectionSum -> int [GETTER]
-          - METHOD: calculateScores({required int bonusThreshold, required int bonusAmount, required int upperSectionEnd})
-          - METHOD: clearUnfixedCells()
-            - CALLS:
-              - cell.clear ON cell
-          - METHOD: hasCompletedGame -> bool [GETTER]
-            - CALLS:
-              - List.every
-          - METHOD: fromJson(Map<String, dynamic> json, List<String> cellLabels) [FACTORY]
-            - CALLS:
-              - List.generate
-              - BoardCell
-            - INSTANTIATES:
-              - Player
-          - METHOD: toJson()
-            - CALLS:
-              - List.map
-              - List.toList
-    IMPORTS:
-      - ./board_cell.dart
-
-  - FILE: lib/router/router.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: AppRouter EXTENDS $AppRouter
-        - METHODS:
-          - METHOD: defaultRouteType -> RouteType [GETTER]
-          - METHOD: routes -> List<AutoRoute> [GETTER]
-            - INSTANTIATES:
-              - AutoRoute
-            - REFERENCES_ROUTE: SettingsView.page, ApplicationView.page
-    ATTRIBUTES:
-      - @AutoRouterConfig()
-    IMPORTS:
-      - auto_route/auto_route.dart
-      - yatzy/router/router.gr.dart
-
-  - FILE: lib/router/router.gr.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: $AppRouter EXTENDS RootStackRouter [ABSTRACT]
-        - PROPERTIES:
-          - pagesMap: Map<String, PageFactory>
-      - CLASS: ApplicationView EXTENDS PageRouteInfo<void>
-        - METHODS:
-          - METHOD: constructor({List<PageRouteInfo>? children})
-        - PROPERTIES:
-          - name: String [STATIC]
-          - page: PageInfo<void> [STATIC]
-      - CLASS: SettingsView EXTENDS PageRouteInfo<void>
-        - METHODS:
-          - METHOD: constructor({List<PageRouteInfo>? children})
-        - PROPERTIES:
-          - name: String [STATIC]
-          - page: PageInfo<void> [STATIC]
-    IMPORTS:
-      - auto_route/auto_route.dart
-      - yatzy/views/application_view.dart
-      - yatzy/views/settings_view.dart
-
-  - FILE: lib/scroll/animations_scroll.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: AnimationsScroll WITH LanguagesAnimationsScroll
-        - PROPERTIES:
-          - _getChosenLanguage: Function
-          - _standardLanguage: String
-          - keyXPos: double
-          - keyYPos: double
-          - animationController: AnimationController
-          - positionAnimation: Animation<double>
-        - METHODS:
-          - METHOD: constructor({required Function getChosenLanguage, required String standardLanguage})
-          - METHOD: getChosenLanguage()
-          - METHOD: standardLanguage()
-    IMPORTS:
-      - flutter/animation.dart
-      - ./languages_animations_scroll.dart
-
-  - FILE: lib/scroll/languages_animations_scroll.dart
-    LANGUAGE: Dart
-    MIXINS:
-      - MIXIN: LanguagesAnimationsScroll
-        - PROPERTIES:
-          - _getChosenLanguage: Function
-          - _standardLanguage: String
-          - _scrollText: Map<String, String>
-        - METHODS:
-          - METHOD: languagesSetup(Function getChosenLanguage, String standardLanguage)
-          - METHOD: getText(var textVariable)
-
-  - FILE: lib/scroll/widget_scroll.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: WidgetAnimationsScroll EXTENDS StatefulWidget
-        - PROPERTIES:
-          - width: double
-          - height: double
-          - left: double
-          - top: double
-        - METHODS:
-          - METHOD: createState() -> _WidgetAnimationsScrollState
-            - INSTANTIATES:
-              - _WidgetAnimationsScrollState
-      - CLASS: _WidgetAnimationsScrollState EXTENDS State<WidgetAnimationsScroll> WITH TickerProviderStateMixin, LanguagesAnimationsScroll
-        - METHODS:
-          - METHOD: setupAnimation(TickerProvider ticket)
-            - DEPENDS_ON:
-              - AnimationController FROM flutter/material.dart
-              - Duration
-              - CurveTween FROM flutter/material.dart
-              - Curves FROM flutter/material.dart
-            - INSTANTIATES:
-              - AnimationController
-              - CurveTween
-            - CALLS:
-              - animationsScroll.animationController.addListener
-              - animationsScroll.animationController.repeat
-          - METHOD: initState()
-            - CALLS:
-              - super.initState
-              - languagesSetup ON this
-              - animationsScroll.getChosenLanguage ON animationsScroll
-              - animationsScroll.standardLanguage ON animationsScroll
-              - setupAnimation ON this
-          - METHOD: dispose()
-            - CALLS:
-              - super.dispose
-              - animationsScroll.animationController.dispose
-          - METHOD: build(BuildContext context)
-            - DEPENDS_ON:
-              - AnimatedBuilder FROM flutter/material.dart
-              - Positioned FROM flutter/material.dart
-              - SizedBox FROM flutter/material.dart
-              - FittedBox FROM flutter/material.dart
-              - DefaultTextStyle FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - AnimatedTextKit FROM animated_text_kit/animated_text_kit.dart
-              - FadeAnimatedText FROM animated_text_kit/animated_text_kit.dart
-              - Colors FROM flutter/material.dart
-            - INSTANTIATES:
-              - AnimatedBuilder
-              - Positioned
-              - SizedBox
-              - FittedBox
-              - DefaultTextStyle
-              - TextStyle
-              - AnimatedTextKit
-              - FadeAnimatedText
-            - CALLS:
-              - String.split
-    IMPORTS:
-      - animated_text_kit/animated_text_kit.dart
-      - flutter/material.dart
-      - ../startup.dart
-      - ./languages_animations_scroll.dart
-
-  - FILE: lib/services/game_service.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: GameService
-        - PROPERTIES:
-          - socketService: SocketService
-          - _game: Game?
-          - onGameUpdated: Function(Game)?
-          - onError: Function(String)?
-        - METHODS:
-          - METHOD: constructor({required this.socketService, this.onGameUpdated, this.onError})
-            - CALLS:
-              - socketService.onGameUpdate = _handleGameUpdate
-          - METHOD: game -> Game? [GETTER]
-          - METHOD: _handleGameUpdate(Game updatedGame)
-            - CALLS:
-              - onGameUpdated?(_game!) ON this
-          - METHOD: createGame({required String gameType, required int maxPlayers, required String username})
-            - CALLS:
-              - socketService.createGame ON socketService
-          - METHOD: joinGame({required int gameId, required String username})
-            - CALLS:
-              - socketService.joinGame ON socketService
-          - METHOD: rollDice({List<bool>? keepDice})
-            - CALLS:
-              - _reportError ON this
-              - List.filled
-              - socketService.rollDice ON socketService
-          - METHOD: calculateScoreForCell(BoardCell cell, List<int> diceValues)
-            - CALLS:
-              - List<int>.from
-              - List.sort
-              - String.toLowerCase
-              - List.where
-              - List.fold
-              - _calculatePairScore ON this
-              - _calculateTwoPairsScore ON this
-              - _calculateThreeOfAKindScore ON this
-              - _calculateFourOfAKindScore ON this
-              - _calculateFullHouseScore ON this
-              - _calculateSmallStraightScore ON this
-              - _calculateLargeStraightScore ON this
-              - _calculateYatzyScore ON this
-          - METHOD: selectCell(int cellIndex)
-            - CALLS:
-              - _reportError ON this
-              - calculateScoreForCell ON this
-              - socketService.selectCell ON socketService
-          - METHOD: _reportError(String message)
-            - CALLS:
-              - onError?(message) ON this
-          - METHOD: _calculatePairScore(List<int> sortedDice)
-          - METHOD: _calculateTwoPairsScore(List<int> sortedDice)
-          - METHOD: _calculateThreeOfAKindScore(List<int> sortedDice)
-          - METHOD: _calculateFourOfAKindScore(List<int> sortedDice)
-          - METHOD: _calculateFullHouseScore(List<int> sortedDice)
-          - METHOD: _calculateSmallStraightScore(List<int> sortedDice)
-          - METHOD: _calculateLargeStraightScore(List<int> sortedDice)
-          - METHOD: _calculateYatzyScore(List<int> sortedDice)
-    IMPORTS:
-      - ../models/game.dart
-      - ../models/board_cell.dart
-      - ./socket_service.dart
-
-  - FILE: lib/services/http_service.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: HttpService
-        - PROPERTIES:
-          - baseUrl: String
-        - METHODS:
-          - METHOD: constructor({required this.baseUrl})
-            - CALLS:
-              - print
-          - METHOD: getDB(String route) [ASYNC]
-            - DEPENDS_ON:
-              - http FROM package:http/http.dart
-              - Uri FROM dart:core
-            - CALLS:
-              - print
-              - Uri.parse
-              - http.get
-          - METHOD: postDB(String route, Map<String, dynamic> json) [ASYNC]
-            - DEPENDS_ON:
-              - http FROM package:http/http.dart
-              - Uri FROM dart:core
-              - jsonEncode FROM dart:convert
-            - CALLS:
-              - print
-              - Uri.parse
-              - jsonEncode
-              - http.post
-          - METHOD: updateDB(String route, Map<String, dynamic> json) [ASYNC]
-            - DEPENDS_ON:
-              - http FROM package:http/http.dart
-              - Uri FROM dart:core
-              - jsonEncode FROM dart:convert
-            - CALLS:
-              - print
-              - Uri.parse
-              - jsonEncode
-              - http.post
-          - METHOD: deleteDB(String route) [ASYNC]
-            - DEPENDS_ON:
-              - http FROM package:http/http.dart
-              - Uri FROM dart:core
-            - CALLS:
-              - print
-              - Uri.parse
-              - http.delete
-          - METHOD: deleteUser(String route, String email) [ASYNC]
-            - DEPENDS_ON:
-              - http FROM package:http/http.dart
-              - Uri FROM dart:core
-            - CALLS:
-              - print
-              - Uri.parse
-              - http.delete
-          - METHOD: login(String userName, String password) [ASYNC]
-            - DEPENDS_ON:
-              - http FROM package:http/http.dart
-              - Uri FROM dart:core
-              - jsonEncode FROM dart:convert
-            - CALLS:
-              - print
-              - Uri.parse
-              - jsonEncode
-              - http.post
-          - METHOD: signup(String userName, String password) [ASYNC]
-            - DEPENDS_ON:
-              - http FROM package:http/http.dart
-              - Uri FROM dart:core
-              - jsonEncode FROM dart:convert
-            - CALLS:
-              - print
-              - Uri.parse
-              - jsonEncode
-              - http.post
-    IMPORTS:
-      - dart:convert
-      - package:http/http.dart
-
-  - FILE: lib/services/service_provider.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: ServiceProvider EXTENDS InheritedWidget
-        - PROPERTIES:
-          - socketService: SocketService
-          - gameService: GameService
-        - METHODS:
-          - METHOD: constructor({super.key, required super.child, required this.socketService, required this.gameService})
-          - METHOD: of(BuildContext context) [STATIC]
-            - CALLS:
-              - context.dependOnInheritedWidgetOfExactType<ServiceProvider>
-          - METHOD: initialize({required Widget child, required BuildContext context}) [STATIC]
-            - INSTANTIATES:
-              - SocketService
-              - GameService
-              - ServiceProvider
-            - CALLS:
-              - print
-          - METHOD: updateShouldNotify(ServiceProvider oldWidget)
-    IMPORTS:
-      - flutter/material.dart
-      - ./socket_service.dart
-      - ./game_service.dart
-
-  - FILE: lib/services/socket_service.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: SocketService
-        - PROPERTIES:
-          - _instanceCounter: int [STATIC]
-          - _instanceId: int
-          - context: BuildContext
-          - socket: io.Socket
-          - socketId: String
-          - isConnected: bool
-          - _handlersSetUp: bool
-          - game: Game?
-          - _connectingInProgress: bool
-          - _globalConnectionInProgress: bool [STATIC]
-          - _connectionInitiator: String? [STATIC]
-          - onGameUpdate: Function(Game)?
-          - onChatMessage: Function(Map<String, dynamic>)?
-        - METHODS:
-          - METHOD: constructor({required this.context})
-            - CALLS:
-              - print
-              - StackTrace.current
-          - METHOD: connect()
-            - DEPENDS_ON:
-              - io FROM package:socket_io_client/socket_io_client.dart
-            - CALLS:
-              - StackTrace.current.toString
-              - print
-              - io.io
-              - _clearEventHandlers ON this
-              - _setupEventHandlers ON this
-              - socket.connect ON socket
-              - socket.onConnect ON socket
-              - socket.onConnectError ON socket
-          - METHOD: _clearEventHandlers()
-            - CALLS:
-              - print
-              - socket.off ON socket
-          - METHOD: _setupEventHandlers()
-            - CALLS:
-              - print
-              - socket.onConnect ON socket
-              - _sendEcho ON this
-              - _requestId ON this
-              - _updateState ON this
-              - socket.onDisconnect ON socket
-              - socket.onConnectError ON socket
-              - socket.on('welcome', handler) ON socket
-              - socket.on('echo_response', handler) ON socket
-              - socket.on('onClientMsg', _handleClientMessage) ON socket
-              - socket.on('onServerMsg', _handleServerMessage) ON socket
-              - socket.on('userId', _handleUserId) ON socket
-              - socket.on('gameUpdate', _handleGameUpdate) ON socket
-              - socket.on('chatMessage', _handleChatMessage) ON socket
-          - METHOD: _sendEcho()
-            - DEPENDS_ON:
-              - DateTime FROM dart:core
-              - jsonEncode FROM dart:convert
-            - CALLS:
-              - DateTime.now().millisecondsSinceEpoch
-              - print
-              - jsonEncode
-              - socket.emit('echo') ON socket [EVENT]
-          - METHOD: _requestId()
-            - DEPENDS_ON:
-              - DateTime FROM dart:core
-            - CALLS:
-              - DateTime.now().millisecondsSinceEpoch
-              - print
-              - socket.emit('sendToServer') ON socket [EVENT]
-          - METHOD: _handleUserId(dynamic data)
-            - CALLS:
-              - print
-              - _updateState ON this
-          - METHOD: _handleClientMessage(dynamic data)
-            - CALLS:
-              - print
-              - app.callbackOnClientMsg ON app
-              - _updateState ON this
-          - METHOD: _handleServerMessage(dynamic data)
-            - CALLS:
-              - print
-              - app.callbackOnServerMsg ON app
-              - _updateState ON this
-          - METHOD: _handleGameUpdate(dynamic data)
-            - CALLS:
-              - print
-              - _processGameUpdate ON this
-              - _updateState ON this
-          - METHOD: _processGameUpdate(Map<String, dynamic> gameData)
-            - DEPENDS_ON:
-              - Game FROM ../models/game.dart
-            - CALLS:
-              - Game.fromJson
-              - onGameUpdate? ON this
-          - METHOD: _handleChatMessage(dynamic data)
-            - CALLS:
-              - print
-              - onChatMessage? ON this
-          - METHOD: createGame({required String gameType, required int maxPlayers, required String username})
-            - DEPENDS_ON:
-              - DateTime FROM dart:core
-            - CALLS:
-              - print
-              - DateTime.now().millisecondsSinceEpoch
-              - socket.emit('sendToServer') ON socket [EVENT]
-          - METHOD: joinGame({required int gameId, required String username})
-            - DEPENDS_ON:
-              - DateTime FROM dart:core
-            - CALLS:
-              - print
-              - DateTime.now().millisecondsSinceEpoch
-              - socket.emit('sendToServer') ON socket [EVENT]
-          - METHOD: rollDice({required int gameId, required List<bool> keepDice})
-            - DEPENDS_ON:
-              - DateTime FROM dart:core
-            - CALLS:
-              - print
-              - DateTime.now().millisecondsSinceEpoch
-              - socket.emit('sendToServer') ON socket [EVENT]
-          - METHOD: selectCell({required int gameId, required int cellIndex})
-            - DEPENDS_ON:
-              - DateTime FROM dart:core
-            - CALLS:
-              - print
-              - DateTime.now().millisecondsSinceEpoch
-              - socket.emit('sendToServer') ON socket [EVENT]
-          - METHOD: sendChatMessage({required int gameId, required String message})
-            - DEPENDS_ON:
-              - DateTime FROM dart:core
-            - CALLS:
-              - print
-              - DateTime.now().millisecondsSinceEpoch
-              - socket.emit('sendToServer') ON socket [EVENT]
-          - METHOD: sendToClients(Map<String, dynamic> data)
-            - DEPENDS_ON:
-              - DateTime FROM dart:core
-            - CALLS:
-              - print
-              - DateTime.now().millisecondsSinceEpoch
-              - socket.emit('sendToClients') ON socket [EVENT]
-          - METHOD: sendToServer(Map<String, dynamic> data)
-            - DEPENDS_ON:
-              - DateTime FROM dart:core
-              - jsonEncode FROM dart:convert
-            - CALLS:
-              - DateTime.now().millisecondsSinceEpoch
-              - print
-              - jsonEncode
-              - socket.emit('sendToServer') ON socket [EVENT]
-          - METHOD: disconnect()
-            - CALLS:
-              - print
-              - _clearEventHandlers ON this
-              - socket.disconnect ON socket
-              - _updateState ON this
-          - METHOD: _updateState()
-            - DEPENDS_ON:
-              - SetStateCubit FROM ../states/cubit/state/state_cubit.dart
-            - CALLS:
-              - context.read<SetStateCubit>().setState
-              - print
-    IMPORTS:
-      - flutter/material.dart
-      - package:socket_io_client/socket_io_client.dart
-      - flutter_bloc/flutter_bloc.dart
-      - yatzy/application/communication_application.dart
-      - dart:convert
-      - ../models/game.dart
-      - ../states/cubit/state/state_cubit.dart
-      - ../startup.dart
-
-  - FILE: lib/shared_preferences.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: SharedPrefProvider [ABSTRACT]
-        - PROPERTIES:
-          - prefs: SharedPreferences [STATIC]
-        - METHODS:
-          - METHOD: loadPrefs() [STATIC, ASYNC]
-            - DEPENDS_ON:
-              - SharedPreferences FROM shared_preferences/shared_preferences.dart
-            - CALLS:
-              - SharedPreferences.getInstance
-          - METHOD: fetchPrefBool(String key) [STATIC]
-            - CALLS:
-              - prefs.getBool
-          - METHOD: fetchPrefInt(String key) [STATIC]
-            - CALLS:
-              - prefs.getInt
-          - METHOD: fetchPrefString(String key) [STATIC]
-            - CALLS:
-              - prefs.getString
-          - METHOD: fetchPrefObject(String key) [STATIC]
-            - CALLS:
-              - prefs.getString
-              - jsonDecode FROM dart:convert
-              - jsonEncode FROM dart:convert
-          - METHOD: setPrefBool(String key, bool value) [STATIC, ASYNC]
-            - CALLS:
-              - prefs.setBool
-          - METHOD: setPrefInt(String key, int value) [STATIC, ASYNC]
-            - CALLS:
-              - prefs.setInt
-          - METHOD: setPrefString(String key, String value) [STATIC, ASYNC]
-            - CALLS:
-              - prefs.setString
-          - METHOD: setPrefObject(String key, value) [STATIC, ASYNC]
-            - CALLS:
-              - jsonEncode FROM dart:convert
-              - prefs.setString
-    IMPORTS:
-      - dart:convert
-      - shared_preferences/shared_preferences.dart
-
-  - FILE: lib/startup.dart
-    LANGUAGE: Dart
-    VARIABLES:
-      - VARIABLE: isOnline: bool
-      - VARIABLE: isDebug: bool
-      - VARIABLE: localhost: String
-      - VARIABLE: localhostNET: String
-      - VARIABLE: localhostNETIO: String
-      - VARIABLE: applicationStarted: bool
-      - VARIABLE: userName: String
-      - VARIABLE: userNames: List
-      - VARIABLE: isTesting: bool
-      - VARIABLE: isTutorial: bool
-      - VARIABLE: mainPageLoaded: bool
-      - VARIABLE: keySettings: GlobalKey
-      - VARIABLE: screenWidth: double
-      - VARIABLE: screenHeight: double
-      - VARIABLE: devicePixelRatio: double
-      - VARIABLE: chosenLanguage: String
-      - VARIABLE: standardLanguage: String
-      - VARIABLE: differentLanguages: List<String>
-      - VARIABLE: inputItems: InputItems
-      - VARIABLE: tutorial: Tutorial
-      - VARIABLE: topScore: TopScore
-      - VARIABLE: animationsScroll: AnimationsScroll
-      - VARIABLE: app: Application
-      - VARIABLE: chat: Chat
-      - VARIABLE: dices: Dices
-    INSTANTIATES:
-      - InputItems
-    IMPORTS:
-      - flutter/cupertino.dart
-      - yatzy/scroll/animations_scroll.dart
-      - yatzy/top_score/top_score.dart
-      - yatzy/tutorial/tutorial.dart
-      - ./application/application.dart
-      - ./chat/chat.dart
-      - ./dices/dices.dart
-      - ./input_items/input_items.dart
-
-  - FILE: lib/states/bloc/language/language_bloc.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: LanguageBloc EXTENDS Bloc<LanguageEvent, String>
-        - PROPERTIES:
-          - key: String [STATIC]
-        - METHODS:
-          - METHOD: constructor()
-            - CALLS:
-              - SharedPrefProvider.fetchPrefString
-              - super
-              - on<LanguageChanged>(_languageChanged)
-          - METHOD: _languageChanged(LanguageChanged event, Emitter<String> emit) [ASYNC]
-            - CALLS:
-              - SharedPrefProvider.setPrefString
-              - emit
-    ATTRIBUTES:
-      - @injectable
-    IMPORTS:
-      - injectable/injectable.dart
-      - ../../../shared_preferences.dart
-      - flutter_bloc/flutter_bloc.dart
-      - ./language_event.dart
-
-  - FILE: lib/states/bloc/language/language_event.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: LanguageEvent [ABSTRACT]
-      - CLASS: LanguageChanged EXTENDS LanguageEvent
-        - PROPERTIES:
-          - language: String
-        - METHODS:
-          - METHOD: constructor({required this.language})
-
-  - FILE: lib/states/cubit/state/state_cubit.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: SetStateCubit EXTENDS Cubit<int>
-        - METHODS:
-          - METHOD: constructor()
-            - CALLS:
-              - super
-          - METHOD: setState() [ASYNC]
-            - CALLS:
-              - emit
-    IMPORTS:
-      - flutter_bloc/flutter_bloc.dart
-
-  - FILE: lib/top_score/languages_top_score.dart
-    LANGUAGE: Dart
-    MIXINS:
-      - MIXIN: LanguagesTopScore
-        - PROPERTIES:
-          - _getChosenLanguage: Function
-          - _standardLanguage: String
-          - _topScores: Map<String, String>
-        - METHODS:
-          - METHOD: languagesSetup(Function getChosenLanguage, String standardLanguage)
-          - METHOD: getText(var textVariable)
-
-  - FILE: lib/top_score/top_score.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: TopScore WITH LanguagesTopScore
-        - PROPERTIES:
-          - _getChosenLanguage: Function
-          - _standardLanguage: String
-          - animationController: AnimationController
-          - loopAnimation: Animation<double>
-          - _loadedGameTypes: Map<String, bool>
-          - topScores: List<dynamic>
-        - METHODS:
-          - METHOD: constructor({required Function getChosenLanguage, required String standardLanguage})
-          - METHOD: updateScoresFromData(List<Map<String, dynamic>> newScores, SetStateCubit cubit)
-            - CALLS:
-              - print
-              - cubit.setState
-          - METHOD: getChosenLanguage()
-          - METHOD: standardLanguage()
-          - METHOD: loadTopScoreFromServer(String gameType, SetStateCubit cubit) [ASYNC]
-            - DEPENDS_ON:
-              - HttpService FROM ../services/http_service.dart
-              - jsonDecode FROM dart:convert
-            - CALLS:
-              - print
-              - HttpService
-              - httpService.getDB
-              - jsonDecode
-              - cubit.setState
-          - METHOD: updateTopScore(String name, int score, String gameType) [ASYNC]
-            - DEPENDS_ON:
-              - HttpService FROM ../services/http_service.dart
-              - jsonDecode FROM dart:convert
-            - CALLS:
-              - print
-              - HttpService
-              - httpService.postDB
-              - jsonDecode
-    IMPORTS:
-      - dart:convert
-      - flutter/animation.dart
-      - ../states/cubit/state/state_cubit.dart
-      - ../services/http_service.dart
-      - ./languages_top_score.dart
-      - ../startup.dart
-
-  - FILE: lib/top_score/widget_top_scores.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: WidgetTopScore EXTENDS StatefulWidget
-        - PROPERTIES:
-          - width: double
-          - height: double
-        - METHODS:
-          - METHOD: createState() -> _WidgetTopScoreState
-            - INSTANTIATES:
-              - _WidgetTopScoreState
-      - CLASS: _WidgetTopScoreState EXTENDS State<WidgetTopScore> WITH TickerProviderStateMixin, LanguagesTopScore
-        - METHODS:
-          - METHOD: setupAnimation(TickerProvider ticket)
-            - DEPENDS_ON:
-              - AnimationController FROM flutter/material.dart
-              - Duration
-              - CurveTween FROM flutter/material.dart
-              - Curves FROM flutter/material.dart
-            - INSTANTIATES:
-              - AnimationController
-              - CurveTween
-            - CALLS:
-              - topScore.animationController.addStatusListener
-              - topScore.animationController.reverse
-              - topScore.animationController.forward
-          - METHOD: initState()
-            - CALLS:
-              - super.initState
-              - languagesSetup ON this
-              - topScore.getChosenLanguage ON topScore
-              - topScore.standardLanguage ON topScore
-              - setupAnimation ON this
-          - METHOD: dispose()
-            - CALLS:
-              - super.dispose
-              - topScore.animationController.dispose
-          - METHOD: build(BuildContext context)
-            - DEPENDS_ON:
-              - Positioned FROM flutter/material.dart
-              - Container FROM flutter/material.dart
-              - EdgeInsets FROM flutter/material.dart
-              - FittedBox FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - FontStyle FROM flutter/material.dart
-              - Shadow FROM flutter/material.dart
-              - AnimatedBuilder FROM flutter/material.dart
-              - BoxDecoration FROM flutter/material.dart
-              - Border FROM flutter/material.dart
-              - BorderRadius FROM flutter/material.dart
-              - LinearGradient FROM flutter/material.dart
-              - Scrollbar FROM flutter/material.dart
-              - ListView FROM flutter/material.dart
-              - Row FROM flutter/material.dart
-              - SizedBox FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-            - INSTANTIATES:
-              - Positioned
-              - Container
-              - FittedBox
-              - Text
-              - TextStyle
-              - Shadow
-              - AnimatedBuilder
-              - BoxDecoration
-              - Border
-              - BorderRadius
-              - LinearGradient
-              - Scrollbar
-              - ListView
-              - Row
-              - SizedBox
-            - CALLS:
-              - Colors.blue.withValues
-              - Colors.greenAccent.withValues
-              - Colors.lightBlueAccent.withValues
-    IMPORTS:
-      - flutter/material.dart
-      - ../startup.dart
-      - ./languages_top_score.dart
-
-  - FILE: lib/tutorial/tutorial.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: Tutorial
-        - PROPERTIES:
-          - keyXPos: List<double>
-          - keyYPos: List<double>
-          - animationSide: List<String>
-          - animationController1, animationController2, animationController3: AnimationController
-          - positionAnimation1, positionAnimation2, positionAnimation3: Animation<double>
-        - METHODS:
-          - METHOD: setup(TickerProvider ticket)
-            - DEPENDS_ON:
-              - AnimationController FROM flutter/material.dart
-              - Duration
-              - CurveTween FROM flutter/material.dart
-              - Curves FROM flutter/material.dart
-            - INSTANTIATES:
-              - AnimationController
-              - CurveTween
-            - CALLS:
-              - animationController1.addListener
-              - animationController2.addListener
-              - animationController3.addListener
-          - METHOD: widgetArrow(GlobalKey key, double w, double h, AnimationController animationController, String text, int controller, String side, double scale)
-            - DEPENDS_ON:
-              - AnimatedBuilder FROM flutter/material.dart
-              - RenderBox FROM flutter/material.dart
-              - Size FROM flutter/material.dart
-              - Offset FROM flutter/material.dart
-              - Positioned FROM flutter/material.dart
-              - Column FROM flutter/material.dart
-              - SizedBox FROM flutter/material.dart
-              - FittedBox FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - Shadow FROM flutter/material.dart
-              - Image FROM flutter/material.dart
-              - Row FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-            - INSTANTIATES:
-              - AnimatedBuilder
-              - Positioned
-              - Column
-              - SizedBox
-              - FittedBox
-              - Text
-              - TextStyle
-              - Shadow
-              - Image
-              - Row
-            - CALLS:
-              - key.currentContext?.findRenderObject
-              - renderBox.localToGlobal
-              - Colors.black.withValues
-              - Colors.blueAccent
-    IMPORTS:
-      - flutter/material.dart
-
-  - FILE: lib/utils/yatzy_mapping_client.dart
-    LANGUAGE: Dart
-    VARIABLES:
-      - VARIABLE: _gameTypeMappingsClient: Map<String, List<String>>
-    FUNCTIONS:
-      - FUNCTION: _getBaseGameTypeClient(String gameType)
-        - CALLS:
-          - String.startsWith
-      - FUNCTION: _getBaseLabel(String fullLabel)
-        - CALLS:
-          - String.contains
-      - FUNCTION: getSelectionLabel(String gameType, int index)
-        - CALLS:
-          - _getBaseGameTypeClient
-          - print
-      - FUNCTION: getSelectionIndex(String gameType, String label)
-        - CALLS:
-          - _getBaseGameTypeClient
-          - _getBaseLabel
-          - List.indexOf
-          - print
-
-  - FILE: lib/views/application_view.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: ApplicationView EXTENDS StatefulWidget
-        - METHODS:
-          - METHOD: constructor({super.key})
-          - METHOD: createState() -> _ApplicationViewState
-            - INSTANTIATES:
-              - _ApplicationViewState
-      - CLASS: _ApplicationViewState EXTENDS State<ApplicationView> WITH TickerProviderStateMixin
-        - METHODS:
-          - METHOD: myState()
-            - CALLS:
-              - setState
-          - METHOD: _showGameFinishedDialog()
-            - DEPENDS_ON:
-              - getIt FROM ../injection.dart
-              - AppRouter FROM ../router/router.dart
-              - SettingsView FROM ../router/router.gr.dart
-              - AlertDialog FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - TextButton FROM flutter/material.dart
-            - CALLS:
-              - showDialog
-              - Navigator.of(...).pop
-              - router.pushAndPopUntil
-            - INSTANTIATES:
-              - AlertDialog
-              - Text
-              - TextButton
-          - METHOD: postFrameCallback(BuildContext context) [ASYNC]
-            - CALLS:
-              - myState ON this
-              - _showGameFinishedDialog ON this
-          - METHOD: initState()
-            - CALLS:
-              - super.initState
-              - tutorial.setup ON tutorial
-              - WidgetsBinding.instance.addPostFrameCallback
-              - app.animation.setupAnimation ON app.animation
-          - METHOD: dispose()
-            - CALLS:
-              - animationsScroll.animationController.dispose
-              - super.dispose
-          - METHOD: build(BuildContext context)
-            - DEPENDS_ON:
-              - WidgetsBinding FROM flutter/material.dart
-              - BlocBuilder FROM flutter_bloc/flutter_bloc.dart
-              - SetStateCubit FROM ../states/cubit/state/state_cubit.dart
-            - CALLS:
-              - WidgetsBinding.instance.addPostFrameCallback
-              - _showGameFinishedDialog ON this
-              - app.widgetScaffold ON app
-    ATTRIBUTES:
-      - @RoutePage()
-    IMPORTS:
-      - auto_route/auto_route.dart
-      - flutter/cupertino.dart
-      - flutter/material.dart
-      - flutter_bloc/flutter_bloc.dart
-      - yatzy/application/widget_application_scaffold.dart
-      - ../router/router.gr.dart
-      - ../injection.dart
-      - ../router/router.dart
-      - ../startup.dart
-      - ../states/cubit/state/state_cubit.dart
-
-  - FILE: lib/views/settings_view.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: SettingsView EXTENDS StatefulWidget
-        - METHODS:
-          - METHOD: constructor({super.key})
-          - METHOD: createState() -> _SettingsViewHomeState
-            - INSTANTIATES:
-              - _SettingsViewHomeState
-      - CLASS: _SettingsViewHomeState EXTENDS State<SettingsView> WITH TickerProviderStateMixin
-        - METHODS:
-          - METHOD: myState()
-            - CALLS:
-              - setState
-          - METHOD: initState()
-            - DEPENDS_ON:
-              - TabController FROM flutter/material.dart
-            - CALLS:
-              - super.initState
-            - INSTANTIATES:
-              - TabController
-          - METHOD: build(BuildContext context)
-            - DEPENDS_ON:
-              - BlocBuilder FROM flutter_bloc/flutter_bloc.dart
-              - SetStateCubit FROM ../states/cubit/state/state_cubit.dart
-            - CALLS:
-              - app.widgetScaffoldSettings ON app
-    ATTRIBUTES:
-      - @RoutePage()
-    IMPORTS:
-      - auto_route/auto_route.dart
-      - flutter/material.dart
-      - flutter_bloc/flutter_bloc.dart
-      - yatzy/application/widget_application_settings.dart
-      - ../startup.dart
-      - ../states/cubit/state/state_cubit.dart
-
-  - FILE: lib/widgets/spectator_game_board.dart
-    LANGUAGE: Dart
-    CLASSES:
-      - CLASS: SpectatorGameBoard EXTENDS StatefulWidget
-        - PROPERTIES:
-          - gameData: Map<String, dynamic>
-        - METHODS:
-          - METHOD: constructor({Key? key, required this.gameData})
-          - METHOD: createState() -> _SpectatorGameBoardState
-            - INSTANTIATES:
-              - _SpectatorGameBoardState
-      - CLASS: _SpectatorGameBoardState EXTENDS State<SpectatorGameBoard>
-        - PROPERTIES:
-          - _horizontalScrollController: ScrollController
-          - _verticalScrollController: ScrollController
-        - METHODS:
-          - METHOD: dispose()
-            - CALLS:
-              - _horizontalScrollController.dispose
-              - _verticalScrollController.dispose
-              - super.dispose
-          - METHOD: build(BuildContext context)
-            - DEPENDS_ON:
-              - Stack FROM flutter/material.dart
-              - Column FROM flutter/material.dart
-              - Container FROM flutter/material.dart
-              - BoxDecoration FROM flutter/material.dart
-              - Border FROM flutter/material.dart
-              - BorderSide FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - SizedBox FROM flutter/material.dart
-              - Row FROM flutter/material.dart
-              - Padding FROM flutter/material.dart
-              - Center FROM flutter/material.dart
-              - BoxShadow FROM flutter/material.dart
-              - Expanded FROM flutter/material.dart
-              - RawScrollbar FROM flutter/material.dart
-              - Radius FROM flutter/material.dart
-              - ScrollbarOrientation FROM flutter/material.dart
-              - SingleChildScrollView FROM flutter/material.dart
-              - Positioned FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-            - INSTANTIATES:
-              - Stack
-              - Column
-              - Container
-              - BoxDecoration
-              - Border
-              - BorderSide
-              - Text
-              - TextStyle
-              - SizedBox
-              - Row
-              - Padding
-              - Center
-              - BoxShadow
-              - Expanded
-              - RawScrollbar
-              - Radius
-              - SingleChildScrollView
-              - Positioned
-            - CALLS:
-              - print
-              - List<String>.from
-              - List<int>.from
-              - List.generate
-              - getDiceFace ON this
-              - buildScoreTable ON this
-              - Positioned.fill
-          - METHOD: getDiceFace(int value)
-            - DEPENDS_ON:
-              - Container FROM flutter/material.dart
-              - BoxDecoration FROM flutter/material.dart
-              - BorderRadius FROM flutter/material.dart
-              - Column FROM flutter/material.dart
-              - Row FROM flutter/material.dart
-              - SizedBox FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-            - INSTANTIATES:
-              - Container
-              - BoxDecoration
-              - BorderRadius
-              - Column
-              - Row
-              - SizedBox
-          - METHOD: buildScoreTable(List<String> playerNames)
-            - DEPENDS_ON:
-              - ScoreCategory
-              - Padding FROM flutter/material.dart
-              - Table FROM flutter/material.dart
-              - TableCellVerticalAlignment FROM flutter/material.dart
-              - FixedColumnWidth FROM flutter/material.dart
-              - TableBorder FROM flutter/material.dart
-              - TableRow FROM flutter/material.dart
-              - BoxDecoration FROM flutter/material.dart
-              - TableCell FROM flutter/material.dart
-              - Text FROM flutter/material.dart
-              - TextStyle FROM flutter/material.dart
-              - FontWeight FROM flutter/material.dart
-              - Container FROM flutter/material.dart
-              - Colors FROM flutter/material.dart
-            - INSTANTIATES:
-              - ScoreCategory
-              - Padding
-              - Table
-              - FixedColumnWidth
-              - TableBorder
-              - TableRow
-              - BoxDecoration
-              - TableCell
-              - Text
-              - TextStyle
-              - Container
-            - CALLS:
-              - print
-              - List.map
-              - List.toList
-      - CLASS: ScoreCategory
-        - PROPERTIES:
-          - displayName: String
-          - index: int
-          - isHighlighted: bool
-        - METHODS:
-          - METHOD: constructor(this.displayName, this.index, this.isHighlighted)
-    IMPORTS:
-      - flutter/material.dart
-
-  - FILE: unity/yatzy/Assets/FlutterUnityIntegration/Demo/GameManager.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: GameManager EXTENDS MonoBehaviour
-        - METHODS:
-            - METHOD: Start()
-              - CALLS:
-                - gameObject.AddComponent<UnityMessageManager> ON gameObject
-            - METHOD: Update()
-            - METHOD: HandleWebFnCall(String action)
-              - CALLS:
-                - Time.set_timeScale
-                - Application.Unload
-                - Application.Quit
-    IMPORTS:
-      - System
-      - System.Collections
-      - System.Collections.Generic
-      - FlutterUnityIntegration
-      - UnityEngine
-
-  - FILE: unity/yatzy/Assets/FlutterUnityIntegration/Demo/Rotate.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: Rotate EXTENDS MonoBehaviour IMPLEMENTS IEventSystemHandler
-        - PROPERTIES:
-          - RotateAmount: Vector3 [SerializeField]
-        - METHODS:
-            - METHOD: Start()
-              - INSTANTIATES:
-                - Vector3
-            - METHOD: Update()
-              - CALLS:
-                - gameObject.transform.Rotate ON gameObject.transform
-                - Time.deltaTime
-                - Input.touchCount
-                - Input.GetTouch
-                - Touch.phase.Equals
-                - Camera.main.ScreenPointToRay
-                - Physics.Raycast
-                - UnityMessageManager.Instance.SendMessageToFlutter
-            - METHOD: SetRotationSpeed(String message)
-              - CALLS:
-                - float.Parse
-              - INSTANTIATES:
-                - Vector3
-    IMPORTS:
-      - System
-      - FlutterUnityIntegration
-      - UnityEngine
-      - UnityEngine.EventSystems
-
-  - FILE: unity/yatzy/Assets/FlutterUnityIntegration/Demo/SceneLoader.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: SceneLoader EXTENDS MonoBehaviour
-        - METHODS:
-            - METHOD: Start()
-            - METHOD: Update()
-            - METHOD: LoadScene(int idx)
-              - CALLS:
-                - Debug.Log
-                - SceneManager.LoadScene
-            - METHOD: MessengerFlutter()
-              - CALLS:
-                - UnityMessageManager.Instance.SendMessageToFlutter
-            - METHOD: SwitchNative()
-              - CALLS:
-                - UnityMessageManager.Instance.ShowHostMainWindow
-            - METHOD: UnloadNative()
-              - CALLS:
-                - UnityMessageManager.Instance.UnloadMainWindow
-            - METHOD: QuitNative()
-              - CALLS:
-                - UnityMessageManager.Instance.QuitUnityWindow
-    IMPORTS:
-      - System.Collections
-      - System.Collections.Generic
-      - FlutterUnityIntegration
-      - UnityEngine
-      - UnityEngine.SceneManagement
-
-  - FILE: unity/yatzy/Assets/FlutterUnityIntegration/Editor/Build.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: Build EXTENDS EditorWindow
-        - PROPERTIES:
-          - ProjectPath: string [STATIC]
-          - APKPath: string [STATIC]
-          - AndroidExportPath: string [STATIC]
-          - WindowsExportPath: string [STATIC]
-          - IOSExportPath: string [STATIC]
-          - WebExportPath: string [STATIC]
-          - IOSExportPluginPath: string [STATIC]
-          - _pluginMode: bool
-          - _persistentKey: string [STATIC]
-        - METHODS:
-            - METHOD: DoBuildAndroidLibrary() [STATIC]
-              - CALLS:
-                - DoBuildAndroid
-                - Path.Combine
-                - Copy
-            - METHOD: DoBuildAndroidPlugin() [STATIC]
-              - CALLS:
-                - DoBuildAndroid
-                - Path.Combine
-                - Copy
-            - METHOD: DoBuildIOS() [STATIC]
-              - CALLS:
-                - BuildIOS
-            - METHOD: DoBuildIOSPlugin() [STATIC]
-              - CALLS:
-                - BuildIOS
-                - SetupIOSProjectForPlugin
-            - METHOD: DoBuildWebGL() [STATIC]
-              - CALLS:
-                - BuildWebGL
-            - METHOD: DoBuildWindowsOS() [STATIC]
-              - CALLS:
-                - BuildWindowsOS
-            - METHOD: PluginSettings() [STATIC]
-              - CALLS:
-                - EditorWindow.GetWindow
-            - METHOD: OnGUI()
-              - CALLS:
-                - GUILayout.Label
-                - EditorGUI.BeginChangeCheck
-                - EditorGUILayout.Toggle
-                - EditorGUI.EndChangeCheck
-                - EditorPrefs.SetBool
-            - METHOD: OnEnable()
-              - CALLS:
-                - EditorPrefs.GetBool
-            - METHOD: BuildWindowsOS(String path) [STATIC]
-              - CALLS:
-                - EditorUserBuildSettings.SwitchActiveBuildTarget
-                - Directory.Exists
-                - Directory.Delete
-                - GetEnabledScenes
-                - ExportAddressables
-                - BuildPipeline.BuildPlayer
-              - INSTANTIATES:
-                - BuildPlayerOptions
-                - Exception
-            - METHOD: BuildWebGL(String path) [STATIC]
-              - CALLS:
-                - EditorUserBuildSettings.SwitchActiveBuildTarget
-                - Directory.Exists
-                - Directory.Delete
-                - GetEnabledScenes
-                - ExportAddressables
-                - BuildPipeline.BuildPlayer
-                - ModifyWebGLExport
-              - INSTANTIATES:
-                - BuildPlayerOptions
-                - Exception
-            - METHOD: DoBuildAndroid(String buildPath, bool isPlugin) [STATIC]
-              - CALLS:
-                - EditorUserBuildSettings.SwitchActiveBuildTarget
-                - Directory.Exists
-                - Directory.Delete
-                - GetEnabledScenes
-                - ExportAddressables
-                - BuildPipeline.BuildPlayer
-                - Copy
-                - ModifyAndroidGradle
-                - SetupAndroidProjectForPlugin
-                - SetupAndroidProject
-              - INSTANTIATES:
-                - BuildPlayerOptions
-                - Exception
-            - METHOD: ModifyWebGLExport() [STATIC]
-              - CALLS:
-                - Path.Combine
-                - File.ReadAllText
-                - String.Replace
-                - File.WriteAllText
-            - METHOD: ModifyAndroidGradle(bool isPlugin) [STATIC]
-              - CALLS:
-                - Path.Combine
-                - File.ReadAllText
-                - String.Replace
-                - Regex.Replace
-                - File.WriteAllText
-              - INSTANTIATES:
-                - Regex
-            - METHOD: BuildIOS(String path) [STATIC]
-              - CALLS:
-                - EditorUserBuildSettings.SwitchActiveBuildTarget
-                - Directory.Exists
-                - Directory.Delete
-                - GetEnabledScenes
-                - ExportAddressables
-                - BuildPipeline.BuildPlayer
-              - INSTANTIATES:
-                - BuildPlayerOptions
-                - Exception
-            - METHOD: Copy(string source, string destinationPath) [STATIC]
-              - CALLS:
-                - Directory.Exists
-                - Directory.Delete
-                - Directory.CreateDirectory
-                - Directory.GetDirectories
-                - String.Replace
-                - Directory.GetFiles
-                - File.Copy
-            - METHOD: GetEnabledScenes() [STATIC]
-              - CALLS:
-                - EditorBuildSettings.scenes.Where(...).Select(...).ToArray()
-            - METHOD: ExportAddressables() [STATIC]
-            - METHOD: SetupAndroidProject() [STATIC]
-              - CALLS:
-                - Path.GetFullPath
-                - Path.Combine
-                - File.ReadAllText
-                - Regex.IsMatch
-                - Regex.Replace
-                - File.WriteAllText
-                - String.Contains
-              - INSTANTIATES:
-                - Regex
-            - METHOD: SetupAndroidProjectForPlugin() [STATIC]
-              - CALLS:
-                - Path.GetFullPath
-                - Path.Combine
-                - File.ReadAllText
-                - Regex.IsMatch
-                - Regex.Replace
-                - File.WriteAllText
-              - INSTANTIATES:
-                - Regex
-            - METHOD: SetupIOSProjectForPlugin() [STATIC]
-              - CALLS:
-                - Path.GetFullPath
-                - Path.Combine
-                - File.ReadAllText
-                - Regex.IsMatch
-                - Regex.Replace
-                - File.WriteAllText
-              - INSTANTIATES:
-                - Regex
-            - METHOD: BuildUnityFrameworkArchive() [STATIC, ASYNC]
-              - CALLS:
-                - Directory.Exists
-                - Debug.Log
-                - Bash
-                - Debug.Log
-              - INSTANTIATES:
-                - Exception
-    ATTRIBUTES:
-      - [MenuItem]
-    IMPORTS:
-      - System
-      - System.IO
-      - System.Linq
-      - System.Text.RegularExpressions
-      - UnityEditor
-      - UnityEngine
-      - Application = UnityEngine.Application
-      - BuildResult = UnityEditor.Build.Reporting.BuildResult
-      - FlutterUnityIntegration.Editor
-
-  - FILE: unity/yatzy/Assets/FlutterUnityIntegration/Editor/SweetShellHelper.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: SweetShellHelper [STATIC]
-        - METHODS:
-          - METHOD: Bash(this string cmd, string fileName) [STATIC, EXTENSION]
-            - CALLS:
-              - String.Replace
-              - UnityEngine.Debug.LogWarning
-              - UnityEngine.Debug.Log
-              - source.SetResult
-              - source.SetException
-              - process.Dispose
-              - process.Start
-              - UnityEngine.Debug.LogError
-            - INSTANTIATES:
-              - TaskCompletionSource<int>
-              - Process
-              - ProcessStartInfo
-              - Exception
-    IMPORTS:
-      - System.Diagnostics
-      - System.Threading.Tasks
-      - System
-
-  - FILE: unity/yatzy/Assets/FlutterUnityIntegration/Editor/XCodePostBuild.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: XcodePostBuild [STATIC]
-        - PROPERTIES:
-          - TouchedMarker: string [CONST]
-        - METHODS:
-          - METHOD: OnPostBuild(BuildTarget target, string pathToBuiltProject) [STATIC]
-            - ATTRIBUTES:
-              - [PostProcessBuild]
-            - CALLS:
-              - PatchUnityNativeCode
-              - UpdateUnityProjectFiles
-              - UpdateBuildSettings
-          - METHOD: UpdateBuildSettings(string pathToBuildProject) [STATIC]
-            - CALLS:
-              - Path.Combine
-              - pbx.ReadFromFile
-              - pbx.GetUnityFrameworkTargetGuid
-              - pbx.ProjectGuid
-              - pbx.SetBuildProperty
-              - pbx.WriteToFile
-            - INSTANTIATES:
-              - PBXProject
-          - METHOD: UpdateUnityProjectFiles(string pathToBuiltProject) [STATIC]
-            - CALLS:
-              - Path.Combine
-              - pbx.ReadFromFile
-              - pbx.TargetGuidByName
-              - pbx.AddFolderReference
-              - pbx.AddFileToBuild
-              - pbx.WriteToFile
-            - INSTANTIATES:
-              - PBXProject
-          - METHOD: PatchUnityNativeCode(string pathToBuiltProject) [STATIC]
-            - CALLS:
-              - Path.Combine
-              - CheckUnityAppController
-              - EditUnityAppControllerH
-              - MarkUnityAppControllerH
-              - EditUnityAppControllerMM
-              - MarkUnityAppControllerMM
-          - METHOD: MarkUnityAppControllerH(string path) [STATIC]
-            - CALLS:
-              - EditCodeFile
-              - String.Contains
-              - String.Trim
-          - METHOD: MarkUnityAppControllerMM(string path) [STATIC]
-            - CALLS:
-              - EditCodeFile
-              - String.Contains
-              - String.Trim
-          - METHOD: CheckUnityAppController(string path) [STATIC]
-            - CALLS:
-              - EditCodeFile
-              - String.Contains
-          - METHOD: EditUnityAppControllerH(string path) [STATIC]
-            - CALLS:
-              - EditCodeFile
-              - String.Contains
-              - String.Trim
-          - METHOD: EditUnityAppControllerMM(string path) [STATIC]
-            - CALLS:
-              - EditCodeFile
-              - String.Trim
-              - String.Contains
-          - METHOD: EditCodeFile(string path, Func<string, IEnumerable<string>> lineHandler) [STATIC]
-            - CALLS:
-              - File.Exists
-              - File.Delete
-              - File.Move
-              - File.OpenText
-              - File.Create
-              - reader.ReadLine
-              - writer.WriteLine
-            - INSTANTIATES:
-              - StreamWriter
-    IMPORTS:
-      - System
-      - System.Collections.Generic
-      - System.IO
-      - UnityEditor
-      - UnityEditor.Callbacks
-      - UnityEditor.iOS.Xcode
-      - UnityEngine
-
-  - FILE: unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: NativeAPI
-        - METHODS:
-          - METHOD: OnUnityMessage(string message) [STATIC, EXTERN, IOS ONLY]
-          - METHOD: OnUnitySceneLoaded(string name, int buildIndex, bool isLoaded, bool IsValid) [STATIC, EXTERN, IOS ONLY]
-          - METHOD: OnUnityMessageWeb(string message) [STATIC, EXTERN, WEBGL ONLY]
-          - METHOD: OnUnitySceneLoadedWeb(string name, int buildIndex, bool isLoaded, bool isValid) [STATIC, EXTERN, WEBGL ONLY]
-          - METHOD: OnSceneLoaded(Scene scene, LoadSceneMode mode) [STATIC]
-            - CALLS:
-              - Debug.Log [Android Only]
-              - OnUnitySceneLoadedWeb [WebGL Only]
-              - OnUnitySceneLoaded [iOS Only]
-            - INSTANTIATES:
-              - AndroidJavaClass [Android Only]
-          - METHOD: SendMessageToFlutter(string message) [STATIC]
-            - CALLS:
-              - Debug.Log [Android Only]
-              - OnUnityMessageWeb [WebGL Only]
-              - OnUnityMessage [iOS Only]
-            - INSTANTIATES:
-              - AndroidJavaClass [Android Only]
-          - METHOD: ShowHostMainWindow() [STATIC]
-            - CALLS:
-              - Debug.Log [Android Only]
-            - INSTANTIATES:
-              - AndroidJavaClass [Android Only]
-          - METHOD: UnloadMainWindow() [STATIC]
-            - CALLS:
-              - Debug.Log [Android Only]
-            - INSTANTIATES:
-              - AndroidJavaClass [Android Only]
-          - METHOD: QuitUnityWindow() [STATIC]
-            - CALLS:
-              - Debug.Log [Android Only]
-            - INSTANTIATES:
-              - AndroidJavaClass [Android Only]
-    IMPORTS:
-      - System.Runtime.InteropServices
-      - UnityEngine.SceneManagement
-      - UnityEngine
-      - System
-
-  - FILE: unity/yatzy/Assets/FlutterUnityIntegration/SingletonMonoBehaviour.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: SingletonMonoBehaviour<T> EXTENDS MonoBehaviour [ABSTRACT, GENERIC]
-        - PROPERTIES:
-          - LazyInstance: Lazy<T> [STATIC]
-          - Instance: T [STATIC, GETTER]
-        - METHODS:
-          - METHOD: CreateSingleton() [STATIC]
-            - CALLS:
-              - ownerObject.AddComponent<T>
-              - DontDestroyOnLoad
-            - INSTANTIATES:
-              - GameObject
-    IMPORTS:
-      - System
-      - UnityEngine
-
-  - FILE: unity/yatzy/Assets/FlutterUnityIntegration/UnityMessageManager.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: MessageHandler
-        - PROPERTIES:
-          - id: int
-          - seq: string
-          - name: String
-          - data: JToken
-        - METHODS:
-          - METHOD: Deserialize(string message) [STATIC]
-            - CALLS:
-              - JObject.Parse
-              - m.GetValue(...).Value<T>
-            - INSTANTIATES:
-              - MessageHandler
-          - METHOD: getData<T>()
-            - CALLS:
-              - data.Value<T>
-          - METHOD: constructor(int id, string seq, string name, JToken data)
-          - METHOD: send(object data)
-            - CALLS:
-              - JObject.FromObject
-              - UnityMessageManager.Instance.SendMessageToFlutter
-              - o.ToString
-      - CLASS: UnityMessage
-        - PROPERTIES:
-          - name: String
-          - data: JObject
-          - callBack: Action<object>
-      - CLASS: UnityMessageManager EXTENDS SingletonMonoBehaviour<UnityMessageManager>
-        - PROPERTIES:
-          - MessagePrefix: string [CONST]
-          - ID: int [STATIC]
-          - waitCallbackMessageMap: Dictionary<int, UnityMessage>
-        - EVENTS:
-          - OnMessage: MessageDelegate
-          - OnFlutterMessage: MessageHandlerDelegate
-        - METHODS:
-          - METHOD: generateId() [STATIC]
-          - METHOD: Start()
-            - CALLS:
-              - SceneManager.sceneLoaded += OnSceneLoaded
-          - METHOD: OnSceneLoaded(Scene scene, LoadSceneMode mode)
-            - CALLS:
-              - NativeAPI.OnSceneLoaded
-          - METHOD: ShowHostMainWindow()
-            - CALLS:
-              - NativeAPI.ShowHostMainWindow
-          - METHOD: UnloadMainWindow()
-            - CALLS:
-              - NativeAPI.UnloadMainWindow
-          - METHOD: QuitUnityWindow()
-            - CALLS:
-              - NativeAPI.QuitUnityWindow
-          - METHOD: SendMessageToFlutter(string message)
-            - CALLS:
-              - NativeAPI.SendMessageToFlutter
-          - METHOD: SendMessageToFlutter(UnityMessage message)
-            - CALLS:
-              - generateId
-              - waitCallbackMessageMap.Add
-              - JObject.FromObject
-              - UnityMessageManager.Instance.SendMessageToFlutter
-              - o.ToString
-          - METHOD: onMessage(string message)
-            - CALLS:
-              - OnMessage?.Invoke
-          - METHOD: onFlutterMessage(string message)
-            - CALLS:
-              - String.StartsWith
-              - String.Replace
-              - MessageHandler.Deserialize
-              - waitCallbackMessageMap.TryGetValue
-              - waitCallbackMessageMap.Remove
-              - m.callBack?.Invoke
-              - OnFlutterMessage?.Invoke
-    IMPORTS:
-      - System
-      - System.Collections.Generic
-      - Newtonsoft.Json.Linq
-      - UnityEngine
-      - UnityEngine.SceneManagement
-
-  - FILE: unity/yatzy/Assets/Scripts/CircularMotionScript.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: CircularMotionScript EXTENDS MonoBehaviour
-        - PROPERTIES:
-          - timeCounter: float
-          - myColor: Color
-          - lightMotion: bool
-          - originalPosition: Vector3
-          - speed: float
-        - METHODS:
-            - METHOD: Start()
-              - INSTANTIATES:
-                - Color
-            - METHOD: Update()
-              - CALLS:
-                - Time.deltaTime
-                - Mathf.Cos
-                - Mathf.Sin
-                - GameObject.Find
-                - GetComponent<Renderer>().material.set_color
-              - INSTANTIATES:
-                - Vector3
-    IMPORTS:
-      - System.Collections
-      - System.Collections.Generic
-      - UnityEngine
-
-  - FILE: unity/yatzy/Assets/Scripts/Connection.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: Connection EXTENDS MonoBehaviour
-        - PROPERTIES:
-          - websocket: WebSocket
-          - _actions: ConcurrentQueue<Action>
-          - isOnline: bool
-        - METHODS:
-            - METHOD: Start() [ASYNC]
-              - CALLS:
-                - websocket.Connect
-              - INSTANTIATES:
-                - WebSocket
-            - METHOD: Update()
-              - CALLS:
-                - _actions.TryDequeue
-                - action?.Invoke
-                - websocket.DispatchMessageQueue
-            - METHOD: OnApplicationQuit() [ASYNC]
-              - CALLS:
-                - websocket.Close
-    IMPORTS:
-      - System
-      - System.Collections
-      - System.Collections.Concurrent
-      - System.Collections.Generic
-      - UnityEngine
-      - NativeWebSocket
-
-  - FILE: unity/yatzy/Assets/Scripts/DiceCheckZoneScript.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: DiceCheckZoneScript EXTENDS MonoBehaviour
-        - PROPERTIES:
-          - vel: Vector3
-          - angVel: Vector3
-        - METHODS:
-            - METHOD: OnTriggerStay(Collider col)
-              - CALLS:
-                - col.gameObject.GetComponentInParent<DiceScript>().GetDiceNumber
-                - col.gameObject.GetComponentInParent<Rigidbody>().linearVelocity
-                - col.gameObject.GetComponentInParent<Rigidbody>().angularVelocity
-                - Mathf.Abs
-                - col.gameObject.GetComponentInParent<DiceScript>().SetDiceNumber
-    IMPORTS:
-      - System.Collections
-      - System.Collections.Generic
-      - UnityEngine
-
-  - FILE: unity/yatzy/Assets/Scripts/DiceScript.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: DiceScript EXTENDS MonoBehaviour
-        - PROPERTIES:
-          - diceNumber: int
-          - originalPosition: Vector3
-          - cupPosition: Vector3
-          - startPosition: Vector3
-          - respondsToClicks: bool
-          - isGreen: bool
-          - isBlue: bool
-          - isActive: bool
-        - METHODS:
-            - METHOD: Awake()
-            - METHOD: Update()
-            - METHOD: OnMouseDown()
-              - CALLS:
-                - String.Replace
-                - GameObject.Find
-                - GetComponent<DiceScript>()
-                - transform.rotation.eulerAngles
-                - Quaternion.Euler
-            - METHOD: GetDiceNumber() -> int
-            - METHOD: SetDiceNumber(int number)
-    IMPORTS:
-      - System.Collections
-      - System.Collections.Generic
-      - UnityEngine
-
-  - FILE: unity/yatzy/Assets/Scripts/GameManagerScript.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: jsonCommunicator
-        - PROPERTIES:
-          - actionUnity: string
-          - diceResult: List<int>
-        - METHODS:
-          - METHOD: constructor(string _actionUnity, List<int> _diceResult)
-            - INSTANTIATES:
-              - List<int>
-      - CLASS: GameManagerScript EXTENDS MonoBehaviour
-        - PROPERTIES:
-          - throwDices: bool
-          - throwActive: bool
-          - maxNrDices: int [STATIC]
-          - go: GameObject[]
-          - goG: GameObject[]
-          - goB: GameObject[]
-          - goSnow: GameObject
-          - goSnowActive: bool
-          - diceResult: List<int> [STATIC]
-          - rb: Rigidbody [STATIC]
-          - c: float
-          - nrDices: int
-          - nrThrows: int
-          - nrThrowsRemaining: int
-          - animatorCup: Animator
-          - animatorCat: Animator
-          - animatorDog: Animator
-          - timeFromThrownDices: float
-          - rethrow: bool
-          - dicesActive: bool
-        - METHODS:
-            - METHOD: Start()
-              - CALLS:
-                - Debug.Log
-                - SystemInfo.graphicsDeviceType
-                - gameObject.AddComponent<UnityMessageManager>
-                - GameObject.Find
-                - goSnow.transform.GetChild(...).gameObject.GetComponent<ParticleSystem>().main.startSize.constant
-                - goSnow.SetActive
-                - Time.set_timeScale
-                - InitDices ON this
-                - animatorCup.set_speed
-                - animatorCat.Play
-                - animatorDog.Play
-                - Physics.set_gravity
-              - INSTANTIATES:
-                - GameObject
-                - List<int>
-                - Vector3
-            - METHOD: InitDices(bool initRotation = true)
-              - CALLS:
-                - GameObject.Find
-                - Quaternion.Euler
-            - METHOD: SetDices(List<int> dices)
-              - CALLS:
-                - Quaternion.Euler
-            - METHOD: Update()
-              - CALLS:
-                - go[i].GetComponent<DiceScript>().GetDiceNumber
-                - goB[i].GetComponent<DiceScript>().isActive
-                - goG[i].GetComponent<DiceScript>().startPosition
-                - go[i].GetComponentInParent<Rigidbody>().rotation.eulerAngles
-                - Quaternion.Euler
-                - goG[i].GetComponent<DiceScript>().set_respondsToClicks
-                - goB[i].GetComponent<DiceScript>().set_respondsToClicks
-                - JsonConvert.SerializeObject
-                - InitDices ON this
-                - UnityMessageManager.Instance.SendMessageToFlutter
-                - Time.time
-                - Input.GetKeyDown
-                - KeyCode.O
-                - Debug.Log
-                - GameObject.Find
-                - go[i].GetComponent<DiceScript>().cupPosition
-                - GameObject.Find(...).transform.position
-                - Quaternion.identity
-                - go[i].GetComponent<Rigidbody>()
-                - Random.Range
-                - go[i].GetComponent<DiceScript>().SetDiceNumber
-                - animatorCup.Play
-              - INSTANTIATES:
-                - jsonCommunicator
-                - Vector3
-            - METHOD: SetNrDices(string strNrDices)
-              - CALLS:
-                - int.Parse
-                - InitDices ON this
-            - METHOD: flutterMessage(String json)
-              - CALLS:
-                - Debug.Log
-                - JObject.Parse
-                - UnityMessageManager.Instance.SendMessageToFlutter
-                - InitDices ON this
-                - GameObject.Find
-                - localGameObject.GetComponent<CircularMotionScript>().set_myColor
-                - localGameObject.GetComponent<CircularMotionScript>().set_lightMotion
-                - SetDices ON this
-                - goSnow.SetActive
-              - INSTANTIATES:
-                - GameObject
-                - Color
-                - List<int>
-    IMPORTS:
-      - System
-      - System.Collections
-      - System.Collections.Generic
-      - UnityEngine
-      - Newtonsoft.Json
-      - Newtonsoft.Json.Linq
-      - FlutterUnityIntegration
-      - Random = UnityEngine.Random
-
-  - FILE: unity/yatzy/Assets/Scripts/ThrowDices.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: ThrowDices EXTENDS MonoBehaviour
-        - PROPERTIES:
-          - gameManager: GameObject
-        - METHODS:
-            - METHOD: Awake()
-              - CALLS:
-                - GameObject.Find
-            - METHOD: OnMouseDown()
-              - CALLS:
-                - Debug.Log
-                - gameManager.GetComponent<GameManagerScript>().throwActive
-            - METHOD: Update()
-    IMPORTS:
-      - System.Collections
-      - System.Collections.Generic
-      - UnityEngine
-
-  - FILE: unity/yatzy/Assets/WebSocket/WebSocket.cs
-    LANGUAGE: C#
-    CLASSES:
-      - CLASS: MainThreadUtil EXTENDS MonoBehaviour
-        - PROPERTIES:
-          - Instance: MainThreadUtil [STATIC]
-          - synchronizationContext: SynchronizationContext [STATIC]
-        - METHODS:
-          - METHOD: Setup() [STATIC]
-            - ATTRIBUTES:
-              - [RuntimeInitializeOnLoadMethod]
-            - CALLS:
-              - AddComponent<MainThreadUtil>
-              - SynchronizationContext.Current
-            - INSTANTIATES:
-              - GameObject
-          - METHOD: Run(IEnumerator waitForUpdate) [STATIC]
-            - CALLS:
-              - synchronizationContext.Post
-              - Instance.StartCoroutine
-              - CoroutineWrapper
-          - METHOD: Awake()
-            - CALLS:
-              - DontDestroyOnLoad
-      - CLASS: WaitForUpdate EXTENDS CustomYieldInstruction
-        - PROPERTIES:
-          - keepWaiting: bool [GETTER]
-        - METHODS:
-          - METHOD: GetAwaiter() -> MainThreadAwaiter
-            - CALLS:
-              - MainThreadUtil.Run
-              - CoroutineWrapper
-            - INSTANTIATES:
-              - MainThreadAwaiter
-      - CLASS: MainThreadAwaiter IMPLEMENTS INotifyCompletion
-        - PROPERTIES:
-          - continuation: Action
-          - IsCompleted: bool [GETTER, SETTER]
-        - METHODS:
-          - METHOD: GetResult()
-          - METHOD: Complete()
-            - CALLS:
-              - continuation?.Invoke
-          - METHOD: OnCompleted(Action continuation)
-      - CLASS: WebSocket EXTENDS IWebSocket
-        - PROPERTIES:
-          - OnOpen: WebSocketOpenEventHandler [EVENT]
-          - OnMessage: WebSocketMessageEventHandler [EVENT]
-          - OnError: WebSocketErrorEventHandler [EVENT]
-          - OnClose: WebSocketCloseEventHandler [EVENT]
-          - uri: Uri
-          - headers: Dictionary<string, string>
-          - subprotocols: List<string>
-          - m_Socket: ClientWebSocket
-          - m_TokenSource: CancellationTokenSource
-          - m_CancellationToken: CancellationToken
-          - OutgoingMessageLock: object
-          - IncomingMessageLock: object
-          - isSending: bool
-          - sendBytesQueue: List<ArraySegment<byte>>
-          - sendTextQueue: List<ArraySegment<byte>>
-          - m_MessageList: List<byte[]>
-        - METHODS:
-          - METHOD: constructor(string url, Dictionary<string, string> headers = null)
-            - CALLS:
-              - ArgumentException
-            - INSTANTIATES:
-              - Uri
-              - Dictionary<string, string>
-              - List<string>
-          - METHOD: constructor(string url, string subprotocol, Dictionary<string, string> headers = null)
-            - CALLS:
-              - ArgumentException
-            - INSTANTIATES:
-              - Uri
-              - Dictionary<string, string>
-              - List<string>
-          - METHOD: constructor(string url, List<string> subprotocols, Dictionary<string, string> headers = null)
-            - CALLS:
-              - ArgumentException
-            - INSTANTIATES:
-              - Uri
-              - Dictionary<string, string>
-          - METHOD: CancelConnection()
-            - CALLS:
-              - m_TokenSource?.Cancel
-          - METHOD: Connect() [ASYNC]
-            - CALLS:
-              - m_Socket.ConnectAsync
-              - OnOpen?.Invoke
-              - Receive ON this
-              - OnError?.Invoke
-              - OnClose?.Invoke
-              - m_TokenSource.Cancel
-              - m_Socket.Dispose
-            - INSTANTIATES:
-              - CancellationTokenSource
-              - ClientWebSocket
-          - METHOD: State -> WebSocketState [GETTER]
-          - METHOD: Send(byte[] bytes) -> Task
-            - CALLS:
-              - SendMessage ON this
-            - INSTANTIATES:
-              - ArraySegment<byte>
-          - METHOD: SendText(string message) -> Task
-            - CALLS:
-              - Encoding.UTF8.GetBytes
-              - SendMessage ON this
-            - INSTANTIATES:
-              - ArraySegment<byte>
-          - METHOD: SendMessage(List<ArraySegment<byte>> queue, WebSocketMessageType messageType, ArraySegment<byte> buffer) [ASYNC]
-            - CALLS:
-              - Monitor.TryEnter
-              - m_Socket.CloseAsync
-              - m_Socket.SendAsync(...).Wait
-              - Monitor.Exit
-              - HandleQueue ON this
-              - queue.Add
-          - METHOD: HandleQueue(List<ArraySegment<byte>> queue, WebSocketMessageType messageType) [ASYNC]
-            - CALLS:
-              - queue.RemoveAt
-              - SendMessage ON this
-          - METHOD: DispatchMessageQueue()
-            - CALLS:
-              - m_MessageList.Clear
-              - OnMessage?.Invoke
-            - INSTANTIATES:
-              - List<byte[]>
-          - METHOD: Receive() [ASYNC]
-            - CALLS:
-              - WaitForBackgroundThread
-              - m_Socket.ReceiveAsync
-              - ms.Write
-              - ms.ToArray
-              - Close ON this
-              - WebSocketHelpers.ParseCloseCodeEnum
-              - m_TokenSource.Cancel
-              - WaitForUpdate
-              - OnClose?.Invoke
-            - INSTANTIATES:
-              - ArraySegment<byte>
-              - MemoryStream
-          - METHOD: Close() [ASYNC]
-            - CALLS:
-              - m_Socket.CloseAsync
-      - CLASS: WebSocketFactory [STATIC]
-        - PROPERTIES:
-          - instances: Dictionary<Int32, WebSocket> [STATIC]
-          - isInitialized: bool [STATIC]
-        - METHODS:
-          - METHOD: WebSocketAllocate(string url) [STATIC, EXTERN, WEBGL ONLY]
-          - METHOD: WebSocketAddSubProtocol(int instanceId, string subprotocol) [STATIC, EXTERN, WEBGL ONLY]
-          - METHOD: WebSocketFree(int instanceId) [STATIC, EXTERN, WEBGL ONLY]
-          - METHOD: WebSocketSetOnOpen(OnOpenCallback callback) [STATIC, EXTERN, WEBGL ONLY]
-          - METHOD: WebSocketSetOnMessage(OnMessageCallback callback) [STATIC, EXTERN, WEBGL ONLY]
-          - METHOD: WebSocketSetOnError(OnErrorCallback callback) [STATIC, EXTERN, WEBGL ONLY]
-          - METHOD: WebSocketSetOnClose(OnCloseCallback callback) [STATIC, EXTERN, WEBGL ONLY]
-          - METHOD: Initialize() [STATIC]
-            - CALLS:
-              - WebSocketSetOnOpen
-              - WebSocketSetOnMessage
-              - WebSocketSetOnError
-              - WebSocketSetOnClose
-          - METHOD: HandleInstanceDestroy(int instanceId) [STATIC]
-            - CALLS:
-              - instances.Remove
-              - WebSocketFree
-          - METHOD: DelegateOnOpenEvent(int instanceId) [STATIC]
-            - ATTRIBUTES:
-              - [MonoPInvokeCallback]
-            - CALLS:
-              - instances.TryGetValue
-              - instanceRef.DelegateOnOpenEvent
-          - METHOD: DelegateOnMessageEvent(int instanceId, System.IntPtr msgPtr, int msgSize) [STATIC]
-            - ATTRIBUTES:
-              - [MonoPInvokeCallback]
-            - CALLS:
-              - instances.TryGetValue
-              - Marshal.Copy
-              - instanceRef.DelegateOnMessageEvent
-            - INSTANTIATES:
-              - byte[]
-          - METHOD: DelegateOnErrorEvent(int instanceId, System.IntPtr errorPtr) [STATIC]
-            - ATTRIBUTES:
-              - [MonoPInvokeCallback]
-            - CALLS:
-              - instances.TryGetValue
-              - Marshal.PtrToStringAuto
-              - instanceRef.DelegateOnErrorEvent
-          - METHOD: DelegateOnCloseEvent(int instanceId, int closeCode) [STATIC]
-            - ATTRIBUTES:
-              - [MonoPInvokeCallback]
-            - CALLS:
-              - instances.TryGetValue
-              - instanceRef.DelegateOnCloseEvent
-          - METHOD: CreateInstance(string url) [STATIC]
-            - INSTANTIATES:
-              - WebSocket
-    INTERFACES:
-      - INTERFACE: IWebSocket
-    ENUMS:
-      - ENUM: WebSocketCloseCode
-      - ENUM: WebSocketState
-    DELEGATES:
-      - DELEGATE: WebSocketOpenEventHandler
-      - DELEGATE: WebSocketMessageEventHandler
-      - DELEGATE: WebSocketErrorEventHandler
-      - DELEGATE: WebSocketCloseEventHandler
-    IMPORTS:
-      - System
-      - System.Collections.Generic
-      - System.IO
-      - System.Net.WebSockets
-      - System.Runtime.CompilerServices
-      - System.Text
-      - System.Threading
-      - System.Threading.Tasks
-      - AOT
-      - System.Runtime.InteropServices
-      - UnityEngine
-      - System.Collections
-
+DEPENDENCY_GRAPH:
+  VERSION: 1.0
+  ELEMENTS:
+    # --- Backend (TypeScript) ---
+    - ID: "backend/src/controllers/ChatController.ts:ChatController"
+      TYPE: CLASS
+      FILE: "backend/src/controllers/ChatController.ts"
+      LANGUAGE: TypeScript
+      MEMBERS:
+        io: { TYPE: PROPERTY, PROPERTY_TYPE: "socket.io:Server" }
+        gameService: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/services/GameService.ts:GameService" }
+      USES_TYPE:
+        - "socket.io:Server"
+        - "socket.io:Socket"
+        - "backend/src/services/GameService.ts:GameService"
+        - "backend/src/models/Game.ts:Game"
+        - "backend/src/models/Player.ts:Player"
+      INSTANTIATES: []
+      CALLS: [] # Constructor/methods call others
+
+    - ID: "backend/src/controllers/ChatController.ts:ChatController:constructor"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/ChatController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/ChatController.ts:ChatController"
+      USES_TYPE:
+        - "socket.io:Server"
+        - "backend/src/services/GameService.ts:GameService"
+      CALLS: []
+
+    - ID: "backend/src/controllers/ChatController.ts:ChatController:registerSocketHandlers"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/ChatController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/ChatController.ts:ChatController"
+      USES_TYPE: ["socket.io:Socket"]
+      CALLS:
+        - "built-in:console.log"
+        - "socket.io:Socket:on"
+        - "backend/src/controllers/ChatController.ts:ChatController:handleChatMessage" # Called from lambda
+        - "backend/src/controllers/ChatController.ts:ChatController:handleServerChatMessage" # Called from lambda
+      ACCESSES_MEMBER: ["socket.io:Socket:id"]
+
+    - ID: "backend/src/controllers/ChatController.ts:ChatController:handleChatMessage"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/ChatController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/ChatController.ts:ChatController"
+      USES_TYPE:
+        - "socket.io:Socket"
+        - "backend/src/services/GameService.ts:GameService"
+        - "backend/src/models/Game.ts:Game"
+        - "backend/src/models/Player.ts:Player"
+      CALLS:
+        - "built-in:console.log"
+        - "built-in:Array.isArray"
+        - "backend/src/services/GameService.ts:GameService:getGame"
+        - "socket.io:Server:to"
+        - "socket.io:Socket:emit"
+      ACCESSES_MEMBER:
+        - "socket.io:Socket:id"
+        - "backend/src/models/Game.ts:Game:players"
+        - "backend/src/models/Player.ts:Player:id"
+        - "backend/src/models/Player.ts:Player:isActive"
+
+    - ID: "backend/src/controllers/ChatController.ts:ChatController:handleServerChatMessage"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/ChatController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/ChatController.ts:ChatController"
+      USES_TYPE:
+        - "socket.io:Socket"
+        - "backend/src/services/GameService.ts:GameService"
+        - "backend/src/models/Game.ts:Game"
+        - "backend/src/models/Player.ts:Player"
+      CALLS:
+        - "built-in:console.log"
+        - "backend/src/services/GameService.ts:GameService:getGame"
+        - "socket.io:Server:to"
+        - "socket.io:Socket:emit"
+        - "socket.io:Socket:to" # For room broadcast
+      ACCESSES_MEMBER:
+        - "socket.io:Socket:id"
+        - "backend/src/models/Game.ts:Game:players"
+        - "backend/src/models/Player.ts:Player:id"
+        - "backend/src/models/Player.ts:Player:isActive"
+
+    - ID: "backend/src/controllers/ChatController.ts:ChatController:broadcastToPlayersInSameGame"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/ChatController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/ChatController.ts:ChatController"
+      USES_TYPE:
+        - "socket.io:Socket"
+        - "backend/src/services/GameService.ts:GameService"
+        - "backend/src/models/Game.ts:Game"
+        - "backend/src/models/Player.ts:Player"
+      CALLS:
+        - "built-in:console.log"
+        - "backend/src/services/GameService.ts:GameService:getAllGames"
+        - "socket.io:Server:to"
+        - "socket.io:Socket:emit"
+      ACCESSES_MEMBER:
+        - "socket.io:Socket:id"
+        - "backend/src/models/Game.ts:Game:players"
+        - "backend/src/models/Game.ts:Game:id"
+        - "backend/src/models/Player.ts:Player:id"
+        - "backend/src/models/Player.ts:Player:isActive"
+
+    - ID: "backend/src/controllers/GameController.ts:GameController"
+      TYPE: CLASS
+      FILE: "backend/src/controllers/GameController.ts"
+      LANGUAGE: TypeScript
+      MEMBERS:
+        gameService: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/services/GameService.ts:GameService" }
+        gameLogService: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/services/GameLogService.ts:GameLogService" }
+      USES_TYPE:
+        - "socket.io:Socket"
+        - "backend/src/services/GameService.ts:GameService"
+        - "backend/src/models/Player.ts:PlayerFactory"
+        - "backend/src/models/Player.ts:Player"
+        - "backend/src/services/GameLogService.ts:GameLogService"
+        - "backend/src/services/GameLogService.ts:GameMove"
+        - "backend/src/utils/yatzyMapping.ts:getSelectionLabel"
+        - "backend/src/models/Game.ts:Game"
+        - "backend/src/models/BoardCell.ts:BoardCell" # Used implicitly via Player/Game state
+      INSTANTIATES: [] # Instantiates Player via factory
+      CALLS: []
+
+    - ID: "backend/src/controllers/GameController.ts:GameController:constructor"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/GameController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
+      USES_TYPE:
+        - "backend/src/services/GameService.ts:GameService"
+        - "backend/src/services/GameLogService.ts:GameLogService"
+      CALLS: []
+
+    - ID: "backend/src/controllers/GameController.ts:GameController:registerSocketHandlers"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/GameController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
+      USES_TYPE: ["socket.io:Socket"]
+      CALLS:
+        - "socket.io:Socket:on"
+        - "backend/src/controllers/GameController.ts:GameController:handleRequestGame" # From lambda
+        - "backend/src/controllers/GameController.ts:GameController:handleRequestJoinGame" # From lambda
+        - "backend/src/controllers/GameController.ts:GameController:handleRemoveGame" # From lambda
+        - "backend/src/controllers/GameController.ts:GameController:handleSpectateGame" # From lambda
+        - "backend/src/controllers/GameController.ts:GameController:handleSendDices" # From lambda
+        - "backend/src/controllers/GameController.ts:GameController:handleSendSelection" # From lambda
+
+    - ID: "backend/src/controllers/GameController.ts:GameController:handleRequestGame"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/GameController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
+      USES_TYPE: ["socket.io:Socket", "backend/src/models/Player.ts:PlayerFactory", "backend/src/models/Player.ts:Player", "backend/src/services/GameService.ts:GameService"]
+      CALLS:
+        - "built-in:console.warn"
+        - "socket.io:Socket:emit"
+        - "backend/src/models/Player.ts:PlayerFactory:createPlayer"
+        - "backend/src/services/GameService.ts:GameService:createOrJoinGame"
+      ACCESSES_MEMBER: ["socket.io:Socket:id"]
+      INSTANTIATES: ["backend/src/models/Player.ts:Player"] # Via Factory
+
+    - ID: "backend/src/controllers/GameController.ts:GameController:handleRequestJoinGame"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/GameController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
+      USES_TYPE: ["socket.io:Socket", "backend/src/models/Game.ts:Game", "backend/src/models/Player.ts:PlayerFactory", "backend/src/models/Player.ts:Player", "backend/src/services/GameService.ts:GameService"]
+      CALLS:
+        - "backend/src/services/GameService.ts:GameService:getGame"
+        - "socket.io:Socket:emit"
+        - "backend/src/models/Game.ts:Game:isGameFull"
+        - "backend/src/models/Player.ts:PlayerFactory:createPlayer"
+        - "backend/src/services/GameService.ts:GameService:joinGame"
+        - "backend/src/services/GameService.ts:GameService:notifyGameUpdate"
+        - "backend/src/services/GameService.ts:GameService:broadcastGameList"
+        - "backend/src/models/Game.ts:Game:toJSON"
+        - "socket.io:Server:to" # Accessed via gameService['io']
+      ACCESSES_MEMBER:
+        - "backend/src/models/Game.ts:Game:gameStarted"
+        - "backend/src/models/Game.ts:Game:gameType"
+        - "backend/src/models/Game.ts:Game:players"
+        - "backend/src/models/Player.ts:Player:isActive"
+        - "backend/src/models/Player.ts:Player:id"
+        - "socket.io:Socket:id"
+      INSTANTIATES: ["backend/src/models/Player.ts:Player"] # Via Factory
+
+    - ID: "backend/src/controllers/GameController.ts:GameController:handleRemoveGame"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/GameController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
+      USES_TYPE: ["socket.io:Socket", "backend/src/models/Game.ts:Game", "backend/src/services/GameService.ts:GameService"]
+      CALLS:
+        - "built-in:console.log"
+        - "backend/src/services/GameService.ts:GameService:getGame"
+        - "backend/src/services/GameService.ts:GameService:removeGame"
+        - "backend/src/services/GameService.ts:GameService:broadcastGameList"
+      ACCESSES_MEMBER:
+        - "backend/src/models/Game.ts:Game:gameFinished"
+        - "backend/src/models/Game.ts:Game:id"
+        - "socket.io:Socket:id"
+
+    - ID: "backend/src/controllers/GameController.ts:GameController:handleSendDices"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/GameController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
+      USES_TYPE: ["socket.io:Socket", "backend/src/models/Game.ts:Game", "backend/src/services/GameService.ts:GameService"]
+      CALLS:
+        - "built-in:console.error"
+        - "backend/src/services/GameService.ts:GameService:getGame"
+        - "backend/src/models/Game.ts:Game:findPlayerIndex"
+        - "built-in:console.log"
+        - "backend/src/services/GameService.ts:GameService:processDiceRoll"
+      ACCESSES_MEMBER:
+        - "socket.io:Socket:id"
+        - "backend/src/models/Game.ts:Game:playerToMove"
+
+    - ID: "backend/src/controllers/GameController.ts:GameController:handleSendSelection"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/GameController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
+      USES_TYPE: ["socket.io:Socket", "backend/src/models/Game.ts:Game", "backend/src/services/GameService.ts:GameService"]
+      CALLS:
+        - "built-in:console.error"
+        - "backend/src/services/GameService.ts:GameService:getGame"
+        - "backend/src/models/Game.ts:Game:findPlayerIndex"
+        - "built-in:console.warn"
+        - "built-in:console.log"
+        - "backend/src/services/GameService.ts:GameService:processSelection"
+        - "backend/src/services/GameService.ts:GameService:forwardSelectionToPlayers"
+      ACCESSES_MEMBER:
+        - "socket.io:Socket:id"
+        - "backend/src/models/Game.ts:Game:playerToMove"
+
+    - ID: "backend/src/controllers/GameController.ts:GameController:handleSpectateGame"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/GameController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
+      USES_TYPE: ["socket.io:Socket", "backend/src/models/Game.ts:Game", "backend/src/services/GameService.ts:GameService", "backend/src/services/GameLogService.ts:GameLogService", "backend/src/services/GameLogService.ts:GameLog", "backend/src/services/GameLogService.ts:GameMove", "backend/src/models/Player.ts:Player", "backend/src/models/BoardCell.ts:BoardCell"]
+      CALLS:
+        - "built-in:console.error"
+        - "socket.io:Socket:emit"
+        - "built-in:console.log"
+        - "backend/src/services/GameService.ts:GameService:getGame"
+        - "backend/src/services/GameLogService.ts:GameLogService:getGameLog"
+        - "backend/src/models/Game.ts:Game:applySelection"
+        - "backend/src/models/Player.ts:Player:calculateScores"
+        - "backend/src/models/Game.ts:Game:toJSON"
+        - "backend/src/services/GameLogService.ts:GameLogService:logSpectate"
+        - "backend/src/services/GameService.ts:GameService:addSpectator"
+      ACCESSES_MEMBER:
+        - "socket.io:Socket:id"
+        - "backend/src/models/Game.ts:Game:id"
+        - "backend/src/models/Game.ts:Game:gameStarted"
+        - "backend/src/services/GameLogService.ts:GameLog:moves"
+        - "backend/src/services/GameLogService.ts:GameMove:action"
+        - "backend/src/services/GameLogService.ts:GameMove:playerIndex"
+        - "backend/src/services/GameLogService.ts:GameMove:selectionLabel"
+        - "backend/src/services/GameLogService.ts:GameMove:score"
+        - "backend/src/models/Game.ts:Game:players"
+        - "backend/src/models/Player.ts:Player:isActive"
+        - "backend/src/models/Player.ts:Player:cells"
+        - "backend/src/models/BoardCell.ts:BoardCell:label"
+        - "backend/src/models/BoardCell.ts:BoardCell:value"
+        - "backend/src/models/BoardCell.ts:BoardCell:fixed"
+        - "backend/src/models/Player.ts:Player:username"
+        - "backend/src/models/Player.ts:Player:score"
+
+    - ID: "backend/src/controllers/PlayerController.ts:PlayerController"
+      TYPE: CLASS
+      FILE: "backend/src/controllers/PlayerController.ts"
+      LANGUAGE: TypeScript
+      MEMBERS:
+        gameService: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/services/GameService.ts:GameService" }
+        gameLogService: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/services/GameLogService.ts:GameLogService" }
+        playerRegistry: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:Map" }
+      USES_TYPE:
+        - "socket.io:Socket"
+        - "backend/src/services/GameService.ts:GameService"
+        - "backend/src/models/Player.ts:PlayerFactory" # Imported but not directly used in shown methods
+        - "backend/src/services/GameLogService.ts:GameLogService"
+      INSTANTIATES: ["built-in:Map"]
+      CALLS: []
+
+    - ID: "backend/src/controllers/PlayerController.ts:PlayerController:constructor"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/PlayerController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/PlayerController.ts:PlayerController"
+      USES_TYPE:
+        - "backend/src/services/GameService.ts:GameService"
+        - "backend/src/services/GameLogService.ts:GameLogService"
+      CALLS: []
+
+    - ID: "backend/src/controllers/PlayerController.ts:PlayerController:registerSocketHandlers"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/PlayerController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/PlayerController.ts:PlayerController"
+      USES_TYPE: ["socket.io:Socket"]
+      CALLS:
+        - "socket.io:Socket:on"
+        - "built-in:console.log" # From lambda
+        - "built-in:console.error" # From lambda
+        - "backend/src/controllers/PlayerController.ts:PlayerController:handleGetId" # From lambda
+      ACCESSES_MEMBER: ["socket.io:Socket:id"]
+
+    - ID: "backend/src/controllers/PlayerController.ts:PlayerController:handleGetId"
+      TYPE: METHOD
+      FILE: "backend/src/controllers/PlayerController.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/controllers/PlayerController.ts:PlayerController"
+      USES_TYPE: ["socket.io:Socket"]
+      CALLS:
+        - "built-in:Map:has"
+        - "built-in:console.log"
+        - "socket.io:Socket:emit"
+        - "built-in:Map:set"
+      ACCESSES_MEMBER: ["socket.io:Socket:id"]
+
+    - ID: "backend/src/db.ts:initializeDbConnection"
+      TYPE: FUNCTION
+      FILE: "backend/src/db.ts"
+      LANGUAGE: TypeScript
+      USES_TYPE: ["mongodb:MongoClient", "mongodb:Db"]
+      CALLS:
+        - "built-in:console.log"
+        - "mongodb:MongoClient.connect"
+        - "mongodb:Db:collection"
+        - "mongodb:Collection:insertOne"
+        - "mongodb:Collection:countDocuments"
+        - "built-in:console.error"
+        - "backend/src/db.ts:getDbConnection" # Implicit via client.db
+      INSTANTIATES: ["built-in:Date"]
+
+    - ID: "backend/src/db.ts:getDbConnection"
+      TYPE: FUNCTION
+      FILE: "backend/src/db.ts"
+      LANGUAGE: TypeScript
+      USES_TYPE: ["mongodb:Db", "mongodb:MongoClient"]
+      CALLS:
+        - "built-in:console.error"
+        - "mongodb:MongoClient:db"
+
+    - ID: "backend/src/models/BoardCell.ts:BoardCell"
+      TYPE: CLASS
+      FILE: "backend/src/models/BoardCell.ts"
+      LANGUAGE: TypeScript
+      MEMBERS:
+        index: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:number" }
+        label: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:string" }
+        value: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:number" }
+        fixed: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:boolean" }
+        isNonScoreCell: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:boolean" }
+      USES_TYPE: []
+      INSTANTIATES: []
+      CALLS: [] # Constructor calls built-ins
+
+    - ID: "backend/src/models/BoardCell.ts:BoardCell:constructor"
+      TYPE: METHOD
+      FILE: "backend/src/models/BoardCell.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/BoardCell.ts:BoardCell"
+      CALLS: ["built-in:string:toLowerCase", "built-in:string:includes"]
+
+    - ID: "backend/src/models/BoardCell.ts:BoardCell:toJSON"
+      TYPE: METHOD
+      FILE: "backend/src/models/BoardCell.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/BoardCell.ts:BoardCell"
+      CALLS: []
+
+    - ID: "backend/src/models/BoardCell.ts:BoardCell:fromJson"
+      TYPE: METHOD # Static
+      FILE: "backend/src/models/BoardCell.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/BoardCell.ts:BoardCell" # Conceptually static member
+      USES_TYPE: ["backend/src/models/BoardCell.ts:BoardCell"]
+      INSTANTIATES: ["backend/src/models/BoardCell.ts:BoardCell"]
+      CALLS: []
+
+    - ID: "backend/src/models/Dice.ts:Dice"
+      TYPE: CLASS
+      FILE: "backend/src/models/Dice.ts"
+      LANGUAGE: TypeScript
+      MEMBERS:
+        values: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:number[]" }
+        diceCount: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:number" }
+      USES_TYPE: []
+      INSTANTIATES: ["built-in:Array"]
+      CALLS: [] # Constructor calls reset
+
+    - ID: "backend/src/models/Dice.ts:Dice:constructor"
+      TYPE: METHOD
+      FILE: "backend/src/models/Dice.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Dice.ts:Dice"
+      CALLS: ["backend/src/models/Dice.ts:Dice:reset"]
+
+    - ID: "backend/src/models/Dice.ts:Dice:roll"
+      TYPE: METHOD
+      FILE: "backend/src/models/Dice.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Dice.ts:Dice"
+      CALLS: ["built-in:Math.floor", "built-in:Math.random", "backend/src/models/Dice.ts:Dice:getValues"]
+
+    - ID: "backend/src/models/Dice.ts:Dice:rollSelected"
+      TYPE: METHOD
+      FILE: "backend/src/models/Dice.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Dice.ts:Dice"
+      CALLS: ["built-in:Math.floor", "built-in:Math.random", "backend/src/models/Dice.ts:Dice:getValues"]
+
+    - ID: "backend/src/models/Dice.ts:Dice:getValues"
+      TYPE: METHOD
+      FILE: "backend/src/models/Dice.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Dice.ts:Dice"
+      CALLS: []
+
+    - ID: "backend/src/models/Dice.ts:Dice:setValues"
+      TYPE: METHOD
+      FILE: "backend/src/models/Dice.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Dice.ts:Dice"
+      CALLS: []
+
+    - ID: "backend/src/models/Dice.ts:Dice:reset"
+      TYPE: METHOD
+      FILE: "backend/src/models/Dice.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Dice.ts:Dice"
+      CALLS: ["built-in:Array:fill"]
+      INSTANTIATES: ["built-in:Array"]
+
+    - ID: "backend/src/models/Game.ts:Game"
+      TYPE: CLASS
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBERS: # (Many members, simplified)
+        players: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/models/Player.ts:Player[]" }
+      USES_TYPE:
+        - "backend/src/models/Player.ts:Player"
+        - "backend/src/models/Player.ts:PlayerFactory"
+        - "backend/src/utils/yatzyMapping.ts:getSelectionIndex"
+        - "backend/src/models/BoardCell.ts:BoardCell" # Implicit via Player
+      INSTANTIATES: ["built-in:Array"] # In constructor and fromJSON
+      CALLS: [] # Methods call others
+
+    - ID: "backend/src/models/Game.ts:Game:constructor"
+      TYPE: METHOD
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Game.ts:Game"
+      USES_TYPE: ["backend/src/models/Player.ts:PlayerFactory", "backend/src/models/Player.ts:Player"]
+      CALLS: ["backend/src/models/Player.ts:PlayerFactory:createEmptyPlayer"]
+      INSTANTIATES: ["built-in:Array", "backend/src/models/Player.ts:Player"] # Via Factory
+
+    - ID: "backend/src/models/Game.ts:Game:addPlayer"
+      TYPE: METHOD
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Game.ts:Game"
+      USES_TYPE: ["backend/src/models/Player.ts:Player"]
+      CALLS: ["backend/src/models/Game.ts:Game:findEmptySlot"]
+
+    - ID: "backend/src/models/Game.ts:Game:removePlayer"
+      TYPE: METHOD
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Game.ts:Game"
+      USES_TYPE: ["backend/src/models/Player.ts:Player"]
+      CALLS:
+        - "backend/src/models/Game.ts:Game:findPlayerIndex"
+        - "built-in:console.log"
+        - "backend/src/models/Game.ts:Game:advanceToNextActivePlayer"
+        - "built-in:Array:filter"
+      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:isActive"]
+
+    - ID: "backend/src/models/Game.ts:Game:markPlayerAborted"
+      TYPE: METHOD
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Game.ts:Game"
+      USES_TYPE: ["backend/src/models/Player.ts:Player"]
+      CALLS:
+        - "backend/src/models/Game.ts:Game:findPlayerIndex"
+        - "backend/src/models/Game.ts:Game:advanceToNextActivePlayer"
+        - "built-in:Array:filter"
+      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:isActive"]
+
+    - ID: "backend/src/models/Game.ts:Game:findPlayerIndex"
+      TYPE: METHOD
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Game.ts:Game"
+      USES_TYPE: ["backend/src/models/Player.ts:Player"]
+      CALLS: ["built-in:Array:findIndex"]
+      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:id"]
+
+    - ID: "backend/src/models/Game.ts:Game:findEmptySlot"
+      TYPE: METHOD
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Game.ts:Game"
+      USES_TYPE: ["backend/src/models/Player.ts:Player"]
+      CALLS: ["built-in:Array:findIndex"]
+      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:id", "backend/src/models/Player.ts:Player:isActive"]
+
+    - ID: "backend/src/models/Game.ts:Game:isGameFull"
+      TYPE: METHOD
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Game.ts:Game"
+      CALLS: []
+
+    - ID: "backend/src/models/Game.ts:Game:getCurrentTurnNumber"
+      TYPE: METHOD
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Game.ts:Game"
+      CALLS: []
+
+    - ID: "backend/src/models/Game.ts:Game:incrementRollCount"
+      TYPE: METHOD
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Game.ts:Game"
+      CALLS: []
+
+    - ID: "backend/src/models/Game.ts:Game:advanceToNextActivePlayer"
+      TYPE: METHOD
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Game.ts:Game"
+      USES_TYPE: ["backend/src/models/Player.ts:Player"]
+      CALLS: ["built-in:console.log", "built-in:Array:filter"]
+      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:isActive"]
+
+    - ID: "backend/src/models/Game.ts:Game:applySelection"
+      TYPE: METHOD
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Game.ts:Game"
+      USES_TYPE: ["backend/src/utils/yatzyMapping.ts:getSelectionIndex", "backend/src/models/Player.ts:Player", "backend/src/models/BoardCell.ts:BoardCell"]
+      CALLS:
+        - "backend/src/utils/yatzyMapping.ts:getSelectionIndex"
+        - "built-in:console.log"
+        - "backend/src/models/Player.ts:Player:calculateScores"
+        - "built-in:console.warn"
+        - "built-in:console.error"
+      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:cells", "backend/src/models/BoardCell.ts:BoardCell:fixed", "backend/src/models/BoardCell.ts:BoardCell:value"]
+
+    - ID: "backend/src/models/Game.ts:Game:isGameFinished"
+      TYPE: METHOD
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Game.ts:Game"
+      USES_TYPE: ["backend/src/models/Player.ts:Player"]
+      CALLS: ["built-in:Array:filter", "built-in:Array:every", "backend/src/models/Player.ts:Player:hasCompletedGame"]
+      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:isActive"]
+
+    - ID: "backend/src/models/Game.ts:Game:setDiceValues"
+      TYPE: METHOD
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Game.ts:Game"
+      CALLS: ["built-in:console.error"]
+
+    - ID: "backend/src/models/Game.ts:Game:toJSON"
+      TYPE: METHOD
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Game.ts:Game"
+      USES_TYPE: ["backend/src/models/Player.ts:Player"]
+      CALLS: ["built-in:Array:map", "backend/src/models/Player.ts:Player:toJSON", "backend/src/models/Game.ts:Game:isGameFinished"]
+
+    - ID: "backend/src/models/Game.ts:Game:fromJSON"
+      TYPE: METHOD # Static
+      FILE: "backend/src/models/Game.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Game.ts:Game"
+      USES_TYPE: ["backend/src/models/Game.ts:Game", "backend/src/models/Player.ts:Player", "backend/src/models/Player.ts:PlayerFactory"]
+      INSTANTIATES: ["backend/src/models/Game.ts:Game", "built-in:Array", "backend/src/models/Player.ts:Player"] # Player via fromJSON or Factory
+      CALLS: ["backend/src/models/Player.ts:Player:fromJSON", "backend/src/models/Player.ts:PlayerFactory:createEmptyPlayer", "backend/src/models/Player.ts:PlayerFactory:createPlayer", "built-in:Array:filter"]
+      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:id", "backend/src/models/Player.ts:Player:username", "backend/src/models/Player.ts:Player:isActive"]
+
+    - ID: "backend/src/models/Player.ts:Player"
+      TYPE: CLASS
+      FILE: "backend/src/models/Player.ts"
+      LANGUAGE: TypeScript
+      MEMBERS: # (Many members, simplified)
+        cells: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/models/BoardCell.ts:BoardCell[]" }
+      USES_TYPE:
+        - "backend/src/models/BoardCell.ts:BoardCell"
+        - "backend/src/utils/gameConfig.ts:GameConfig"
+        - "backend/src/utils/gameConfig.ts:getBaseGameType"
+      INSTANTIATES: [] # Cells instantiated in constructor or fromJson
+      CALLS: [] # Methods call others
+
+    - ID: "backend/src/models/Player.ts:Player:constructor"
+      TYPE: METHOD
+      FILE: "backend/src/models/Player.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Player.ts:Player"
+      USES_TYPE: ["backend/src/models/BoardCell.ts:BoardCell", "backend/src/utils/gameConfig.ts:GameConfig", "backend/src/utils/gameConfig.ts:getBaseGameType"]
+      CALLS: ["backend/src/utils/gameConfig.ts:getBaseGameType", "built-in:Array:map"]
+      INSTANTIATES: ["backend/src/models/BoardCell.ts:BoardCell"]
+
+    - ID: "backend/src/models/Player.ts:Player:calculateScores"
+      TYPE: METHOD
+      FILE: "backend/src/models/Player.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Player.ts:Player"
+      USES_TYPE: ["backend/src/utils/gameConfig.ts:GameConfig", "backend/src/utils/gameConfig.ts:getBaseGameType", "backend/src/models/BoardCell.ts:BoardCell"]
+      CALLS: ["backend/src/utils/gameConfig.ts:getBaseGameType", "built-in:Array:findIndex", "built-in:Array:slice", "built-in:Array:every", "built-in:console.log"]
+      ACCESSES_MEMBER: ["backend/src/models/BoardCell.ts:BoardCell:fixed", "backend/src/models/BoardCell.ts:BoardCell:value", "backend/src/models/BoardCell.ts:BoardCell:label"]
+
+    - ID: "backend/src/models/Player.ts:Player:hasCompletedGame"
+      TYPE: METHOD
+      FILE: "backend/src/models/Player.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Player.ts:Player"
+      USES_TYPE: ["backend/src/models/BoardCell.ts:BoardCell"]
+      CALLS: ["built-in:Array:every"]
+      ACCESSES_MEMBER: ["backend/src/models/BoardCell.ts:BoardCell:fixed", "backend/src/models/BoardCell.ts:BoardCell:isNonScoreCell"]
+
+    - ID: "backend/src/models/Player.ts:Player:getScore"
+      TYPE: METHOD
+      FILE: "backend/src/models/Player.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Player.ts:Player"
+      CALLS: []
+
+    - ID: "backend/src/models/Player.ts:Player:toJSON"
+      TYPE: METHOD
+      FILE: "backend/src/models/Player.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Player.ts:Player"
+      USES_TYPE: ["backend/src/models/BoardCell.ts:BoardCell"]
+      CALLS: ["built-in:Array:map", "backend/src/models/BoardCell.ts:BoardCell:toJSON"]
+
+    - ID: "backend/src/models/Player.ts:Player:fromJSON"
+      TYPE: METHOD # Static
+      FILE: "backend/src/models/Player.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Player.ts:Player"
+      USES_TYPE: ["backend/src/models/Player.ts:Player", "backend/src/utils/gameConfig.ts:GameConfig", "backend/src/utils/gameConfig.ts:getBaseGameType", "backend/src/models/BoardCell.ts:BoardCell"]
+      INSTANTIATES: ["backend/src/models/Player.ts:Player"]
+      CALLS: ["backend/src/utils/gameConfig.ts:getBaseGameType", "built-in:Array:map", "backend/src/models/BoardCell.ts:BoardCell:fromJson"]
+
+    - ID: "backend/src/models/Player.ts:PlayerFactory"
+      TYPE: CLASS
+      FILE: "backend/src/models/Player.ts"
+      LANGUAGE: TypeScript
+      USES_TYPE: ["backend/src/models/Player.ts:Player", "backend/src/utils/gameConfig.ts:getBaseGameType", "backend/src/utils/gameConfig.ts:GameConfig", "backend/src/models/BoardCell.ts:BoardCell"]
+      CALLS: [] # Static methods only
+
+    - ID: "backend/src/models/Player.ts:PlayerFactory:createPlayer"
+      TYPE: METHOD # Static
+      FILE: "backend/src/models/Player.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Player.ts:PlayerFactory"
+      USES_TYPE: ["backend/src/models/Player.ts:Player", "backend/src/utils/gameConfig.ts:getBaseGameType"]
+      INSTANTIATES: ["backend/src/models/Player.ts:Player"]
+      CALLS: ["backend/src/utils/gameConfig.ts:getBaseGameType", "built-in:Array:includes", "built-in:console.warn"]
+
+    - ID: "backend/src/models/Player.ts:PlayerFactory:createEmptyPlayer"
+      TYPE: METHOD # Static
+      FILE: "backend/src/models/Player.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/models/Player.ts:PlayerFactory"
+      USES_TYPE: ["backend/src/models/Player.ts:Player", "backend/src/utils/gameConfig.ts:getBaseGameType", "backend/src/utils/gameConfig.ts:GameConfig", "backend/src/models/BoardCell.ts:BoardCell"]
+      INSTANTIATES: ["backend/src/models/Player.ts:Player", "backend/src/models/BoardCell.ts:BoardCell"]
+      CALLS: ["backend/src/utils/gameConfig.ts:getBaseGameType", "built-in:Array:includes", "built-in:console.warn", "built-in:Array:map"]
+
+    - ID: "backend/src/routes/getLogRoute.ts:getLogRoute"
+      TYPE: VARIABLE # Route object definition
+      FILE: "backend/src/routes/getLogRoute.ts"
+      LANGUAGE: TypeScript
+      USES_TYPE: ["jsonwebtoken", "backend/src/db.ts:getDbConnection", "mongodb:Db", "mongodb:Collection", "mongodb:Cursor"]
+      CALLS:
+        - "built-in:console.log"
+        - "express:Response:status"
+        - "express:Response:json"
+        - "jsonwebtoken:verify"
+        - "backend/src/db.ts:getDbConnection"
+        - "mongodb:Db:collection"
+        - "mongodb:Collection:find"
+        - "mongodb:Cursor:toArray"
+
+    - ID: "backend/src/routes/getTopScores.ts:getTopScores"
+      TYPE: VARIABLE # Route object definition
+      FILE: "backend/src/routes/getTopScores.ts"
+      LANGUAGE: TypeScript
+      USES_TYPE: ["backend/src/db.ts:getDbConnection", "mongodb:Db", "mongodb:Collection"]
+      CALLS:
+        - "backend/src/db.ts:getDbConnection"
+        - "built-in:console.warn"
+        - "express:Response:status"
+        - "express:Response:json"
+        - "built-in:console.log"
+        - "mongodb:Db:collection"
+        - "mongodb:Collection:find"
+        - "mongodb:Collection:sort"
+        - "mongodb:Collection:toArray"
+        - "express:Response:sendStatus"
+
+    - ID: "backend/src/routes/index.ts:routes"
+      TYPE: FUNCTION
+      FILE: "backend/src/routes/index.ts"
+      LANGUAGE: TypeScript
+      IMPORTS: # Imports route objects
+        - "backend/src/routes/logInRoute.ts"
+        - "backend/src/routes/logRoute.ts"
+        - "backend/src/routes/getLogRoute.ts"
+        - "backend/src/routes/signUpRoute.ts"
+        - "backend/src/routes/getTopScores.ts"
+        - "backend/src/routes/updateTopScore.ts"
+        - "backend/src/routes/spectateGameRoute.ts" # Although not explicitly in the return array, it's imported in server.ts
+      CALLS: [] # Returns an array of route objects
+
+    - ID: "backend/src/routes/logInRoute.ts:logInRoute"
+      TYPE: VARIABLE # Route object definition
+      FILE: "backend/src/routes/logInRoute.ts"
+      LANGUAGE: TypeScript
+      USES_TYPE: ["bcrypt", "jsonwebtoken", "backend/src/db.ts:getDbConnection", "mongodb:Db", "mongodb:Collection"]
+      CALLS:
+        - "backend/src/db.ts:getDbConnection"
+        - "mongodb:Db:collection"
+        - "mongodb:Collection:findOne"
+        - "express:Response:sendStatus"
+        - "bcrypt:compare"
+        - "jsonwebtoken:sign"
+        - "express:Response:status"
+        - "express:Response:json"
+
+    - ID: "backend/src/routes/logRoute.ts:logRoute"
+      TYPE: VARIABLE # Route object definition
+      FILE: "backend/src/routes/logRoute.ts"
+      LANGUAGE: TypeScript
+      USES_TYPE: ["jsonwebtoken", "backend/src/db.ts:getDbConnection", "mongodb:Db", "mongodb:Collection"]
+      CALLS:
+        - "built-in:console.log"
+        - "express:Response:status"
+        - "express:Response:json"
+        - "jsonwebtoken:verify"
+        - "backend/src/db.ts:getDbConnection"
+        - "mongodb:Db:collection"
+        - "mongodb:Collection:findOneAndUpdate"
+
+    - ID: "backend/src/routes/signUpRoute.ts:signUpRoute"
+      TYPE: VARIABLE # Route object definition
+      FILE: "backend/src/routes/signUpRoute.ts"
+      LANGUAGE: TypeScript
+      USES_TYPE: ["bcrypt", "jsonwebtoken", "backend/src/db.ts:getDbConnection", "mongodb:Db", "mongodb:Collection"]
+      CALLS:
+        - "backend/src/db.ts:getDbConnection"
+        - "mongodb:Db:collection"
+        - "mongodb:Collection:findOne"
+        - "built-in:console.log"
+        - "express:Response:sendStatus"
+        - "bcrypt:hash"
+        - "mongodb:Collection:insertOne"
+        - "jsonwebtoken:sign"
+        - "express:Response:status"
+        - "express:Response:send"
+        - "express:Response:json"
+
+    - ID: "backend/src/routes/spectateGameRoute.ts:initializeSpectateRoute"
+      TYPE: FUNCTION
+      FILE: "backend/src/routes/spectateGameRoute.ts"
+      LANGUAGE: TypeScript
+      USES_TYPE: ["backend/src/services/GameService.ts:GameService", "backend/src/services/GameLogService.ts:GameLogService"]
+      CALLS: []
+
+    - ID: "backend/src/routes/spectateGameRoute.ts:spectateGameRoute"
+      TYPE: VARIABLE # Route object definition
+      FILE: "backend/src/routes/spectateGameRoute.ts"
+      LANGUAGE: TypeScript
+      USES_TYPE: ["express:Request", "express:Response", "backend/src/services/GameService.ts:GameService", "backend/src/services/GameLogService.ts:GameLogService", "backend/src/models/Game.ts:Game", "backend/src/models/Player.ts:Player", "backend/src/models/BoardCell.ts:BoardCell", "backend/src/services/GameLogService.ts:GameLog", "backend/src/services/GameLogService.ts:GameMove"]
+      CALLS: # Calls are made via gameServiceInstance and gameLogServiceInstance
+        - "built-in:console.log"
+        - "built-in:parseInt"
+        - "built-in:isNaN"
+        - "built-in:console.error"
+        - "express:Response:status"
+        - "express:Response:json"
+        - "backend/src/services/GameService.ts:GameService:getGame" # Via instance
+        - "backend/src/models/Player.ts:Player:calculateScores" # Via instance
+        - "backend/src/models/Game.ts:Game:toJSON" # Via instance
+        - "backend/src/services/GameLogService.ts:GameLogService:getGameLog" # Via instance
+
+    - ID: "backend/src/routes/updateTopScore.ts:updateTopScore"
+      TYPE: VARIABLE # Route object definition
+      FILE: "backend/src/routes/updateTopScore.ts"
+      LANGUAGE: TypeScript
+      USES_TYPE: ["backend/src/db.ts:getDbConnection", "mongodb:Db", "mongodb:Collection"]
+      CALLS:
+        - "backend/src/db.ts:getDbConnection"
+        - "built-in:console.warn"
+        - "express:Response:status"
+        - "express:Response:json"
+        - "mongodb:Db:collection"
+        - "mongodb:Collection:insertOne"
+        - "mongodb:Collection:find"
+        - "mongodb:Collection:sort"
+        - "mongodb:Collection:toArray"
+        - "built-in:console.log"
+        - "express:Response:sendStatus"
+
+    - ID: "backend/src/server.ts:server" # Represents the main server setup script execution
+      TYPE: SCRIPT
+      FILE: "backend/src/server.ts"
+      LANGUAGE: TypeScript
+      IMPORTS:
+        - "express"
+        - "backend/src/routes/index.ts"
+        - "backend/src/db.ts"
+        - "path"
+        - "cors"
+        - "socket.io"
+        - "http"
+        - "backend/src/services/GameService.ts"
+        - "backend/src/services/GameLogService.ts"
+        - "backend/src/services/TopScoreService.ts"
+        - "backend/src/controllers/GameController.ts"
+        - "backend/src/controllers/PlayerController.ts"
+        - "backend/src/controllers/ChatController.ts"
+        - "backend/src/routes/spectateGameRoute.ts"
+      INSTANTIATES:
+        - "express:Application"
+        - "http:Server"
+        - "socket.io:Server"
+        - "backend/src/services/GameLogService.ts:GameLogService"
+        - "backend/src/services/TopScoreService.ts:TopScoreService"
+        - "backend/src/services/GameService.ts:GameService"
+        - "backend/src/controllers/GameController.ts:GameController"
+        - "backend/src/controllers/PlayerController.ts:PlayerController"
+        - "backend/src/controllers/ChatController.ts:ChatController"
+      USES_TYPE: # Many types used through instances
+        - "backend/src/routes/index.ts:routes"
+        - "backend/src/routes/spectateGameRoute.ts:spectateGameRoute"
+      CALLS:
+        - "express:Application:use"
+        - "http:createServer"
+        - "backend/src/routes/index.ts:routes"
+        - "express:Application:get" # etc. for routes
+        - "backend/src/routes/spectateGameRoute.ts:initializeSpectateRoute"
+        - "socket.io:Server:use"
+        - "socket.io:Server:on"
+        - "socket.io:Socket:emit"
+        - "socket.io:Socket:on"
+        - "backend/src/controllers/GameController.ts:GameController:registerSocketHandlers" # via io.on('connect')
+        - "backend/src/controllers/PlayerController.ts:PlayerController:registerSocketHandlers" # via io.on('connect')
+        - "backend/src/controllers/ChatController.ts:ChatController:registerSocketHandlers" # via io.on('connect')
+        - "backend/src/services/TopScoreService.ts:TopScoreService:getTopScores" # via io.on('connect') lambda
+        - "backend/src/services/GameService.ts:GameService:handlePlayerDisconnect" # via io.on('connect') lambda
+        - "express:Application:get"
+        - "express:Response:sendFile"
+        - "backend/src/db.ts:initializeDbConnection"
+        - "backend/src/services/GameLogService.ts:GameLogService:getCollection"
+        - "backend/src/services/GameLogService.ts:GameLogService:getDatabaseName"
+        - "backend/src/services/GameLogService.ts:GameLogService:getCollectionName"
+        - "http:Server:listen"
+        - "built-in:console.log"
+        - "built-in:console.error"
+        - "built-in:process.exit"
+
+    - ID: "backend/src/services/GameLogService.ts:GameMove"
+      TYPE: INTERFACE
+      FILE: "backend/src/services/GameLogService.ts"
+      LANGUAGE: TypeScript
+
+    - ID: "backend/src/services/GameLogService.ts:GameLog"
+      TYPE: INTERFACE
+      FILE: "backend/src/services/GameLogService.ts"
+      LANGUAGE: TypeScript
+      USES_TYPE: ["backend/src/services/GameLogService.ts:GameMove"]
+
+    - ID: "backend/src/services/GameLogService.ts:GameLogService"
+      TYPE: CLASS
+      FILE: "backend/src/services/GameLogService.ts"
+      LANGUAGE: TypeScript
+      USES_TYPE: ["mongodb:Collection", "backend/src/db.ts:getDbConnection", "backend/src/models/Game.ts:Game", "backend/src/services/GameLogService.ts:GameMove", "backend/src/services/GameLogService.ts:GameLog", "backend/src/models/Player.ts:Player"]
+      CALLS: [] # Methods call DB operations
+
+    - ID: "backend/src/services/GameLogService.ts:GameLogService:getCollection"
+      TYPE: METHOD
+      FILE: "backend/src/services/GameLogService.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/services/GameLogService.ts:GameLogService"
+      USES_TYPE: ["mongodb:Collection", "backend/src/services/GameLogService.ts:GameLog", "backend/src/db.ts:getDbConnection", "mongodb:Db"]
+      CALLS: ["backend/src/db.ts:getDbConnection", "mongodb:Db:collection"]
+
+    - ID: "backend/src/services/GameLogService.ts:GameLogService:logGameStart"
+      TYPE: METHOD
+      FILE: "backend/src/services/GameLogService.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/services/GameLogService.ts:GameLogService"
+      USES_TYPE: ["backend/src/models/Game.ts:Game", "backend/src/services/GameLogService.ts:GameLog", "backend/src/models/Player.ts:Player"]
+      CALLS:
+        - "built-in:console.log"
+        - "backend/src/services/GameLogService.ts:GameLogService:getCollection"
+        - "built-in:Array:map"
+        - "mongodb:Collection:replaceOne"
+        - "built-in:console.error"
+      ACCESSES_MEMBER: ["backend/src/models/Game.ts:Game:id", "backend/src/models/Game.ts:Game:gameType", "backend/src/models/Game.ts:Game:maxPlayers", "backend/src/models/Game.ts:Game:players", "backend/src/models/Player.ts:Player:username", "backend/src/models/Player.ts:Player:id"]
+      INSTANTIATES: ["built-in:Date"]
+
+    - ID: "backend/src/services/GameLogService.ts:GameLogService:logMove"
+      TYPE: METHOD
+      FILE: "backend/src/services/GameLogService.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/services/GameLogService.ts:GameLogService"
+      USES_TYPE: ["backend/src/services/GameLogService.ts:GameMove", "mongodb:Collection", "backend/src/services/GameLogService.ts:GameLog", "backend/src/db.ts:getDbConnection", "mongodb:Db"]
+      CALLS:
+        - "built-in:console.log"
+        - "backend/src/services/GameLogService.ts:GameLogService:getCollection"
+        - "backend/src/db.ts:getDbConnection" # Direct check
+        - "mongodb:Collection:findOne"
+        - "mongodb:Collection:insertOne"
+        - "mongodb:Collection:updateOne"
+        - "built-in:console.error"
+      INSTANTIATES: ["built-in:Date"] # For placeholder
+
+    - ID: "backend/src/services/GameLogService.ts:GameLogService:logGameEnd"
+      TYPE: METHOD
+      FILE: "backend/src/services/GameLogService.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/services/GameLogService.ts:GameLogService"
+      USES_TYPE: ["mongodb:Collection", "backend/src/services/GameLogService.ts:GameLog"]
+      CALLS:
+        - "built-in:console.log"
+        - "backend/src/services/GameLogService.ts:GameLogService:getCollection"
+        - "mongodb:Collection:updateOne"
+        - "built-in:console.error"
+      INSTANTIATES: ["built-in:Date"]
+
+    - ID: "backend/src/services/GameLogService.ts:GameLogService:getGameLog"
+      TYPE: METHOD
+      FILE: "backend/src/services/GameLogService.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/services/GameLogService.ts:GameLogService"
+      USES_TYPE: ["mongodb:Collection", "backend/src/services/GameLogService.ts:GameLog", "backend/src/services/GameLogService.ts:GameMove"]
+      CALLS:
+        - "built-in:console.log"
+        - "backend/src/services/GameLogService.ts:GameLogService:getCollection"
+        - "mongodb:Collection:findOne"
+        - "built-in:console.error"
+      ACCESSES_MEMBER: ["backend/src/services/GameLogService.ts:GameLog:moves", "backend/src/services/GameLogService.ts:GameMove:action", "backend/src/services/GameLogService.ts:GameMove:playerIndex", "backend/src/services/GameLogService.ts:GameMove:selectionLabel", "backend/src/services/GameLogService.ts:GameMove:score"]
+
+    - ID: "backend/src/services/GameLogService.ts:GameLogService:logSpectate"
+      TYPE: METHOD
+      FILE: "backend/src/services/GameLogService.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/services/GameLogService.ts:GameLogService"
+      USES_TYPE: ["backend/src/services/GameLogService.ts:GameMove", "backend/src/services/GameLogService.ts:GameLog", "mongodb:Collection"]
+      CALLS:
+        - "built-in:console.log"
+        - "backend/src/services/GameLogService.ts:GameLogService:getGameLog"
+        - "built-in:console.error"
+        - "backend/src/services/GameLogService.ts:GameLogService:getCollection"
+        - "mongodb:Collection:updateOne"
+      ACCESSES_MEMBER: ["backend/src/services/GameLogService.ts:GameLog:moves"]
+      INSTANTIATES: ["built-in:Date"]
+
+    - ID: "backend/src/services/GameService.ts:GameService"
+      TYPE: CLASS
+      FILE: "backend/src/services/GameService.ts"
+      LANGUAGE: TypeScript
+      MEMBERS: # Simplified
+        games: { TYPE: PROPERTY, PROPERTY_TYPE: "Map<number, Game>" }
+        spectators: { TYPE: PROPERTY, PROPERTY_TYPE: "Map<number, Set<string>>" }
+        io: { TYPE: PROPERTY, PROPERTY_TYPE: "socket.io:Server" }
+        gameLogService: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/services/GameLogService.ts:GameLogService" }
+        topScoreService: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/services/TopScoreService.ts:TopScoreService" }
+      USES_TYPE:
+        - "backend/src/models/Game.ts:Game"
+        - "backend/src/models/Player.ts:Player"
+        - "backend/src/models/Player.ts:PlayerFactory"
+        - "socket.io:Server"
+        - "socket.io:Socket"
+        - "backend/src/services/GameLogService.ts:GameLogService"
+        - "backend/src/services/GameLogService.ts:GameMove"
+        - "backend/src/services/TopScoreService.ts:TopScoreService"
+        - "backend/src/utils/yatzyMapping.ts:getSelectionLabel"
+      INSTANTIATES: ["built-in:Map", "built-in:Set"] # In members
+      CALLS: [] # Methods call others
+
+    - ID: "backend/src/services/GameService.ts:GameService:constructor"
+      TYPE: METHOD
+      FILE: "backend/src/services/GameService.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/services/GameService.ts:GameService"
+      USES_TYPE: ["socket.io:Server", "backend/src/services/GameLogService.ts:GameLogService", "backend/src/services/TopScoreService.ts:TopScoreService"]
+
+    # ... (Skipping detailed breakdown of every method in GameService, TopScoreService for brevity, highlighting key interactions)
+
+    - ID: "backend/src/services/GameService.ts:GameService:createOrJoinGame"
+      TYPE: METHOD
+      FILE: "backend/src/services/GameService.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/services/GameService.ts:GameService"
+      USES_TYPE: ["backend/src/models/Game.ts:Game", "backend/src/models/Player.ts:Player", "backend/src/services/GameLogService.ts:GameLogService", "socket.io:Server"]
+      CALLS:
+        - "backend/src/services/GameService.ts:GameService:handlePlayerStartingNewGame"
+        - "backend/src/services/GameService.ts:GameService:findAvailableGame"
+        - "backend/src/services/GameService.ts:GameService:createGame"
+        - "backend/src/models/Game.ts:Game:addPlayer"
+        - "backend/src/services/GameLogService.ts:GameLogService:logGameStart"
+        - "backend/src/models/Game.ts:Game:isGameFull"
+        - "backend/src/models/Game.ts:Game:toJSON"
+        - "socket.io:Server:to"
+        - "socket.io:Server:emit"
+        - "backend/src/services/GameService.ts:GameService:notifyGameUpdate"
+        - "backend/src/services/GameService.ts:GameService:broadcastGameList"
+      ACCESSES_MEMBER: ["backend/src/models/Game.ts:Game:gameStarted", "backend/src/models/Game.ts:Game:players", "backend/src/models/Player.ts:Player:isActive", "backend/src/models/Player.ts:Player:id"]
+
+    - ID: "backend/src/services/GameService.ts:GameService:processSelection"
+      TYPE: METHOD
+      FILE: "backend/src/services/GameService.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/services/GameService.ts:GameService"
+      USES_TYPE: ["backend/src/models/Game.ts:Game", "backend/src/models/Player.ts:Player", "backend/src/services/GameLogService.ts:GameLogService", "backend/src/services/GameLogService.ts:GameMove", "backend/src/services/GameLogService.ts:GameLog", "backend/src/models/BoardCell.ts:BoardCell", "socket.io:Server"]
+      CALLS:
+        - "backend/src/services/GameService.ts:GameService:getGame"
+        - "backend/src/models/Game.ts:Game:findPlayerIndex"
+        - "backend/src/services/GameLogService.ts:GameLogService:logMove"
+        - "backend/src/services/GameLogService.ts:GameLogService:getGameLog"
+        - "backend/src/models/Game.ts:Game:applySelection"
+        - "backend/src/models/Game.ts:Game:isGameFinished"
+        - "backend/src/services/GameService.ts:GameService:notifyGameUpdate"
+        - "backend/src/services/GameService.ts:GameService:handleGameFinished"
+        - "backend/src/models/Game.ts:Game:setDiceValues"
+        - "backend/src/models/Game.ts:Game:advanceToNextActivePlayer"
+        - "backend/src/models/Game.ts:Game:toJSON"
+        - "socket.io:Server:to"
+        - "socket.io:Server:emit"
+      ACCESSES_MEMBER: ["backend/src/models/Game.ts:Game:playerToMove", "backend/src/models/Game.ts:Game:diceValues", "backend/src/models/Player.ts:Player:cells", "backend/src/models/BoardCell.ts:BoardCell:label", "backend/src/models/BoardCell.ts:BoardCell:value", "backend/src/models/BoardCell.ts:BoardCell:fixed"]
+      INSTANTIATES: ["built-in:Date"]
+
+    - ID: "backend/src/services/GameService.ts:GameService:handleGameFinished"
+      TYPE: METHOD
+      FILE: "backend/src/services/GameService.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/services/GameService.ts:GameService"
+      USES_TYPE: ["backend/src/models/Game.ts:Game", "backend/src/models/Player.ts:Player", "backend/src/services/GameLogService.ts:GameLogService", "backend/src/services/TopScoreService.ts:TopScoreService"]
+      CALLS:
+        - "backend/src/models/Player.ts:Player:getScore"
+        - "backend/src/services/GameLogService.ts:GameLogService:logGameEnd"
+        - "backend/src/services/TopScoreService.ts:TopScoreService:updateTopScore"
+        - "built-in:Promise.all"
+        - "backend/src/services/GameService.ts:GameService:notifyGameFinished"
+        - "built-in:Map:delete"
+        - "built-in:Map:has"
+        - "backend/src/services/GameService.ts:GameService:broadcastGameList"
+      ACCESSES_MEMBER: ["backend/src/models/Game.ts:Game:players", "backend/src/models/Player.ts:Player:id", "backend/src/models/Player.ts:Player:username", "backend/src/models/Game.ts:Game:id", "backend/src/models/Game.ts:Game:gameType"]
+
+    - ID: "backend/src/services/TopScoreService.ts:TopScoreService"
+      TYPE: CLASS
+      FILE: "backend/src/services/TopScoreService.ts"
+      LANGUAGE: TypeScript
+      MEMBERS:
+        io: { TYPE: PROPERTY, PROPERTY_TYPE: "socket.io:Server" }
+      USES_TYPE: ["socket.io:Server", "mongodb:Db", "mongodb:Collection", "backend/src/db.ts:getDbConnection", "backend/src/services/TopScoreService.ts:TopScoreEntry"]
+      CALLS: []
+
+    - ID: "backend/src/services/TopScoreService.ts:TopScoreService:broadcastTopScores"
+      TYPE: METHOD
+      FILE: "backend/src/services/TopScoreService.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/services/TopScoreService.ts:TopScoreService"
+      USES_TYPE: ["socket.io:Server"]
+      CALLS:
+        - "backend/src/services/TopScoreService.ts:TopScoreService:getAllTopScores"
+        - "socket.io:Server:emit"
+
+    - ID: "backend/src/services/TopScoreService.ts:TopScoreService:updateTopScore"
+      TYPE: METHOD
+      FILE: "backend/src/services/TopScoreService.ts"
+      LANGUAGE: TypeScript
+      MEMBER_OF: "backend/src/services/TopScoreService.ts:TopScoreService"
+      USES_TYPE: ["mongodb:Collection"]
+      CALLS:
+        - "backend/src/services/TopScoreService.ts:TopScoreService:getCollection"
+        - "mongodb:Collection:insertOne"
+
+    # --- Frontend (Dart) ---
+    - ID: "lib/application/application.dart:Application"
+      TYPE: CLASS
+      FILE: "lib/application/application.dart"
+      LANGUAGE: Dart
+      WITH_MIXIN: ["lib/application/languages_application.dart:LanguagesApplication"]
+      MEMBERS: # Simplified
+        gameDices: { TYPE: PROPERTY, PROPERTY_TYPE: "lib/dices/dices.dart:Dices" }
+        inputItems: { TYPE: PROPERTY, PROPERTY_TYPE: "lib/input_items/input_items.dart:InputItems" }
+        socketService: { TYPE: PROPERTY, PROPERTY_TYPE: "lib/services/socket_service.dart:SocketService" }
+        animation: { TYPE: PROPERTY, PROPERTY_TYPE: "lib/application/animations_application.dart:AnimationsApplication" }
+      USES_TYPE:
+        - "package:flutter/material.dart:BuildContext"
+        - "package:flutter_bloc/flutter_bloc.dart"
+        - "lib/dices/dices.dart:Dices"
+        - "lib/input_items/input_items.dart:InputItems"
+        - "lib/services/socket_service.dart:SocketService"
+        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
+        - "lib/application/animations_application.dart:AnimationsApplication"
+        - "lib/application/languages_application.dart:LanguagesApplication"
+        - "lib/utils/yatzy_mapping_client.dart:getSelectionLabel"
+      INSTANTIATES: ["lib/application/animations_application.dart:AnimationsApplication"] # Possibly others in setup
+      CALLS: # Methods call others
+
+    - ID: "lib/application/application.dart:Application:constructor"
+      TYPE: METHOD
+      FILE: "lib/application/application.dart"
+      LANGUAGE: Dart
+      MEMBER_OF: "lib/application/application.dart:Application"
+      USES_TYPE: ["package:flutter/material.dart:BuildContext", "lib/dices/dices.dart:Dices", "lib/input_items/input_items.dart:InputItems"]
+      CALLS:
+        - "lib/dices/dices.dart:Dices:setCallbacks"
+        - "lib/application/languages_application.dart:LanguagesApplication:languagesSetup" # Via mixin
+        - "lib/application/application.dart:Application:getChosenLanguage"
+        - "lib/application/application.dart:Application:getStandardLanguage"
+
+    - ID: "lib/application/application.dart:Application:setSocketService"
+      TYPE: METHOD
+      FILE: "lib/application/application.dart"
+      LANGUAGE: Dart
+      MEMBER_OF: "lib/application/application.dart:Application"
+      USES_TYPE: ["lib/services/socket_service.dart:SocketService"]
+      CALLS: ["built-in:print"]
+
+    - ID: "lib/application/application.dart:Application:setup"
+      TYPE: METHOD
+      FILE: "lib/application/application.dart"
+      LANGUAGE: Dart
+      MEMBER_OF: "lib/application/application.dart:Application"
+      USES_TYPE:
+        - "lib/top_score/top_score.dart:TopScore"
+        - "lib/dices/dices.dart:Dices"
+        - "lib/dices/unity_communication.dart:UnityCommunication" # Extension methods
+        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
+        - "lib/application/application_functions_internal_calc_dice_values.dart" # Extension methods
+      CALLS:
+        - "lib/top_score/top_score.dart:TopScore:loadTopScoreFromServer"
+        - "lib/dices/dices.dart:Dices:initDices"
+        - "lib/application/application_functions_internal_calc_dice_values.dart:calcOnes" # etc.
+        - "lib/application/application.dart:Application:setAppText"
+        - "lib/application/application_functions_internal.dart:ApplicationFunctionsInternal:clearFocus"
+        - "lib/dices/unity_communication.dart:UnityCommunication:sendResetToUnity"
+        - "lib/dices/unity_communication.dart:UnityCommunication:sendStartToUnity"
+      INSTANTIATES: ["built-in:List", "package:flutter/material.dart:GlobalKey"]
+
+    - ID: "lib/application/application_functions_internal.dart:ApplicationFunctionsInternal:cellClick"
+      TYPE: METHOD # Extension Method
+      FILE: "lib/application/application_functions_internal.dart"
+      LANGUAGE: Dart
+      MEMBER_OF: "lib/application/application.dart:Application"
+      USES_TYPE:
+        - "lib/utils/yatzy_mapping_client.dart:getSelectionLabel"
+        - "lib/services/socket_service.dart:SocketService"
+        - "lib/dices/dices.dart:Dices"
+        - "lib/dices/unity_communication.dart:UnityCommunication"
+        - "lib/application/animations_application.dart:AnimationsApplication"
+        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
+      CALLS:
+        - "lib/utils/yatzy_mapping_client.dart:getSelectionLabel"
+        - "built-in:print"
+        - "lib/services/socket_service.dart:SocketService:sendToClients"
+        - "lib/application/application_functions_internal.dart:ApplicationFunctionsInternal:applyLocalSelection"
+      ACCESSES_MEMBER:
+        - "lib/application/application.dart:Application:playerToMove"
+        - "lib/application/application.dart:Application:myPlayerId"
+        - "lib/application/application.dart:Application:fixedCell"
+        - "lib/application/application.dart:Application:cellValue"
+        - "lib/application/application.dart:Application:gameDices"
+        - "lib/dices/dices.dart:Dices:diceValue"
+        - "lib/application/application.dart:Application:gameId"
+        - "lib/application/application.dart:Application:socketService"
+        - "lib/services/socket_service.dart:SocketService:isConnected"
+
+    - ID: "lib/application/communication_application.dart:CommunicationApplication:callbackOnServerMsg"
+      TYPE: METHOD # Extension Method
+      FILE: "lib/application/communication_application.dart"
+      LANGUAGE: Dart
+      MEMBER_OF: "lib/application/application.dart:Application"
+      USES_TYPE:
+        - "lib/router/router.gr.dart:SettingsView"
+        - "lib/router/router.gr.dart:ApplicationView"
+        - "lib/router/router.dart:AppRouter"
+        - "lib/injection.dart:getIt"
+        - "lib/services/service_provider.dart:ServiceProvider"
+        - "lib/services/socket_service.dart:SocketService"
+        - "lib/shared_preferences.dart:SharedPrefProvider"
+        - "lib/application/application.dart:Application"
+        - "lib/top_score/top_score.dart:TopScore"
+        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
+        - "package:flutter/material.dart:Route"
+      CALLS:
+        - "built-in:print"
+        - "lib/injection.dart:getIt"
+        - "lib/services/service_provider.dart:ServiceProvider.of"
+        - "lib/shared_preferences.dart:SharedPrefProvider.fetchPrefObject"
+        - "lib/application/application.dart:Application:setup"
+        - "lib/router/router.dart:AppRouter:pushAndPopUntil" # Via getIt
+        - "lib/application/communication_application.dart:CommunicationApplication:_checkIfPlayerAborted"
+        - "lib/application/communication_application.dart:CommunicationApplication:_processGameUpdate"
+        - "lib/top_score/top_score.dart:TopScore:updateScoresFromData"
+        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit:setState" # Via context.read
+        - "lib/services/socket_service.dart:SocketService:sendToServer"
+      ACCESSES_MEMBER:
+        - "lib/services/socket_service.dart:SocketService:socketId"
+        - "lib/application/application.dart:Application:gameId"
+        - "lib/application/application.dart:Application:gameStarted"
+        - "lib/application/application.dart:Application:isSpectating"
+
+    - ID: "lib/application/communication_application.dart:CommunicationApplication:callbackOnClientMsg"
+      TYPE: METHOD # Extension Method
+      FILE: "lib/application/communication_application.dart"
+      LANGUAGE: Dart
+      MEMBER_OF: "lib/application/application.dart:Application"
+      USES_TYPE:
+        - "lib/dices/dices.dart:Dices"
+        - "lib/dices/unity_communication.dart:UnityCommunication"
+        - "lib/application/application_functions_internal.dart:ApplicationFunctionsInternal"
+        - "lib/router/router.gr.dart:SettingsView"
+        - "lib/injection.dart:getIt"
+        - "lib/router/router.dart:AppRouter"
+      CALLS:
+        - "built-in:print"
+        - "lib/application/communication_application.dart:CommunicationApplication:resetDices"
+        - "lib/application/application.dart:Application:updateDiceValues"
+        - "lib/dices/dices.dart:Dices:updateDiceImages"
+        - "lib/dices/unity_communication.dart:UnityCommunication:sendDicesToUnity"
+        - "lib/application/communication_application.dart:CommunicationApplication:updateChat"
+        - "lib/application/application_functions_internal.dart:ApplicationFunctionsInternal:applyLocalSelection"
+        - "lib/injection.dart:getIt"
+        - "lib/router/router.dart:AppRouter:push" # Via getIt
+      ACCESSES_MEMBER:
+        - "lib/application/application.dart:Application:playerActive"
+        - "lib/application/application.dart:Application:myPlayerId"
+        - "lib/dices/dices.dart:Dices:diceValue"
+        - "lib/application/application.dart:Application:appColors"
+        - "lib/application/application.dart:Application:fixedCell"
+        - "lib/application/application.dart:Application:totalFields"
+        - "lib/application/application.dart:Application:appText"
+        - "lib/application/application.dart:Application:cellValue"
+        - "lib/application/application.dart:Application:nrPlayers"
+        - "lib/dices/dices.dart:Dices:nrRolls"
+        - "lib/dices/dices.dart:Dices:unityDices"
+
+    - ID: "lib/services/socket_service.dart:SocketService"
+      TYPE: CLASS
+      FILE: "lib/services/socket_service.dart"
+      LANGUAGE: Dart
+      MEMBERS: # Simplified
+        socket: { TYPE: PROPERTY, PROPERTY_TYPE: "package:socket_io_client:Socket" }
+        onGameUpdate: { TYPE: PROPERTY, PROPERTY_TYPE: "Function" }
+        onChatMessage: { TYPE: PROPERTY, PROPERTY_TYPE: "Function" }
+      USES_TYPE:
+        - "package:flutter/material.dart:BuildContext"
+        - "package:socket_io_client:Socket"
+        - "package:flutter_bloc/flutter_bloc.dart"
+        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
+        - "lib/application/application.dart:Application" # Through global 'app'
+        - "lib/application/communication_application.dart:CommunicationApplication" # Extension methods on 'app'
+        - "lib/models/game.dart:Game"
+      INSTANTIATES: ["package:socket_io_client:Socket"]
+      CALLS: # Methods call socket events/methods
+
+    - ID: "lib/services/socket_service.dart:SocketService:connect"
+      TYPE: METHOD
+      FILE: "lib/services/socket_service.dart"
+      LANGUAGE: Dart
+      MEMBER_OF: "lib/services/socket_service.dart:SocketService"
+      USES_TYPE: ["package:socket_io_client:Socket"]
+      INSTANTIATES: ["package:socket_io_client:Socket"]
+      CALLS:
+        - "built-in:print"
+        - "package:socket_io_client:Socket:connect"
+        - "lib/services/socket_service.dart:SocketService:_clearEventHandlers"
+        - "lib/services/socket_service.dart:SocketService:_setupEventHandlers"
+        - "package:socket_io_client:Socket:onConnect" # Callback setup
+        - "package:socket_io_client:Socket:onConnectError" # Callback setup
+
+    - ID: "lib/services/socket_service.dart:SocketService:_setupEventHandlers"
+      TYPE: METHOD
+      FILE: "lib/services/socket_service.dart"
+      LANGUAGE: Dart
+      MEMBER_OF: "lib/services/socket_service.dart:SocketService"
+      USES_TYPE: ["package:socket_io_client:Socket"]
+      CALLS:
+        - "built-in:print"
+        - "package:socket_io_client:Socket:onConnect"
+        - "package:socket_io_client:Socket:onDisconnect"
+        - "package:socket_io_client:Socket:onConnectError"
+        - "package:socket_io_client:Socket:on" # For custom events
+        - "lib/services/socket_service.dart:SocketService:_sendEcho" # In onConnect
+        - "lib/services/socket_service.dart:SocketService:_requestId" # In onConnect
+        - "lib/services/socket_service.dart:SocketService:_updateState" # In various handlers
+        - "lib/services/socket_service.dart:SocketService:_handleClientMessage" # Handler
+        - "lib/services/socket_service.dart:SocketService:_handleServerMessage" # Handler
+        - "lib/services/socket_service.dart:SocketService:_handleUserId" # Handler
+        - "lib/services/socket_service.dart:SocketService:_handleGameUpdate" # Handler
+        - "lib/services/socket_service.dart:SocketService:_handleChatMessage" # Handler
+
+    - ID: "lib/services/socket_service.dart:SocketService:_handleServerMessage"
+      TYPE: METHOD
+      FILE: "lib/services/socket_service.dart"
+      LANGUAGE: Dart
+      MEMBER_OF: "lib/services/socket_service.dart:SocketService"
+      USES_TYPE: ["lib/application/application.dart:Application"] # Global 'app'
+      CALLS:
+        - "built-in:print"
+        - "lib/application/communication_application.dart:CommunicationApplication:callbackOnServerMsg" # Called on global 'app'
+        - "lib/services/socket_service.dart:SocketService:_updateState"
+
+    - ID: "lib/services/socket_service.dart:SocketService:sendToClients"
+      TYPE: METHOD
+      FILE: "lib/services/socket_service.dart"
+      LANGUAGE: Dart
+      MEMBER_OF: "lib/services/socket_service.dart:SocketService"
+      USES_TYPE: ["package:socket_io_client:Socket"]
+      CALLS:
+        - "built-in:print"
+        - "package:socket_io_client:Socket:emit"
+
+    - ID: "lib/services/socket_service.dart:SocketService:sendToServer"
+      TYPE: METHOD
+      FILE: "lib/services/socket_service.dart"
+      LANGUAGE: Dart
+      MEMBER_OF: "lib/services/socket_service.dart:SocketService"
+      USES_TYPE: ["package:socket_io_client:Socket", "dart:convert"]
+      CALLS:
+        - "built-in:print"
+        - "dart:convert:jsonEncode"
+        - "package:socket_io_client:Socket:emit"
+
+    - ID: "lib/core/app_widget.dart:AppWidget"
+      TYPE: CLASS
+      FILE: "lib/core/app_widget.dart"
+      LANGUAGE: Dart
+      EXTENDS: "package:flutter/material.dart:StatelessWidget"
+      MEMBERS:
+        _appRouter: { TYPE: PROPERTY, PROPERTY_TYPE: "lib/router/router.dart:AppRouter" }
+      USES_TYPE:
+        - "package:flutter/material.dart"
+        - "package:flutter_bloc/flutter_bloc.dart"
+        - "lib/application/communication_application.dart:CommunicationApplication"
+        - "lib/dices/dices.dart:Dices"
+        - "lib/services/service_provider.dart:ServiceProvider"
+        - "lib/application/application.dart:Application"
+        - "lib/chat/chat.dart:Chat"
+        - "lib/injection.dart:getIt"
+        - "lib/router/router.dart:AppRouter"
+        - "lib/scroll/animations_scroll.dart:AnimationsScroll"
+        - "lib/startup.dart" # Global variables
+        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
+        - "lib/top_score/top_score.dart:TopScore"
+        - "lib/tutorial/tutorial.dart:Tutorial"
+        - "lib/input_items/input_items.dart:InputItems"
+        - "lib/services/socket_service.dart:SocketService"
+      INSTANTIATES:
+        - "lib/router/router.dart:AppRouter" # Via getIt
+        - "lib/top_score/top_score.dart:TopScore"
+        - "lib/scroll/animations_scroll.dart:AnimationsScroll"
+        - "lib/tutorial/tutorial.dart:Tutorial"
+        - "lib/dices/dices.dart:Dices"
+        - "lib/application/application.dart:Application"
+        - "lib/chat/chat.dart:Chat"
+        - "lib/input_items/input_items.dart:InputItems"
+      CALLS:
+        - "lib/injection.dart:getIt"
+        - "lib/core/app_widget.dart:AppWidget:getChosenLanguage"
+        - "package:flutter/material.dart:WidgetsBinding.instance.addPostFrameCallback"
+        - "lib/services/service_provider.dart:ServiceProvider.of"
+        - "lib/services/socket_service.dart:SocketService:connect"
+        - "lib/application/application.dart:Application:setSocketService"
+
+    - ID: "lib/main.dart:main"
+      TYPE: FUNCTION
+      FILE: "lib/main.dart"
+      LANGUAGE: Dart
+      USES_TYPE:
+        - "package:flutter/material.dart"
+        - "package:flutter_bloc/flutter_bloc.dart"
+        - "lib/states/bloc/language/language_bloc.dart:LanguageBloc"
+        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
+        - "package:injectable/injectable.dart:Environment"
+        - "lib/core/app_widget.dart:AppWidget"
+        - "lib/injection.dart:configureInjection"
+        - "lib/shared_preferences.dart:SharedPrefProvider"
+      CALLS:
+        - "package:flutter/material.dart:WidgetsFlutterBinding.ensureInitialized"
+        - "lib/shared_preferences.dart:SharedPrefProvider.loadPrefs"
+        - "lib/injection.dart:configureInjection"
+        - "package:flutter/material.dart:runApp"
+      INSTANTIATES:
+        - "package:flutter_bloc/flutter_bloc.dart:MultiBlocProvider"
+        - "package:flutter_bloc/flutter_bloc.dart:BlocProvider" # For LanguageBloc, SetStateCubit
+        - "lib/core/app_widget.dart:AppWidget"
+
+    # --- Unity (C#) ---
+    - ID: "unity/yatzy/Assets/FlutterUnityIntegration/Demo/GameManager.cs:GameManager"
+      TYPE: CLASS
+      FILE: "unity/yatzy/Assets/FlutterUnityIntegration/Demo/GameManager.cs"
+      LANGUAGE: CSharp
+      EXTENDS: "UnityEngine:MonoBehaviour"
+      USES_TYPE: ["FlutterUnityIntegration:UnityMessageManager"]
+      CALLS: ["UnityEngine:GameObject:AddComponent", "UnityEngine:Time:timeScale.set", "UnityEngine:Application:Unload", "UnityEngine:Application:Quit"]
+      RECEIVES_MESSAGE_FLUTTER: ["HandleWebFnCall"] # Implicit via SendMessage in Flutter
+
+    - ID: "unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs:NativeAPI"
+      TYPE: CLASS
+      FILE: "unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs"
+      LANGUAGE: CSharp
+      USES_TYPE: ["UnityEngine:SceneManagement:Scene", "UnityEngine:SceneManagement:LoadSceneMode", "UnityEngine:AndroidJavaClass", "UnityEngine:AndroidJavaObject", "System:Exception"]
+      CALLS:
+        - "UnityEngine:Debug:Log"
+        - "UnityEngine:AndroidJavaClass:.ctor"
+        - "UnityEngine:AndroidJavaClass:CallStatic" # To Java side
+        - "UnityEngine:AndroidJavaObject:Call" # To Java side
+        - "unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs:OnUnityMessageWeb" # DLLImport
+        - "unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs:OnUnitySceneLoadedWeb" # DLLImport
+        - "unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs:OnUnityMessage" # DLLImport (__Internal iOS)
+        - "unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs:OnUnitySceneLoaded" # DLLImport (__Internal iOS)
+
+    - ID: "unity/yatzy/Assets/FlutterUnityIntegration/SingletonMonoBehaviour.cs:SingletonMonoBehaviour<T>"
+      TYPE: CLASS
+      FILE: "unity/yatzy/Assets/FlutterUnityIntegration/SingletonMonoBehaviour.cs"
+      LANGUAGE: CSharp
+      EXTENDS: "UnityEngine:MonoBehaviour"
+      USES_TYPE: ["System:Lazy", "UnityEngine:GameObject"]
+      CALLS: ["UnityEngine:GameObject:.ctor", "UnityEngine:GameObject:AddComponent", "UnityEngine:Object:DontDestroyOnLoad"]
+
+    - ID: "unity/yatzy/Assets/FlutterUnityIntegration/UnityMessageManager.cs:UnityMessageManager"
+      TYPE: CLASS
+      FILE: "unity/yatzy/Assets/FlutterUnityIntegration/UnityMessageManager.cs"
+      LANGUAGE: CSharp
+      EXTENDS: "FlutterUnityIntegration:SingletonMonoBehaviour<UnityMessageManager>"
+      USES_TYPE: ["Newtonsoft.Json.Linq:JObject", "Newtonsoft.Json.Linq:JToken", "UnityEngine:SceneManagement:Scene", "UnityEngine:SceneManagement:LoadSceneMode", "FlutterUnityIntegration:NativeAPI", "FlutterUnityIntegration:MessageHandler", "FlutterUnityIntegration:UnityMessage"]
+      CALLS:
+        - "UnityEngine:SceneManagement:SceneManager:add_sceneLoaded"
+        - "FlutterUnityIntegration:NativeAPI:OnSceneLoaded"
+        - "FlutterUnityIntegration:NativeAPI:ShowHostMainWindow"
+        - "FlutterUnityIntegration:NativeAPI:UnloadMainWindow"
+        - "FlutterUnityIntegration:NativeAPI:QuitUnityWindow"
+        - "FlutterUnityIntegration:NativeAPI:SendMessageToFlutter"
+        - "Newtonsoft.Json.Linq:JObject:FromObject"
+        - "FlutterUnityIntegration:MessageHandler:Deserialize"
+      RECEIVES_MESSAGE_FLUTTER: ["onFlutterMessage"] # Primary entry point from Flutter
+
+    - ID: "unity/yatzy/Assets/Scripts/GameManagerScript.cs:GameManagerScript"
+      TYPE: CLASS
+      FILE: "unity/yatzy/Assets/Scripts/GameManagerScript.cs"
+      LANGUAGE: CSharp
+      EXTENDS: "UnityEngine:MonoBehaviour"
+      USES_TYPE: ["UnityEngine:GameObject", "UnityEngine:Rigidbody", "UnityEngine:Animator", "UnityEngine:Quaternion", "UnityEngine:Vector3", "Newtonsoft.Json:JsonConvert", "Newtonsoft.Json.Linq:JObject", "Newtonsoft.Json.Linq:JArray", "FlutterUnityIntegration:UnityMessageManager", "unity/yatzy/Assets/Scripts/DiceScript.cs:DiceScript", "unity/yatzy/Assets/Scripts/CircularMotionScript.cs:CircularMotionScript"]
+      CALLS:
+        - "UnityEngine:Debug:Log"
+        - "UnityEngine:GameObject:AddComponent"
+        - "UnityEngine:GameObject:Find"
+        - "UnityEngine:GameObject:GetComponent<DiceScript>"
+        - "UnityEngine:GameObject:GetComponent<Animator>"
+        - "UnityEngine:GameObject:GetComponent<CircularMotionScript>"
+        - "UnityEngine:Transform:Find" # Implicit in GameObject.Find with path
+        - "UnityEngine:Transform:GetChild"
+        - "UnityEngine:GameObject:SetActive"
+        - "UnityEngine:Time:timeScale.set"
+        - "UnityEngine:Physics:gravity.set"
+        - "unity/yatzy/Assets/Scripts/GameManagerScript.cs:GameManagerScript:InitDices"
+        - "unity/yatzy/Assets/Scripts/DiceScript.cs:DiceScript:GetDiceNumber"
+        - "unity/yatzy/Assets/Scripts/GameManagerScript.cs:GameManagerScript:jsonCommunicator:.ctor"
+        - "Newtonsoft.Json:JsonConvert:SerializeObject"
+        - "FlutterUnityIntegration:UnityMessageManager:SendMessageToFlutter" # Via Instance
+        - "UnityEngine:Random:Range"
+        - "unity/yatzy/Assets/Scripts/DiceScript.cs:DiceScript:SetDiceNumber"
+        - "UnityEngine:Animator:Play"
+      RECEIVES_MESSAGE_FLUTTER: ["flutterMessage"]
+      SENDS_MESSAGE_FLUTTER: ["results", "unityIdentifier"] # Via UnityMessageManager
+
+    - ID: "unity/yatzy/Assets/Scripts/DiceScript.cs:DiceScript"
+      TYPE: CLASS
+      FILE: "unity/yatzy/Assets/Scripts/DiceScript.cs"
+      LANGUAGE: CSharp
+      EXTENDS: "UnityEngine:MonoBehaviour"
+      USES_TYPE: ["UnityEngine:Vector3", "UnityEngine:GameObject", "UnityEngine:Quaternion"]
+      CALLS: ["UnityEngine:GameObject:Find", "UnityEngine:GameObject:GetComponent<DiceScript>", "built-in:string:Replace"]
+      ACCESSES_MEMBER: ["UnityEngine:Transform:position", "UnityEngine:Transform:rotation", "UnityEngine:Transform:name"]
+      RECEIVES_MESSAGE_UNITY: ["OnMouseDown"] # Unity event
+
+    - ID: "unity/yatzy/Assets/Scripts/DiceCheckZoneScript.cs:DiceCheckZoneScript"
+      TYPE: CLASS
+      FILE: "unity/yatzy/Assets/Scripts/DiceCheckZoneScript.cs"
+      LANGUAGE: CSharp
+      EXTENDS: "UnityEngine:MonoBehaviour"
+      USES_TYPE: ["UnityEngine:Collider", "UnityEngine:Rigidbody", "UnityEngine:Vector3", "unity/yatzy/Assets/Scripts/DiceScript.cs:DiceScript"]
+      CALLS: ["UnityEngine:GameObject:GetComponentInParent<DiceScript>", "UnityEngine:GameObject:GetComponentInParent<Rigidbody>", "unity/yatzy/Assets/Scripts/DiceScript.cs:DiceScript:GetDiceNumber", "unity/yatzy/Assets/Scripts/DiceScript.cs:DiceScript:SetDiceNumber", "UnityEngine:Mathf:Abs"]
+      RECEIVES_MESSAGE_UNITY: ["OnTriggerStay"] # Unity event
+
+    - ID: "unity/yatzy/Assets/Scripts/ThrowDices.cs:ThrowDices"
+      TYPE: CLASS
+      FILE: "unity/yatzy/Assets/Scripts/ThrowDices.cs"
+      LANGUAGE: CSharp
+      EXTENDS: "UnityEngine:MonoBehaviour"
+      USES_TYPE: ["UnityEngine:GameObject", "unity/yatzy/Assets/Scripts/GameManagerScript.cs:GameManagerScript"]
+      CALLS: ["UnityEngine:GameObject:Find", "UnityEngine:GameObject:GetComponent<GameManagerScript>", "UnityEngine:Debug:Log"]
+      RECEIVES_MESSAGE_UNITY: ["OnMouseDown"] # Unity event
+      ACCESSES_MEMBER: ["unity/yatzy/Assets/Scripts/GameManagerScript.cs:GameManagerScript:throwActive", "unity/yatzy/Assets/Scripts/GameManagerScript.cs:GameManagerScript:throwDices"]
+
+    - ID: "unity/yatzy/Assets/WebSocket/WebSocket.cs:WebSocket" # NativeWebSocket.WebSocket
+      TYPE: CLASS
+      FILE: "unity/yatzy/Assets/WebSocket/WebSocket.cs"
+      LANGUAGE: CSharp
+      IMPLEMENTS: ["NativeWebSocket:IWebSocket"]
+      USES_TYPE: ["System:Uri", "System:Net:WebSockets:ClientWebSocket", "System:Threading:CancellationTokenSource", "System:Threading:CancellationToken", "System:IO:MemoryStream", "System:Exception", "NativeWebSocket:WebSocketState", "NativeWebSocket:WebSocketCloseCode", "NativeWebSocket:WebSocketReceiveResult", "System:Net:WebSockets:WebSocketMessageType", "System:Net:WebSockets:WebSocketCloseStatus"]
+      INSTANTIATES: ["System:Uri", "System:Collections:Generic:Dictionary", "System:Collections:Generic:List", "System:Net:WebSockets:ClientWebSocket", "System:Threading:CancellationTokenSource", "System:Text:UTF8Encoding"] # Implicit via GetBytes
+      CALLS:
+        - "System:Net:WebSockets:ClientWebSocket:ConnectAsync"
+        - "System:Net:WebSockets:ClientWebSocket:ReceiveAsync"
+        - "System:Net:WebSockets:ClientWebSocket:SendAsync"
+        - "System:Net:WebSockets:ClientWebSocket:CloseAsync"
+        - "System:IO:MemoryStream:Write"
+        - "System:IO:MemoryStream:Seek"
+        - "System:Threading:Monitor:TryEnter"
+        - "System:Threading:Monitor:Exit"
+        - "System:Text:Encoding:UTF8:GetBytes"
+        - "NativeWebSocket:WebSocket:Receive" # Recursive async call
+        - "NativeWebSocket:WebSocket:SendMessage"
+        - "NativeWebSocket:WebSocket:HandleQueue"
+      ACCESSES_MEMBER: ["NativeWebSocket:WebSocket:State", "System:Net:WebSockets:ClientWebSocket:State"]
+
+  # --- Other Key Files (Example: Services, Models) ---
+    - ID: "lib/services/game_service.dart:GameService"
+      TYPE: CLASS
+      FILE: "lib/services/game_service.dart"
+      LANGUAGE: Dart
+      MEMBERS:
+        socketService: { TYPE: PROPERTY, PROPERTY_TYPE: "lib/services/socket_service.dart:SocketService" }
+        _game: { TYPE: PROPERTY, PROPERTY_TYPE: "lib/models/game.dart:Game" }
+        onGameUpdated: { TYPE: PROPERTY, PROPERTY_TYPE: "Function" }
+        onError: { TYPE: PROPERTY, PROPERTY_TYPE: "Function" }
+      USES_TYPE:
+        - "lib/models/game.dart:Game"
+        - "lib/models/board_cell.dart:BoardCell"
+        - "lib/services/socket_service.dart:SocketService"
+      CALLS:
+        - "lib/services/socket_service.dart:SocketService:createGame"
+        - "lib/services/socket_service.dart:SocketService:joinGame"
+        - "lib/services/socket_service.dart:SocketService:rollDice"
+        - "lib/services/socket_service.dart:SocketService:selectCell"
+        - "lib/services/game_service.dart:GameService:_reportError"
+        - "lib/services/game_service.dart:GameService:_calculatePairScore" # etc. for score helpers
+        - "lib/services/game_service.dart:GameService:_handleGameUpdate" # Assigned as callback
+
+    - ID: "lib/models/game.dart:Game"
+      TYPE: CLASS
+      FILE: "lib/models/game.dart"
+      LANGUAGE: Dart
+      MEMBERS: # Simplified
+        players: { TYPE: PROPERTY, PROPERTY_TYPE: "List<Player>" }
+      USES_TYPE: ["lib/models/board_cell.dart:BoardCell", "lib/models/player.dart:Player", "package:flutter/foundation.dart:VoidCallback"]
+      CALLS:
+        - "lib/models/player.dart:Player:calculateScores"
+        - "lib/models/game.dart:Game:advanceToNextPlayer"
+        - "lib/models/game.dart:Game:checkGameFinished"
+        - "lib/models/game.dart:Game:_getCellLabelsForGameType" # Static
+      INSTANTIATES: ["lib/models/player.dart:Player", "lib/models/board_cell.dart:BoardCell"] # In fromJson
+
+    - ID: "lib/models/player.dart:Player"
+      TYPE: CLASS
+      FILE: "lib/models/player.dart"
+      LANGUAGE: Dart
+      MEMBERS: # Simplified
+        cells: { TYPE: PROPERTY, PROPERTY_TYPE: "List<BoardCell>" }
+      USES_TYPE: ["lib/models/board_cell.dart:BoardCell"]
+      CALLS: ["built-in:List:every"]
+      INSTANTIATES: ["lib/models/board_cell.dart:BoardCell"] # In fromJson
+
+    # --- UI Views (Example) ---
+    - ID: "lib/views/application_view.dart:ApplicationView"
+      TYPE: CLASS
+      FILE: "lib/views/application_view.dart"
+      LANGUAGE: Dart
+      EXTENDS: "package:flutter/material.dart:StatefulWidget"
+      USES_TYPE:
+        - "package:auto_route/auto_route.dart"
+        - "package:flutter/material.dart"
+        - "package:flutter_bloc/flutter_bloc.dart"
+        - "lib/application/widget_application_scaffold.dart:WidgetApplicationScaffold" # Extension method
+        - "lib/router/router.gr.dart:SettingsView"
+        - "lib/injection.dart:getIt"
+        - "lib/router/router.dart:AppRouter"
+        - "lib/startup.dart" # Global 'app'
+        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
+        - "lib/tutorial/tutorial.dart:Tutorial"
+        - "lib/scroll/animations_scroll.dart:AnimationsScroll"
+        - "lib/application/application.dart:Application" # Global 'app'
+      CALLS:
+        - "lib/tutorial/tutorial.dart:Tutorial:setup"
+        - "package:flutter/material.dart:WidgetsBinding.instance.addPostFrameCallback"
+        - "lib/application/animations_application.dart:AnimationsApplication:setupAnimation" # Via app.animation
+        - "lib/views/application_view.dart:_ApplicationViewState:_showGameFinishedDialog"
+        - "lib/application/widget_application_scaffold.dart:WidgetApplicationScaffold:widgetScaffold" # Via app
+        - "package:flutter_bloc/flutter_bloc.dart:BlocBuilder"
+        - "package:flutter/material.dart:showDialog"
+        - "lib/injection.dart:getIt"
+        - "lib/router/router.dart:AppRouter:pushAndPopUntil"
+
+    - ID: "lib/views/settings_view.dart:SettingsView"
+      TYPE: CLASS
+      FILE: "lib/views/settings_view.dart"
+      LANGUAGE: Dart
+      EXTENDS: "package:flutter/material.dart:StatefulWidget"
+      USES_TYPE:
+        - "package:auto_route/auto_route.dart"
+        - "package:flutter/material.dart"
+        - "package:flutter_bloc/flutter_bloc.dart"
+        - "lib/application/widget_application_settings.dart:WidgetApplicationSettings" # Extension method
+        - "lib/startup.dart" # Global 'app'
+        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
+        - "lib/application/application.dart:Application" # Global 'app'
+      CALLS:
+        - "package:flutter/material.dart:TabController"
+        - "lib/application/widget_application_settings.dart:WidgetApplicationSettings:widgetScaffoldSettings" # Via app
+        - "package:flutter_bloc/flutter_bloc.dart:BlocBuilder"
+      INSTANTIATES: ["package:flutter/material.dart:TabController"]
+
+    - ID: "lib/widgets/spectator_game_board.dart:SpectatorGameBoard"
+      TYPE: CLASS
+      FILE: "lib/widgets/spectator_game_board.dart"
+      LANGUAGE: Dart
+      EXTENDS: "package:flutter/material.dart:StatefulWidget"
+      USES_TYPE: ["package:flutter/material.dart"]
+      CALLS:
+        - "lib/widgets/spectator_game_board.dart:_SpectatorGameBoardState:buildScoreTable"
+        - "lib/widgets/spectator_game_board.dart:_SpectatorGameBoardState:getDiceFace"
+      INSTANTIATES: ["package:flutter/material.dart:ScrollController"]
+
+    # Add entries for interfaces, enums, other functions/classes as needed...
 ```
 
 This file is a merged representation of a subset of the codebase, containing specifically included files and files not matching ignore patterns, combined into a single document by Repomix.
@@ -6919,14 +3776,10 @@ import { PlayerController } from "./controllers/PlayerController";
 import { ChatController } from "./controllers/ChatController";
 import { spectateGameRoute, initializeSpectateRoute } from "./routes/spectateGameRoute"; // <-- Import spectate route and initializer
 
-const PORT: number = 8000;
+const PORT: number = 8002;
 
 const app = express();
 
-// Important client has local ip (like 192.168.0.168) not 127.0.0.1 or localhost in browser to work on local developement across different computers
-// Local client connect should look like : http://192.168.0.168:8080 , or your local network ip instead of 192.168.0.168
-// Also with port number this should not be there ssl online since all is taken care of with nginx or similar routing port 80 to prefeerably 8080
-// for Https, socket.io and WebSocket. Requirement of Google Platform app engine flex only one port and is possible! but also convinient!
 app.use(cors({
   origin: '*', // This allows all origins
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -6935,17 +3788,17 @@ app.use(cors({
 
 const httpServer = createServer(app);
 
-// All 4 systems NodeJS, Flutter, Unity and React has this flag to differ from local developement and online publish
-// One improvement could be global system flag all systems look at so avoid funny errors missing to reset flag... :)
-// Got idea from meetup to signal in running code visually if offline/online good idea!
 let isOnline: boolean = false;
 
 const localFlutterDir: string = "C:/Users/J/StudioProjects/flutter_system";
 const localReactDir: string = "C:/Users/J/Desktop/proj";
 
+console.log("Starting Server...");
+
 if (isOnline) {
   //app.use(express.static(path.join(__dirname, "/build")));
-  app.use(express.static(path.join(__dirname, "/web")));
+  app.use("/new", express.static(path.join(__dirname, "web")));
+
 } else {
   //app.use(express.static(localReactDir + "/build"));
   app.use(express.static(localFlutterDir + "/build/web"));
@@ -14759,19 +11612,37 @@ class SocketService {
     
     try {
       // Initialize socket with proper options
-      socket = io.io(
-        localhost, 
-        <String, dynamic>{
-          'transports': ['websocket', 'polling'],
-          'autoConnect': false, // Control connection manually
-          'forceNew': true,     // Ensure a new connection instance
-          'reconnectionAttempts': 3,
-          'reconnectionDelay': 1000,
-          'reconnectionDelayMax': 5000,
-          'timeout': 20000,
-          'extraHeaders': {'Content-Type': 'application/json'}
-        }
-      );
+      if (isOnline) {
+        socket = io.io(
+            localhost,
+            <String, dynamic>{
+              'transports': ['websocket', 'polling'],
+              'autoConnect': false, // Control connection manually
+              'forceNew': true,     // Ensure a new connection instance
+              'reconnectionAttempts': 3,
+              'reconnectionDelay': 1000,
+              'reconnectionDelayMax': 5000,
+              'timeout': 20000,
+              'extraHeaders': {'Content-Type': 'application/json'},
+              'path': '/new/socket.io/',
+            }
+        );
+      } else {
+        socket = io.io(
+            localhost,
+            <String, dynamic>{
+              'transports': ['websocket', 'polling'],
+              'autoConnect': false, // Control connection manually
+              'forceNew': true,     // Ensure a new connection instance
+              'reconnectionAttempts': 3,
+              'reconnectionDelay': 1000,
+              'reconnectionDelayMax': 5000,
+              'timeout': 20000,
+              'extraHeaders': {'Content-Type': 'application/json'},
+            }
+        );
+      }
+
       
       // Clear existing handlers before setting new ones
       _clearEventHandlers(); 
@@ -15217,19 +12088,11 @@ import 'dices/dices.dart';
 import 'input_items/input_items.dart';
 
 var isOnline = false;
-var isDebug = true;
 
-// Updated localhost URL to ensure it works with the current network configuration
-// In local development, use your actual machine's IP address instead of 192.168.0.168
-// This is important for Socket.IO connections to work properly
-var localhost = isOnline 
-    ? isDebug 
-        ? "https://fluttersystems.com" 
-        : "https://clientsystem.net" 
-    : "http://localhost:8000";
+var localhost = isOnline
+        ? "https://fluttersystems.com"
+    : "http://localhost:8002";
 
-var localhostNET = "https://localhost:44357/api/Values";
-var localhostNETIO = "wss://localhost:44357/ws";
 var applicationStarted = false;
 var userName = "Yatzy";
 var userNames = [];
