@@ -123,7 +123,7 @@ export class Game {
                     this.advanceToNextActivePlayer();
                 }
                 const activePlayersCount = this.players.filter(p => p?.isActive).length; // Add null check
-                 if (this.maxPlayers > 1 && activePlayersCount <= 1) {
+                 if (this.maxPlayers > 1 && activePlayersCount < 1) {
                      this.gameFinished = true;
                  } else if (this.maxPlayers === 1 && activePlayersCount === 0) {
                     this.gameFinished = true;

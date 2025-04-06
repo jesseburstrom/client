@@ -151,32 +151,24 @@ class SocketService {
   
   /// Remove all registered event listeners
   void _clearEventHandlers() {
-    if (socket != null) {
-       print('🧼 [Socket #$_instanceId] Clearing existing event handlers...');
-       socket.off('connect');
-       socket.off('disconnect');
-       socket.off('connect_error');
-       socket.off('welcome');
-       socket.off('echo_response');
-       socket.off('onClientMsg');
-       socket.off('onServerMsg');
-       socket.off('userId');
-       socket.off('gameUpdate');
-       socket.off('chatMessage');
-       _handlersSetUp = false;
-    } else {
-       print('🧼 [Socket #$_instanceId] No socket instance to clear handlers from.');
+     print('🧼 [Socket #$_instanceId] Clearing existing event handlers...');
+     socket.off('connect');
+     socket.off('disconnect');
+     socket.off('connect_error');
+     socket.off('welcome');
+     socket.off('echo_response');
+     socket.off('onClientMsg');
+     socket.off('onServerMsg');
+     socket.off('userId');
+     socket.off('gameUpdate');
+     socket.off('chatMessage');
+     _handlersSetUp = false;
     }
-  }
   
   /// Set up Socket.IO event handlers
   void _setupEventHandlers() {
     if (_handlersSetUp) {
        print('🔄 [Socket #$_instanceId] Handlers already set up for this socket instance, skipping.');
-       return;
-    }
-    if (socket == null) {
-       print('❌ [Socket #$_instanceId] Cannot set up handlers: Socket is null.');
        return;
     }
 
@@ -488,10 +480,8 @@ class SocketService {
   void disconnect() {
     print('🔌 [Socket #$_instanceId] Disconnecting socket...');
     _clearEventHandlers(); // Remove listeners before disconnecting
-    if (socket != null) {
-      socket.disconnect();
-    }
-    isConnected = false;
+    socket.disconnect();
+      isConnected = false;
     _handlersSetUp = false;
     _connectingInProgress = false;
     _globalConnectionInProgress = false; // Allow new connections

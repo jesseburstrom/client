@@ -10,9 +10,10 @@ export class BoardCell {
   constructor(index: number, label: string, isNonScoreCell: boolean = false) {
     this.index = index;
     this.label = label;
-    this.value = -1; // Default to -1 (empty)
-    this.fixed = false;
+    this.value = label.toLowerCase() === 'sum' ||  label.toLowerCase() === 'total' ? 0 : -1; // Default to -1 (empty)
+    this.fixed = label.toLowerCase() === 'sum' || label.toLowerCase().includes('bonus') || label.toLowerCase() === 'total';
     this.isNonScoreCell = isNonScoreCell || label.toLowerCase() === 'sum' || label.toLowerCase().includes('bonus') || label.toLowerCase() === 'total';
+
   }
 
   // Method to serialize cell data

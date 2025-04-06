@@ -111,6 +111,15 @@ io.on("connect", (socket) => {
   // Send welcome message for connection confirmation
   socket.emit("welcome", { message: "Connection successful", id: socket.id });
   
+   // ***** FIX: Send the current game list to the newly connected player *****
+   try {
+    console.log(`🔌 Sending current game list to newly connected player ${socket.id}`);
+    gameService.broadcastGameListToPlayer(socket.id); // <-- ADD THIS LINE
+  } catch (error) {
+    console.error(`❌ Error sending game list to player ${socket.id}:`, error);
+  }
+  // **********************************************************************
+  
   // Echo event for testing connection
   socket.on("echo", (data) => {
     console.log("Echo event received:", data);

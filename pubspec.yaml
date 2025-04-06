@@ -39,6 +39,8 @@ dependencies:
   auto_route: 6.4.0
   injectable:
   shared_preferences:
+  collection:
+  provider:
   flutter:
     sdk: flutter
 

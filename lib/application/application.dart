@@ -3,7 +3,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yatzy/application/application_functions_internal.dart';
 import 'package:yatzy/dices/unity_communication.dart';
 import 'package:yatzy/services/socket_service.dart';
-import 'application_functions_internal_calc_dice_values.dart';
 import '../dices/dices.dart';
 import '../input_items/input_items.dart';
 import '../startup.dart';
@@ -12,7 +11,6 @@ import 'animations_application.dart';
 import 'languages_application.dart';
 
 // cannot have typedef inside class
-typedef YatzyFunctions = int Function();
 
 class Application with LanguagesApplication  {
   final BuildContext context;
@@ -62,7 +60,7 @@ class Application with LanguagesApplication  {
 
   var gameId = -1;
   var playerIds = [];
-  var playerActive = [];
+  List<bool> playerActive = [];
 
   var totalFields = 18;
   var bonusSum = 63;
@@ -85,7 +83,6 @@ class Application with LanguagesApplication  {
 
   var listenerKey = GlobalKey();
   late Dices gameDices;
-  late List<YatzyFunctions> yatzyFunctions;
   var serverId = "";
 
   var cellKeys = [];
@@ -104,7 +101,6 @@ class Application with LanguagesApplication  {
   }
 
   callbackUpdateDiceValues() {
-    updateDiceValues();
     Map<String, dynamic> msg = {};
     msg["action"] = "sendDices";
     msg["gameId"] = gameId;
@@ -117,18 +113,6 @@ class Application with LanguagesApplication  {
     if (socketService != null && socketService!.isConnected) {
       socketService?.sendToClients(msg);
     }
-  }
-
-  updateDiceValues() {
-    clearFocus();
-    for (var i = 0; i < totalFields; i++) {
-      if (!fixedCell[playerToMove][i]) {
-        cellValue[playerToMove][i] = yatzyFunctions[i]();
-        appText[playerToMove + 1][i] = cellValue[playerToMove][i].toString();
-      }
-    }
-
-    context.read<SetStateCubit>().setState();
   }
 
   setAppText() {
@@ -194,49 +178,12 @@ class Application with LanguagesApplication  {
       bonusSum = 84;
       bonusAmount = 100;
 
-      yatzyFunctions =
-          [calcOnes, calcTwos, calcThrees, calcFours, calcFives, calcSixes] +
-              [
-                zero,
-                zero,
-                calcPair,
-                calcTwoPairs,
-                calcThreePairs,
-                calcThreeOfKind,
-                calcFourOfKind,
-                calcFiveOfKind,
-                calcSmallLadder,
-                calcLargeLadder,
-                calcFullLadder,
-                calcHouse,
-                calcVilla,
-                calcTower,
-                calcChance,
-                calcYatzy,
-                zero
-              ];
     } else {
       totalFields = 18;
       gameDices.initDices(5);
       bonusSum = 63;
       bonusAmount = 50;
 
-      yatzyFunctions =
-          [calcOnes, calcTwos, calcThrees, calcFours, calcFives, calcSixes] +
-              [
-                zero,
-                zero,
-                calcPair,
-                calcTwoPairs,
-                calcThreeOfKind,
-                calcFourOfKind,
-                calcHouse,
-                calcSmallLadder,
-                calcLargeLadder,
-                calcChance,
-                calcYatzy,
-                zero
-              ];
     }
 
     appText = [];

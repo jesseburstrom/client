@@ -109,7 +109,7 @@ extension CommunicationApplication on Application {
       switch (action) {
         case "onGetId":
           // Explicitly cast keys and values using .map()
-          final Map<String, dynamic> getIdData = (data as Map).map(
+          final Map<String, dynamic> getIdData = (data).map(
             (key, value) => MapEntry(key.toString(), value)
           );
           try {
@@ -313,7 +313,7 @@ extension CommunicationApplication on Application {
           print('🏆 Received top scores update');
           try {
             // Parse received data
-            final Map<String, dynamic> receivedData = (data as Map).map(
+            final Map<String, dynamic> receivedData = (data).map(
               (key, value) => MapEntry(key.toString(), value)
             );
             final receivedGameType = receivedData['gameType'];
@@ -326,7 +326,7 @@ extension CommunicationApplication on Application {
             }
 
             // Convert score entries to the correct type
-            List<Map<String, dynamic>> typedScores = (scoresList as List).map((scoreEntry) {
+            List<Map<String, dynamic>> typedScores = (scoresList).map((scoreEntry) {
               if (scoreEntry is Map) {
                 return scoreEntry.map((k, v) => MapEntry(k.toString(), v));
               } else {
@@ -485,7 +485,7 @@ extension CommunicationApplication on Application {
   void _processGameUpdate(dynamic data) async {
     try {
       final router = getIt<AppRouter>();
-      print('🎮 Processing game update: $data');
+      print('🎮 Processing game update: $data'); // Log action
 
       // Check if we're in spectator mode
       bool isSpectator = data["spectator"] == true;
@@ -634,7 +634,7 @@ extension CommunicationApplication on Application {
       }
 
       // Normal player processing starts here
-      
+
       // If this is a different game from what we're playing, ignore it
       if (data["gameId"] != gameId && gameId != -1) {
         print('🎮 Ignoring update for different game ID: ${data["gameId"]} (our gameId: $gameId)');
@@ -643,16 +643,64 @@ extension CommunicationApplication on Application {
 
       // Update game data with the new information
       gameData = data;
-      
+
       // If the game hasn't started yet, don't do anything more
       if (!(data["gameStarted"] ?? false)) {
         print('🎮 Game ${data["gameId"]} hasn\'t started yet');
         return;
       }
 
-      // Check if the player list has changed - someone might have disconnected
+
       if (data["playerIds"] != null) {
         final newPlayerIds = data["playerIds"];
+
+        List<dynamic> playersData = gameData['players'];
+        playerActive = (gameData['abortedPlayers'] as List<dynamic>)
+            .map((e) => !(e as bool))
+            .toList();
+
+        // --- Update cell state for each player ---
+        for (int p = 0; p < playersData.length; p++) {
+          var playerData = playersData[p];
+          if (playerData?['cells'] is List) {
+            List<dynamic> cellsData = playerData['cells'];
+            bool isAbortedPlayer = gameData['abortedPlayers'][p];
+            for (int c = 0; c < cellsData.length; c++) {
+              // Skip if cell index is out of bounds for local arrays
+              if (c >= totalFields || p >= fixedCell.length || c >= fixedCell[p].length || p >= cellValue.length || c >= cellValue[p].length || p + 1 >= appText.length || c >= appText[p+1].length || p + 1 >= appColors.length || c >= appColors[p+1].length)
+                {print("continue");continue;}
+
+              var cellData = cellsData[c];
+
+              if (cellData != null) {
+                try {
+                  final bool serverFixed = cellData['fixed'] ?? false;
+                  final int serverValue = cellData['value'] ?? -1;
+                  final bool isNonScoreCell = cellData['isNonScoreCell'] ?? (c == 6 || c == 7 || c == totalFields - 1);
+
+
+                  // --- Apply server state directly to local state ---
+                  fixedCell[p][c] = serverFixed;
+                  cellValue[p][c] = serverValue;
+                  appText[p + 1][c] = serverValue != -1 ? serverValue.toString() : "";
+
+                  // --- Update Color based on Fixed Status and Cell Type ---
+                  if (isAbortedPlayer) {
+                    appColors[p + 1][c] = Colors.black.withAlpha(178);
+                  } else if (isNonScoreCell) {
+                    // Always use the special color for Sum, Bonus, Total
+                    appColors[p + 1][c] = Colors.blue.withAlpha(77);
+                  } else if (serverFixed) {
+                    // Use the "fixed" color if the cell is marked fixed by the server
+                    appColors[p + 1][c] = Colors.green.withAlpha(178); // ~0.7 alpha
+                  }
+                } catch (e) { print("❌ Error updating cell state [$p][$c]: $e"); }
+              }
+            }
+          }
+        }
+
+      // ****** END: CORE STATE SYNCHRONIZATION ******
 
         // Check if this is our first update and we don't have an ID yet
         if (gameId == -1) {
@@ -668,9 +716,9 @@ extension CommunicationApplication on Application {
             setup();
             userNames = data["userNames"];
             animation.players = nrPlayers;
-            
+
             print('🎮 Joining game $gameId as player $myPlayerId');
-            
+
             if (applicationStarted) {
               if (gameDices.unityCreated) {
                 gameDices.sendResetToUnity();
@@ -698,7 +746,7 @@ extension CommunicationApplication on Application {
         if (myPlayerId >= 0 && myPlayerId < newPlayerIds.length) {
           String myId = socketService?.socketId ?? '';
 
-          if (newPlayerIds[myPlayerId] == null || 
+          if (newPlayerIds[myPlayerId] == null ||
               newPlayerIds[myPlayerId].isEmpty ||
               (newPlayerIds[myPlayerId] != myId)) {
             print('🎮 WARNING: Our player appears to have been removed from the game');
@@ -734,10 +782,10 @@ extension CommunicationApplication on Application {
       if (newPlayerToMove != null && newPlayerToMove != playerToMove) {
         playerToMove = newPlayerToMove;
         print('🎮 Turn changed to player $playerToMove (my ID: $myPlayerId)');
-        
+
         // Reset dice for the new player's turn
         resetDices();
-        
+
         // If it's my turn, start dice rolling
         if (playerToMove == myPlayerId) {
           print('🎮 My turn now! Enabling dice throw');
@@ -747,13 +795,14 @@ extension CommunicationApplication on Application {
           }
         }
       }
-      
+
       // Always update board colors
       colorBoard();
     } catch (e) {
       print('🎮 Error processing game update: $e');
     }
   }
+
 
   chatCallbackOnSubmitted(String text) {
     print('💬 Chat message submitted: "$text"');
@@ -828,42 +877,18 @@ extension CommunicationApplication on Application {
 
             // Update dice values to show what the other player had
             gameDices.diceValue = data["diceValue"].cast<int>();
-            updateDiceValues();
 
             // Mark the cell as selected but don't change turns
             // Actual turn change will come via the onGameUpdate message
             int player = data["player"];
             int cell = data["cell"];
 
-            // Update the cell appearance and call calcNewSums
-            appColors[player + 1][cell] = Colors.green.withValues(alpha: 0.7);
-            fixedCell[player][cell] = true;
-            
-            // Clear unfixed cells for the current player
-            for (var i = 0; i < totalFields; i++) {
-              if (!fixedCell[player][i]) {
-                appText[player + 1][i] = "";
-                cellValue[player][i] = -1;
-              }
-            }
-            applyLocalSelection(player, cell, cellValue[player][cell]);
-
             // Get next player (same logic as in calcNewSums)
             int nextPlayer = player;
             do {
               nextPlayer = (nextPlayer + 1) % nrPlayers;
             } while (!playerActive[nextPlayer]);
-            
-            // Clear unfixed cells for the next player
-            for (var i = 0; i < totalFields; i++) {
-              if (!fixedCell[nextPlayer][i]) {
-                appText[nextPlayer + 1][i] = "";
-                cellValue[nextPlayer][i] = -1;
-              }
-            }
 
-            // Clear dice visuals
-            gameDices.clearDices();
           } else {
             // This is our own selection coming back to us, we can ignore it
             // since we already processed it locally
@@ -877,7 +902,6 @@ extension CommunicationApplication on Application {
             resetDices();
           } else {
             gameDices.diceValue = dices;
-            updateDiceValues();
             gameDices.nrRolls += 1;
             gameDices.updateDiceImages();
             if (gameDices.unityDices) {

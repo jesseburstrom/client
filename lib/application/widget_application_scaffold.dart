@@ -1,17 +1,12 @@
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:yatzy/application/communication_application.dart';
 import 'package:yatzy/chat/widget_chat.dart';
-import 'package:yatzy/dices/unity_communication.dart';
 import 'package:yatzy/dices/widget_dices.dart';
 import 'package:yatzy/top_score/widget_top_scores.dart';
 
 import '../router/router.gr.dart';
 import '../scroll/widget_scroll.dart';
-import '../services/service_provider.dart';
 import '../startup.dart';
-import '../states/cubit/state/state_cubit.dart';
 import 'application.dart';
 import 'widget_application.dart';
 

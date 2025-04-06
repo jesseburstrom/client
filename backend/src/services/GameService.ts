@@ -6,6 +6,7 @@ import { Server, Socket } from 'socket.io'; // Import Socket type
 import { GameLogService, GameMove } from './GameLogService'; // <-- Import log service and types
 import { TopScoreService } from './TopScoreService'; // <-- Import TopScoreService
 import { getSelectionLabel } from '../utils/yatzyMapping'; // <-- Import mapping utility
+import { GameConfig, getBaseGameType } from '../utils/gameConfig';
 
 /**
  * Service for managing Yatzy games and spectators
@@ -249,33 +250,71 @@ export class GameService {
   }
 
   notifyGameUpdate(game: Game): void {
-    const gameData = game.toJSON();
+    // --- Recalculate ALL players' derived scores before sending update ---
+    // Ensures Sum/Bonus/Total are always up-to-date in the sent payload.
+    // Potential scores are handled by calculatePotentialScores/clearPotentialScores calls elsewhere.
+    game.players.forEach(p => {
+        if (p) { // Calculate even for inactive players so spectators see correct final sums
+             p.calculateDerivedScores(); // Recalculates Sum/Bonus/Total based on fixed cells
+        }
+    });
+    // --- End Recalculation ---
 
-    // Determine action based on game state
-    // gameData.action = game.gameStarted ? 'onGameStart' : 'onGameUpdate'; // Logic seems reversed, usually update after start? Let's use onGameUpdate generally after start.
-    // Let's stick to onGameUpdate for general updates after the initial start signal
+    const gameData = game.toJSON(); // Serialize the final state
     gameData.action = 'onGameUpdate';
 
-    console.log(`🎮 Notifying players about game ${game.id} update, action: ${gameData.action}`);
+    // console.log(`🎮 Notifying players about game ${game.id} update`); // Less verbose log
 
-    for (let i = 0; i < game.players.length; i++) {
-      const player = game.players[i];
-      // Send update to active players
-      if (player?.isActive && player.id) { // Add null check
-        console.log(`🎮 Sending ${gameData.action} to player ${i} (${player.id})`);
-        this.io.to(player.id).emit('onServerMsg', gameData);
-      }
+    // Send to all players (active or not) and spectators
+    for (const player of game.players) {
+        if (player?.id) {
+            this.io.to(player.id).emit('onServerMsg', gameData);
+        }
     }
-
-    // Notify spectators
     const gameSpectators = this.spectators.get(game.id);
-    if (gameSpectators && gameSpectators.size > 0) {
-      console.log(`[Spectator] Notifying ${gameSpectators.size} spectators of game ${game.id} update`);
-      for (const spectatorId of gameSpectators) {
-        this.io.to(spectatorId).emit('onServerMsg', gameData);
-      }
+    if (gameSpectators) {
+       for (const spectatorId of gameSpectators) {
+           this.io.to(spectatorId).emit('onServerMsg', gameData);
+       }
     }
   }
+  // notifyGameUpdate(game: Game): void {
+  //   // --- Recalculate ALL players' derived scores before sending update ---
+  //       // Ensures Sum/Bonus/Total are always up-to-date in the sent payload.
+  //       // Potential scores are handled by calculatePotentialScores/clearPotentialScores calls elsewhere.
+  //       game.players.forEach(p => {
+  //         if (p) { // Calculate even for inactive players so spectators see correct final sums
+  //              p.calculateDerivedScores(); // Recalculates Sum/Bonus/Total based on fixed cells
+  //         }
+  //     });
+  //     // --- End Recalculation ---
+  //   const gameData = game.toJSON();
+
+  //   // Determine action based on game state
+  //   // gameData.action = game.gameStarted ? 'onGameStart' : 'onGameUpdate'; // Logic seems reversed, usually update after start? Let's use onGameUpdate generally after start.
+  //   // Let's stick to onGameUpdate for general updates after the initial start signal
+  //   gameData.action = 'onGameUpdate';
+
+  //   console.log(`🎮 Notifying players about game ${game.id} update, action: ${gameData.action}`);
+
+  //   for (let i = 0; i < game.players.length; i++) {
+  //     const player = game.players[i];
+  //     // Send update to active players
+  //     if (player?.isActive && player.id) { // Add null check
+  //       console.log(`🎮 Sending ${gameData.action} to player ${i} (${player.id})`);
+  //       this.io.to(player.id).emit('onServerMsg', gameData);
+  //     }
+  //   }
+
+  //   // Notify spectators
+  //   const gameSpectators = this.spectators.get(game.id);
+  //   if (gameSpectators && gameSpectators.size > 0) {
+  //     console.log(`[Spectator] Notifying ${gameSpectators.size} spectators of game ${game.id} update`);
+  //     for (const spectatorId of gameSpectators) {
+  //       this.io.to(spectatorId).emit('onServerMsg', gameData);
+  //     }
+  //   }
+  // }
 
   handlePlayerStartingNewGame(playerId: string): void {
     // This function essentially forces a disconnect/abort from existing games
@@ -405,6 +444,23 @@ export class GameService {
     console.log(`🎲 [GameService] Game ${game.id} state updated: Roll ${game.rollCount}, Dice ${game.diceValues}`);
     // --- End Update Game State ---
 
+     // Clear potential scores for ALL players FIRST
+        //    This ensures the previous player's potential scores are gone before calculating new ones.
+        console.log(`[GameService] Clearing potentials for ALL players before calculating new ones.`);
+        game.players.forEach(p => {
+            if (p) {
+                p.clearPotentialScores(); // Resets non-fixed values to -1 and updates derived scores
+            }
+        });
+
+      // --- *** ADDED: Calculate Potential Scores for Current Player *** ---
+      const currentPlayer = game.players[playerIndex];
+      if (currentPlayer) {
+          currentPlayer.calculatePotentialScores(diceValues); // This updates the .value of unfixed cells
+          // Also recalculate derived scores like Sum/Bonus/Total for display consistency
+          currentPlayer.calculateScores();
+      }
+      // --- *** END ADDED *** ---
 
     // --- Notify other players via onClientMsg (for potential direct dice display updates) ---
     const diceUpdateData = {
@@ -457,6 +513,9 @@ export class GameService {
       return false;
     }
 
+    const currentPlayer = game.players[playerIndex];
+    if (!currentPlayer) return false; // Should not happen
+
     console.log(`📝 [GameService] Processing selection for game ${gameId}: Player ${playerIndex} selected ${selectionLabel} for ${score} points`);
 
     // --- Logging ---
@@ -493,6 +552,15 @@ export class GameService {
     console.log(`📝 [GameService] Applying selection to game state: ${selectionLabel} with score ${score}`);
     game.applySelection(playerIndex, selectionLabel, score);
 
+    // --- Recalculate derived scores (Sum, Bonus, Total) for the player who just selected ---
+    //currentPlayer.calculateScores();
+    game.players.forEach(p => {
+      if (p) {
+          p.clearPotentialScores(); // Resets non-fixed values to -1 and updates derived scores
+      }
+    });
+    //currentPlayer.calculateDerivedScores();
+
     // Debug: Log cell values after selection
     const player = game.players[playerIndex];
     if (player && player.cells) {
@@ -507,7 +575,10 @@ export class GameService {
     // Check if game finished after this selection
     if (game.isGameFinished()) {
       console.log(`🏁 [GameService] Game ${gameId} finished after selection`);
-
+      // --- *** ADDED: Clear potential scores before final update *** ---
+      // Not strictly necessary as game is over, but good practice
+      currentPlayer.clearPotentialScores(); // Clear for the player who made the last move
+      // --- *** END ADDED *** ---
       // **** CRUCIAL FIX: Send final update BEFORE handling finish ****
       console.log(`🔄 Notifying final game update (onServerMsg) before finishing game ${game.id}`);
       this.notifyGameUpdate(game); // Send state including the last selection
@@ -515,37 +586,35 @@ export class GameService {
 
       this.handleGameFinished(game); // This handles logging end, notifying, removing game
     } else {
-      // Clear dice for next player
-      game.setDiceValues([0, 0, 0, 0, 0]);
-      game.rollCount = 0;
-      
-      // Advance to next player
+      // Advance turn to the next active player FIRST
       game.advanceToNextActivePlayer();
-      console.log(`🎮 [GameService] Player ${playerId} processed selection, advancing to player ${game.playerToMove}`);
-      
-      // Notify all players and spectators of the game update
-      this.notifyGameUpdate(game);
-      
-      // Prepare full game state with cleared dice
-      const gameData = game.toJSON();
-      gameData.action = 'onGameUpdate';
-      gameData.diceValues = [0, 0, 0, 0, 0];
-      gameData.rollCount = 0;
+      const nextPlayerIndex = game.playerToMove;
+      const nextPlayer = game.players[nextPlayerIndex];
 
-      // Send to all players
-      for (const player of game.players) {
-        if (player?.id) {
-          this.io.to(player.id).emit('onServerMsg', gameData);
-        }
-      }
-      
-      // Send to all spectators
-      const spectators = this.spectators.get(game.id);
-      if (spectators) {
-        for (const spectatorId of spectators) {
-          this.io.to(spectatorId).emit('onServerMsg', gameData);
-        }
-      }
+       // --- Clear potential scores for the player whose turn it is NOW ---
+       if (nextPlayer) {
+           console.log(`[GameService] Clearing potential scores for next player ${nextPlayerIndex} (${nextPlayer.username})`);
+           nextPlayer.clearPotentialScores(); // Resets non-fixed values to -1 and recalculates derived scores
+       } else {
+           console.warn(`[GameService] Could not find next player at index ${nextPlayerIndex} to clear scores.`);
+       }
+       // --- End Clearing Potential Scores ---
+
+      // --- Reset dice state for the *game* dynamically ---
+      const config = GameConfig[getBaseGameType(game.gameType)];
+      const diceCount = config.diceCount;
+      const zeroDiceArray = new Array(diceCount).fill(0); // Create array of 0s with correct length
+      game.setDiceValues(zeroDiceArray); // Use the dynamic array
+      game.rollCount = 0;
+      // --- End Resetting Dice State ---
+
+      console.log(`🎮 [GameService] Advanced turn to player ${game.playerToMove}. Dice reset.`);
+
+      // --- Notify ALL clients (players and spectators) of the updated game state ONCE ---
+      // notifyGameUpdate handles serialization and sending to players/spectators.
+      // It will send the state *after* potential scores are cleared and dice are reset.
+      this.notifyGameUpdate(game);
+      // --- End Notification ---
     }
 
     return true;
