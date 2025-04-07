@@ -17,7 +17,7 @@ import { PlayerController } from "./controllers/PlayerController";
 import { ChatController } from "./controllers/ChatController";
 import { spectateGameRoute, initializeSpectateRoute } from "./routes/spectateGameRoute"; // <-- Import spectate route and initializer
 
-const PORT: number = 8002;
+const PORT: number = 8000;
 
 const app = express();
 
@@ -38,7 +38,8 @@ console.log("Starting Server...");
 
 if (isOnline) {
   //app.use(express.static(path.join(__dirname, "/build")));
-  app.use("/new", express.static(path.join(__dirname, "web")));
+  //app.use("/new", express.static(path.join(__dirname, "web")));
+  app.use("express.static(path.join(__dirname, "web")));
 
 } else {
   //app.use(express.static(localReactDir + "/build"));
@@ -193,7 +194,7 @@ io.on("connect", (socket) => {
 
 app.get("/flutter", (req, res) => {
   if (isOnline) {
-    res.sendFile(path.join(__dirname + "/web/index.html"));
+    res.sendFile("/web/index.html"));
   } else {
     res.sendFile(localFlutterDir + "/build/web/index.html");
   }
@@ -202,7 +203,7 @@ app.get("/flutter", (req, res) => {
 app.get("*", (req, res) => {
   if (isOnline) {
     //res.sendFile(path.join(__dirname + "/build/index.html"));
-    res.sendFile(path.join(__dirname + "/web/index.html"));
+    res.sendFile("/web/index.html"));
   } else {
     res.sendFile(localReactDir + "/build/index.html");
   }
