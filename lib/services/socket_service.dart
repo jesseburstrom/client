@@ -99,7 +99,8 @@ class SocketService {
               'reconnectionDelayMax': 5000,
               'timeout': 20000,
               'extraHeaders': {'Content-Type': 'application/json'},
-              'path': '/new/socket.io/',
+              //'path': '/new/socket.io/',
+              'path': '/socket.io/',
             }
         );
       } else {

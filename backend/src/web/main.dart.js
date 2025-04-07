@@ -93567,7 +93567,7 @@ o.f=!1
 r="\ud83d\udd0c [Socket #"+l
 A.a2(r+"] Initiating connection to server: "+$.aDR)
 try{q=t.N
-o.c=A.aZJ($.aDR,A.n(["transports",A.b(["websocket","polling"],t.s),"autoConnect",!1,"forceNew",!0,"reconnectionAttempts",3,"reconnectionDelay",1000,"reconnectionDelayMax",5000,"timeout",2e4,"extraHeaders",A.n(["Content-Type","application/json"],q,q),"path","/new/socket.io/"],q,t.z))
+o.c=A.aZJ($.aDR,A.n(["transports",A.b(["websocket","polling"],t.s),"autoConnect",!1,"forceNew",!0,"reconnectionAttempts",3,"reconnectionDelay",1000,"reconnectionDelayMax",5000,"timeout",2e4,"extraHeaders",A.n(["Content-Type","application/json"],q,q),"path","/socket.io/"],q,t.z))
 A.a2("\ud83e\uddfc [Socket #"+l+"] Clearing existing event handlers...")
 o.c.kb("connect")
 o.c.kb("disconnect")

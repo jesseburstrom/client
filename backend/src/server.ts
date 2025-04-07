@@ -194,7 +194,7 @@ io.on("connect", (socket) => {
 
 app.get("/flutter", (req, res) => {
   if (isOnline) {
-    res.sendFile("/web/index.html"));
+    res.sendFile(path.join(__dirname + "/web/index.html"));
   } else {
     res.sendFile(localFlutterDir + "/build/web/index.html");
   }
@@ -203,7 +203,7 @@ app.get("/flutter", (req, res) => {
 app.get("*", (req, res) => {
   if (isOnline) {
     //res.sendFile(path.join(__dirname + "/build/index.html"));
-    res.sendFile("/web/index.html"));
+    res.sendFile(path.join(__dirname + "/web/index.html"));
   } else {
     res.sendFile(localReactDir + "/build/index.html");
   }
