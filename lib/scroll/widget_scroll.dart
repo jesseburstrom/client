@@ -40,8 +40,8 @@ class _WidgetAnimationsScrollState extends State<WidgetAnimationsScroll>
 
   @override
   void dispose() {
-    super.dispose();
     animationsScroll.animationController.dispose();
+    super.dispose();
   }
 
   @override

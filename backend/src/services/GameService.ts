@@ -463,20 +463,20 @@ export class GameService {
       // --- *** END ADDED *** ---
 
     // --- Notify other players via onClientMsg (for potential direct dice display updates) ---
-    const diceUpdateData = {
-      action: 'sendDices',
-      gameId: game.id,
-      diceValue: diceValues,
-      rollCount: game.rollCount
-    };
+    // const diceUpdateData = {
+    //   action: 'sendDices',
+    //   gameId: game.id,
+    //   diceValue: diceValues,
+    //   rollCount: game.rollCount
+    // };
 
-    console.log(`🎲 Broadcasting 'sendDices' (onClientMsg) for game ${game.id}`);
-    for (let i = 0; i < game.players.length; i++) {
-      const player = game.players[i];
-      if (player?.isActive && player.id && player.id !== playerId) {
-        this.io.to(player.id).emit('onClientMsg', diceUpdateData);
-      }
-    }
+    // console.log(`🎲 Broadcasting 'sendDices' (onClientMsg) for game ${game.id}`);
+    // for (let i = 0; i < game.players.length; i++) {
+    //   const player = game.players[i];
+    //   if (player?.isActive && player.id && player.id !== playerId) {
+    //     this.io.to(player.id).emit('onClientMsg', diceUpdateData);
+    //   }
+    // }
     // --- End Notify other players ---
 
 
@@ -486,14 +486,14 @@ export class GameService {
     this.notifyGameUpdate(game);
     // --- End Notify ALL ---
 
-    // Also send dice update to spectators via onClientMsg if needed for specific client logic
-    const gameSpectators = this.spectators.get(game.id);
-    if (gameSpectators && gameSpectators.size > 0) {
-      console.log(`[Spectator] Sending 'sendDices' (onClientMsg) to ${gameSpectators.size} spectators`);
-      for (const spectatorId of gameSpectators) {
-         this.io.to(spectatorId).emit('onClientMsg', diceUpdateData);
-      }
-    }
+    // // Also send dice update to spectators via onClientMsg if needed for specific client logic
+    // const gameSpectators = this.spectators.get(game.id);
+    // if (gameSpectators && gameSpectators.size > 0) {
+    //   console.log(`[Spectator] Sending 'sendDices' (onClientMsg) to ${gameSpectators.size} spectators`);
+    //   for (const spectatorId of gameSpectators) {
+    //      this.io.to(spectatorId).emit('onClientMsg', diceUpdateData);
+    //   }
+    // }
 
 
     return true;

@@ -39,8 +39,8 @@ class _WidgetTopScoreState extends State<WidgetTopScore>
 
   @override
   void dispose() {
-    super.dispose();
     topScore.animationController.dispose();
+    super.dispose();
   }
 
   @override

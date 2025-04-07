@@ -31,64 +31,6 @@ extension CommunicationApplication on Application {
     clearFocus();
   }
 
-  handlePlayerAbort(int abortedPlayerIndex) {
-    print('🎮 Handling player abort for player $abortedPlayerIndex');
-
-    // Mark player as inactive
-    playerActive[abortedPlayerIndex] = false;
-
-    // Mark their column as inactive (dark)
-    for (var j = 0; j < totalFields; j++) {
-      appColors[abortedPlayerIndex + 1][j] = Colors.black.withValues(alpha: 0.5);
-    }
-
-    // If the aborted player was the current player to move, advance to the next active player
-    if (abortedPlayerIndex == playerToMove) {
-      advanceToNextActivePlayer();
-    }
-
-    // Update the board colors
-    colorBoard();
-
-    // Send a notification to the console for debugging
-    print('🎮 Player $abortedPlayerIndex has aborted the game, adjusted game state accordingly');
-  }
-
-  advanceToNextActivePlayer() {
-    print('🎮 Advancing to next active player from current player $playerToMove');
-
-    // Safety check
-    if (playerActive.isEmpty) return;
-
-    final startingPlayer = playerToMove;
-    
-    do {
-      playerToMove = (playerToMove + 1) % nrPlayers;
-
-      // If we've checked all players and none are active, keep current player
-      if (playerToMove == startingPlayer) {
-        print('🎮 All players are inactive or we\'ve checked all players');
-        break;
-      }
-    } while (!playerActive[playerToMove]);
-
-    print('🎮 Advanced to next active player: $playerToMove');
-
-    // Update the board colors to show the current player
-    colorBoard();
-    
-    // Reset dice for the new player
-    resetDices();
-
-    if (myPlayerId == playerToMove) {
-      print('🎮 My turn now, enabling dice throw');
-      if (gameDices.unityDices) {
-        gameDices.sendResetToUnity();
-        gameDices.sendStartToUnity();
-      }
-    }
-  }
-
   callbackOnServerMsg(dynamic data) async {
     try {
       final router = getIt<AppRouter>();
@@ -214,8 +156,6 @@ extension CommunicationApplication on Application {
             // --- Set gameStarted flag BEFORE calling setup ---
             gameStarted = true; // Mark game as started locally *before* setup
 
-            playerIds = gameData["playerIds"]; // Use the casted map
-            playerActive = List.filled(playerIds.length, true);
             gameType = gameData["gameType"]; // Use the casted map
             nrPlayers = gameData["nrPlayers"]; // Use the casted map
             setup();
@@ -255,7 +195,6 @@ extension CommunicationApplication on Application {
           print('📩 Processing onRequestGames...');
           data = List<dynamic>.from(data["Games"]);
           games = data;
-          _checkIfPlayerAborted(); // This check is likely safe now
           context.read<SetStateCubit>().setState(); // Update settings view if visible
           break;
         case "onGameUpdate":
@@ -266,7 +205,6 @@ extension CommunicationApplication on Application {
           // Reset state and go back to settings
           gameId = -1;
           myPlayerId = -1;
-          gameFinished = false;
           isSpectating = false; // Ensure spectator mode is also reset
           spectatedGameId = -1;
           gameData = {};
@@ -279,8 +217,6 @@ extension CommunicationApplication on Application {
             (key, value) => MapEntry(key.toString(), value)
           );
           gameData = finishedGameData;
-          gameFinished = true; // Set flag for UI layer to handle dialog
-
           // Trigger UI update first
           context.read<SetStateCubit>().setState();
 
@@ -355,129 +291,6 @@ extension CommunicationApplication on Application {
       }
     } catch (e) {
       print('🎮 Error processing server message: $e');
-    }
-  }
-  
-  // Helper method to check if any players have aborted the game
-  void _checkIfPlayerAborted() {
-    // **** ADD THIS GUARD ****
-    if (isSpectating || gameData.isEmpty || gameId == -1) {
-      print('🎮 Skipping _checkIfPlayerAborted (Spectating or no active game data)');
-      return;
-    }
-    // **** END GUARD ****
-
-    // Existing logic...
-    print('🎮 Checking for aborted players...'); // Add log
-
-    // Track if any player's status changed
-    bool playerStatusChanged = false;
-
-    for (var i = 0; i < games.length; i++) {
-      // Ensure games[i] is a Map and has the required keys
-      if (games[i] is Map && games[i]["gameId"] == gameData["gameId"] && games[i]["playerIds"] != null) {
-        var currentGameFromList = games[i]; // To avoid repeated lookups
-
-        // Ensure playerActive and playerIds are initialized and match length
-        if (playerActive.length != nrPlayers || playerIds.length != nrPlayers) {
-           print('⚠️ Player state arrays mismatch nrPlayers ($nrPlayers). Reinitializing.');
-           playerActive = List.filled(nrPlayers, true); // Reinitialize based on current game
-           playerIds = List<String>.from(gameData['playerIds'] ?? List.filled(nrPlayers, "")); // Use current game data
-        }
-
-
-        for (var j = 0; j < nrPlayers && j < currentGameFromList["playerIds"].length; j++) {
-          // Make sure indices are valid before accessing
-          if (j < playerActive.length) {
-             bool wasActive = playerActive[j];
-             // Check if player ID is present and not empty in the game list data
-             bool isActive = currentGameFromList["playerIds"][j] != null &&
-                             currentGameFromList["playerIds"][j].toString().isNotEmpty;
-
-             // If a player was active but is now inactive, they aborted
-             if (wasActive && !isActive) {
-               print('🎮 Player $j has aborted the game!');
-               playerStatusChanged = true;
-               handlePlayerAbort(j); // Make sure this function handles UI updates
-             }
-
-             // Update the local playerActive status
-             playerActive[j] = isActive;
-          } else {
-             print('⚠️ Index $j out of bounds for playerActive (${playerActive.length})');
-          }
-        }
-         // Update playerIds safely
-         playerIds = List<String>.from(currentGameFromList["playerIds"]);
-         break; // Found the matching game, no need to check others
-      }
-    }
-
-    // If no specific player status changed but current player is inactive,
-    // we need to advance to the next active player
-    // Add checks to prevent RangeError here as well
-    if (!playerStatusChanged &&
-        playerToMove >= 0 && playerToMove < playerActive.length && !playerActive[playerToMove]) {
-      _advanceToNextActivePlayer();
-    } else if (playerToMove >= playerActive.length) {
-       print('⚠️ playerToMove ($playerToMove) is out of bounds for playerActive (${playerActive.length})');
-       // Reset playerToMove? Or handle error?
-       if (playerActive.isNotEmpty) playerToMove = 0;
-    }
-
-    // Update board colors based on the potentially changed playerActive status
-    colorBoard(); // Moved from inside the loop
-
-    // Trigger UI update if needed (e.g., if handlePlayerAbort doesn't do it)
-    if (playerStatusChanged) {
-        try {
-            context.read<SetStateCubit>().setState();
-        } catch (e) { print('⚠️ Error updating state after abort check: $e'); }
-    }
-  }
-  
-  // Helper method to advance to the next active player
-  void _advanceToNextActivePlayer() {
-    print('🎮 Current player $playerToMove is inactive, advancing to next active player');
-    
-    // Clear unfixed cells of the current player before advancing
-    for (var j = 0; j < totalFields; j++) {
-      if (!fixedCell[playerToMove][j]) {
-        cellValue[playerToMove][j] = -1;
-        appText[playerToMove + 1][j] = "";
-      }
-    }
-    
-    // Find the next active player
-    int nextPlayer = playerToMove;
-    bool foundActivePlayer = false;
-    
-    // Try to find an active player by checking each player in order
-    for (int i = 0; i < nrPlayers; i++) {
-      nextPlayer = (nextPlayer + 1) % nrPlayers;
-      if (playerActive[nextPlayer]) {
-        foundActivePlayer = true;
-        break;
-      }
-    }
-    
-    if (foundActivePlayer) {
-      print('🎮 Found next active player: $nextPlayer');
-      playerToMove = nextPlayer;
-      
-      // Reset dice for the new player
-      resetDices();
-      
-      // If it's my turn, start dice rolling
-      if (playerToMove == myPlayerId) {
-        print('🎮 My turn now! Enabling dice throw');
-        if (gameDices.unityDices) {
-          gameDices.sendResetToUnity();
-          gameDices.sendStartToUnity();
-        }
-      }
-    } else {
-      print('🎮 No active players found, game cannot continue');
     }
   }
   
@@ -709,8 +522,6 @@ extension CommunicationApplication on Application {
             // We found ourselves in this game
             myPlayerId = potentialId;
             gameId = data["gameId"];
-            playerIds = data["playerIds"];
-            playerActive = List.filled(playerIds.length, true);
             gameType = data["gameType"];
             nrPlayers = data["nrPlayers"];
             setup();
@@ -736,12 +547,6 @@ extension CommunicationApplication on Application {
           }
         }
 
-        // Make sure playerIds and playerActive are initialized
-        if (playerIds.isEmpty) {
-          playerIds = List<String>.from(newPlayerIds);
-          playerActive = List.filled(playerIds.length, true);
-        }
-
         // Check if the current player is still in the game
         if (myPlayerId >= 0 && myPlayerId < newPlayerIds.length) {
           String myId = socketService?.socketId ?? '';
@@ -754,27 +559,6 @@ extension CommunicationApplication on Application {
             return;
           }
         }
-
-        // Process player status changes if arrays are initialized
-        if (playerIds.isNotEmpty && playerActive.isNotEmpty) {
-          bool playerStatusChanged = false;
-          for (int i = 0; i < playerIds.length && i < playerActive.length; i++) {
-            if (i < newPlayerIds.length) {
-              bool wasActive = playerActive[i];
-              bool isActive = newPlayerIds[i] != null && newPlayerIds[i].toString().isNotEmpty;
-
-              // Player was active but is now inactive (aborted/disconnected)
-              if (wasActive && !isActive) {
-                print('🎮 Player $i has aborted/disconnected!');
-                handlePlayerAbort(i);
-                playerStatusChanged = true;
-              }
-            }
-          }
-        }
-
-        // Update playerIds safely
-        playerIds = List<String>.from(newPlayerIds);
       }
 
       // Handle player turn changes
@@ -797,7 +581,7 @@ extension CommunicationApplication on Application {
       }
 
       // Always update board colors
-      colorBoard();
+      //colorBoard();
     } catch (e) {
       print('🎮 Error processing game update: $e');
     }
@@ -815,9 +599,6 @@ extension CommunicationApplication on Application {
     
     // Get the current game ID
     final gameId = this.gameId;
-    
-    // Format the message with the username
-    final formattedMessage = "$userName: $text";
 
     chat.scrollController.animateTo(
       chat.scrollController.position.maxScrollExtent,
@@ -825,7 +606,7 @@ extension CommunicationApplication on Application {
       curve: Curves.fastOutSlowIn
     );
     
-    print('💬 Sending chat message to game $gameId with players: $playerIds');
+    print('💬 Sending chat message to game $gameId');
     
     // Use the modern SocketService if available
     if (socketService != null && socketService!.isConnected) {
@@ -837,7 +618,6 @@ extension CommunicationApplication on Application {
         "gameId": gameId,
         "message": text,
         "sender": userName,
-        "playerIds": playerIds,
       };
       
       // Send via the modern socket service
@@ -881,7 +661,6 @@ extension CommunicationApplication on Application {
             // Mark the cell as selected but don't change turns
             // Actual turn change will come via the onGameUpdate message
             int player = data["player"];
-            int cell = data["cell"];
 
             // Get next player (same logic as in calcNewSums)
             int nextPlayer = player;

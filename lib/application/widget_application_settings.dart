@@ -1,8 +1,5 @@
-import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:yatzy/dices/unity_communication.dart';
-import '../router/router.gr.dart';
 import '../services/service_provider.dart';
 import '../shared_preferences.dart';
 import '../startup.dart';
@@ -171,7 +168,7 @@ extension WidgetApplicationSettings on Application {
             padding: const EdgeInsets.all(12.0),
             child: Column(
               children: [
-                Text("Game Type", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)), // Use headingStyle if available
+                const Text("Game Type", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)), // Use headingStyle if available
                 const SizedBox(height: 8),
                 inputItems.widgetStringRadioButton( // Use widgetStringRadioButton
                     state,
@@ -233,60 +230,10 @@ extension WidgetApplicationSettings on Application {
         msg["unityLightMotion"] = gameDices.unityLightMotion;
         SharedPrefProvider.setPrefObject('yatzySettings', msg);
       } else {
-        print('❌ No socket connection - starting offline 1-player game');
-        myPlayerId = 0;
-        gameId = 0;
-        playerIds = [""];
-        playerActive = List.filled(playerIds.length, true);
-        nrPlayers = 1;
-
-        setup();
-        userNames = [userName];
-        animation.players = 1;
-        if (applicationStarted) {
-          if (gameDices.unityDices) {
-            gameDices.sendResetToUnity();
-            if (gameDices.unityDices && myPlayerId == playerToMove) {
-              gameDices.sendStartToUnity();
-            }
-          }
-
-          context.read<SetStateCubit>().setState();
-          AutoRouter.of(context).pop();
-        } else {
-          applicationStarted = true;
-          await AutoRouter.of(context).pushAndPopUntil(const ApplicationView(),
-              predicate: (Route<dynamic> route) => false);
-        }
+        print('❌ No socket connection');
       }
     } catch (e) {
       print('⚠️ ServiceProvider not available in onStartGameButton: $e');
-      // Start offline game
-      print('❌ No service provider - starting offline 1-player game');
-      myPlayerId = 0;
-      gameId = 0;
-      playerIds = [""];
-      playerActive = List.filled(playerIds.length, true);
-      nrPlayers = 1;
-
-      setup();
-      userNames = [userName];
-      animation.players = 1;
-      if (applicationStarted) {
-        if (gameDices.unityDices) {
-          gameDices.sendResetToUnity();
-          if (gameDices.unityDices && myPlayerId == playerToMove) {
-            gameDices.sendStartToUnity();
-          }
-        }
-
-        context.read<SetStateCubit>().setState();
-        AutoRouter.of(context).pop();
-      } else {
-        applicationStarted = true;
-        await AutoRouter.of(context).pushAndPopUntil(const ApplicationView(),
-            predicate: (Route<dynamic> route) => false);
-      }
     }
   }
 
@@ -298,7 +245,6 @@ extension WidgetApplicationSettings on Application {
     // Define a consistent color scheme for better visibility
     final primaryColor = Colors.blue.shade700; // Brighter primary color
     final accentColor = Theme.of(context).colorScheme.secondary;
-    final backgroundColor = Theme.of(context).scaffoldBackgroundColor;
 
     const tabTextStyle = TextStyle(
       fontSize: 24,
@@ -338,7 +284,7 @@ extension WidgetApplicationSettings on Application {
                 indicatorWeight: 3,
                 indicatorColor: Colors.white, // High contrast indicator
                 labelColor: Colors.white, // Ensure high contrast for selected tab
-                unselectedLabelColor: Colors.white.withOpacity(0.8), // Still visible unselected tabs
+                unselectedLabelColor: Colors.white.withValues(alpha: 0.8), // Still visible unselected tabs
                 tabs: [
                   Tab(child: Text(game_, style: tabTextStyle)),
                   Tab(child: Text(general_, style: tabTextStyle)),
@@ -506,7 +452,7 @@ extension WidgetApplicationSettings on Application {
                                     borderRadius: BorderRadius.circular(8.0),
                                     boxShadow: [
                                       BoxShadow(
-                                        color: Colors.black.withOpacity(0.1),
+                                        color: Colors.black.withValues(alpha: 0.1),
                                         spreadRadius: 1,
                                         blurRadius: 3,
                                         offset: const Offset(0, 2),
@@ -631,9 +577,9 @@ extension WidgetApplicationSettings on Application {
                                     Theme(
                                       data: Theme.of(context).copyWith(
                                         checkboxTheme: CheckboxThemeData(
-                                          fillColor: MaterialStateProperty.resolveWith<Color>(
-                                            (Set<MaterialState> states) {
-                                              if (states.contains(MaterialState.selected)) {
+                                          fillColor: WidgetStateProperty.resolveWith<Color>(
+                                            (Set<WidgetState> states) {
+                                              if (states.contains(WidgetState.selected)) {
                                                 return accentColor;
                                               }
                                               return Colors.grey.shade400;

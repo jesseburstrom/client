@@ -77,16 +77,6 @@ extension WidgetApplicationScaffold on Application {
       return widget;
     }
 
-    gameFinished = true;
-    for (var i = 0; i < playerActive.length; i++) {
-      if (playerActive[i]) {
-        if (fixedCell[i].contains(false)) {
-          gameFinished = false;
-          break;
-        }
-      }
-    }
-
     stackedWidgets = [];
     if (!gameDices.unityDices &&
         mainPageLoaded &&

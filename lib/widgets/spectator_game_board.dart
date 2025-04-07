@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 class SpectatorGameBoard extends StatefulWidget {
   final Map<String, dynamic> gameData;
 
-  const SpectatorGameBoard({Key? key, required this.gameData}) : super(key: key);
+  const SpectatorGameBoard({super.key, required this.gameData});
 
   @override
   State<SpectatorGameBoard> createState() => _SpectatorGameBoardState();
@@ -111,7 +111,7 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
                         border: Border.all(color: Colors.black, width: 1),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.2),
+                            color: Colors.black.withValues(alpha: 0.2),
                             spreadRadius: 1,
                             blurRadius: 2,
                             offset: const Offset(1, 1),
@@ -158,7 +158,7 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
             if (isFinished)
               Positioned.fill(
                 child: Container(
-                  color: Colors.black.withOpacity(0.5),
+                  color: Colors.black.withValues(alpha: 0.5),
                   child: Center(
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -553,7 +553,7 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
                     textAlign: TextAlign.center,
                   ),
                 ),
-              )).toList(),
+              )),
             ],
           ),
 
@@ -586,7 +586,7 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
                     padding: const EdgeInsets.symmetric(vertical: 8.0),
                     alignment: Alignment.center,
                     color: score != null && !category.isHighlighted ?
-                    Colors.green.shade100.withOpacity(0.7) : null,
+                    Colors.green.shade100.withValues(alpha: 0.7) : null,
                     child: Text(
                       score != null ? score.toString() : '',
                       style: TextStyle(
@@ -598,7 +598,7 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
                 ),
               ],
             );
-          }).toList(),
+          }),
         ],
       ),
     );

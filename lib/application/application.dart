@@ -59,7 +59,7 @@ class Application with LanguagesApplication  {
   Map<String, dynamic> gameData = {};
 
   var gameId = -1;
-  var playerIds = [];
+  //var playerIds = [];
   List<bool> playerActive = [];
 
   var totalFields = 18;
@@ -104,7 +104,7 @@ class Application with LanguagesApplication  {
     Map<String, dynamic> msg = {};
     msg["action"] = "sendDices";
     msg["gameId"] = gameId;
-    msg["playerIds"] = playerIds;
+    //msg["playerIds"] = playerIds;
     msg["diceValue"] = gameDices.diceValue;
     
     // Use socketService for sending dice values to ensure delivery
