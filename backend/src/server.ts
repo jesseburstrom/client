@@ -39,7 +39,7 @@ console.log("Starting Server...");
 if (isOnline) {
   //app.use(express.static(path.join(__dirname, "/build")));
   //app.use("/new", express.static(path.join(__dirname, "web")));
-  app.use("express.static(path.join(__dirname, "web")));
+  app.use(express.static(path.join(__dirname, "web")));
 
 } else {
   //app.use(express.static(localReactDir + "/build"));
