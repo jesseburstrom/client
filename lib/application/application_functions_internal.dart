@@ -1,11 +1,6 @@
 // lib/application/application_functions_internal.dart
-import 'package:yatzy/dices/unity_communication.dart';
-import 'package:yatzy/startup.dart';
-
 import 'application.dart';
 import '../utils/yatzy_mapping_client.dart';
-
-
 
 extension ApplicationFunctionsInternal on Application {
   clearFocus() {

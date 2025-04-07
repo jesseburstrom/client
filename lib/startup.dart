@@ -9,11 +9,11 @@ import 'chat/chat.dart';
 import 'dices/dices.dart';
 import 'input_items/input_items.dart';
 
-var isOnline = true;
+var isOnline = false;
 
 var localhost = isOnline
         ? "https://fluttersystems.com"
-    : "http://localhost:8002";
+    : "http://localhost:8000";
 
 var applicationStarted = false;
 var userName = "Yatzy";
