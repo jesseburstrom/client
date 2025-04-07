@@ -84,6 +84,7 @@ class _WidgetDicesState extends State<WidgetDices>
               width: w + 75,
               height: h + 75,
               child: UnityWidget(
+                webUrl: '/UnityLibrary/index.html',
                 borderRadius: BorderRadius.zero,
                 onUnityCreated: app.gameDices.onUnityCreated,
                 onUnityMessage: app.gameDices.onUnityMessage,
