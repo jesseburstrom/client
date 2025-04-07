@@ -7,6 +7,7 @@ import 'dices.dart';
 
 extension UnityCommunication on Dices {
   sendResetToUnity() {
+    print("Sending Reset To Unity");
     UnityMessage msg = UnityMessage.reset(nrDices, nrTotalRolls);
 
     var json = msg.toJson();

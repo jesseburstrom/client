@@ -563,7 +563,8 @@ extension CommunicationApplication on Application {
 
       // Handle player turn changes
       final newPlayerToMove = data["playerToMove"];
-      if (newPlayerToMove != null && newPlayerToMove != playerToMove) {
+      print('playerToMove $playerToMove newPlayerToMove $newPlayerToMove');
+      if (newPlayerToMove != null && data["diceValues"][0] == 0) {
         playerToMove = newPlayerToMove;
         print('🎮 Turn changed to player $playerToMove (my ID: $myPlayerId)');
 
