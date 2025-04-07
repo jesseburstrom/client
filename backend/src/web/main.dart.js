@@ -93733,7 +93733,7 @@ asW(a,b){var s=0,r=A.Q(t.H),q=1,p=[],o=this,n,m,l,k,j,i,h
 var $async$C4=A.M(function(c,d){if(c===1){p.push(d)
 s=q}while(true)switch(s){case 0:A.a2("\ud83d\udcca [TopScore] Loading top scores for game type: "+a)
 q=3
-j=$.aDR
+j=$.aDR+"/new"
 A.a2("\ud83d\udd0d HttpService created with baseUrl: "+j)
 n=new A.aac(j)
 s=6
