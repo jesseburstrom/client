@@ -1,1842 +1,5735 @@
-Okay, here is a detailed technical description of the project, focusing on the Flutter frontend (`lib` folder) and the Express backend (`backend` folder), based on the provided file structure and code snippets.
-
-**Project Overview**
-
-This project is a multiplayer Yatzy game application. It consists of:
-
-1.  **Flutter Frontend:** A cross-platform mobile/web application providing the user interface, game board display, dice interaction, chat, and settings management. It communicates with the backend via WebSockets (Socket.IO) for real-time game events and potentially HTTP for auxiliary actions like fetching top scores. It also integrates with a Unity project for optional 3D dice rendering.
-2.  **Express Backend:** A Node.js server using Express.js and TypeScript. It manages game logic, player connections, real-time communication via Socket.IO, game state persistence (logs), and top score persistence using MongoDB. It also provides a basic REST API for tasks like fetching top scores and potentially user authentication (though auth seems partially implemented or legacy).
-3.  **Unity Project (External):** A Unity application used for rendering 3D dice, communicating back roll results to the Flutter frontend via the `flutter_unity_widget` package integration.
-
-**1. Backend (Express in `backend` folder)**
-
-The backend is built with Node.js, Express, and TypeScript, leveraging Socket.IO for real-time gameplay and MongoDB for data persistence.
-
-*   **Core Technologies:**
-    *   **Node.js:** Runtime environment.
-    *   **Express.js:** Web framework for handling HTTP requests (REST API) and serving static files (Flutter web build).
-    *   **TypeScript:** Language for static typing and improved maintainability.
-    *   **Socket.IO:** Library for real-time, bidirectional event-based communication (WebSockets with polling fallback). Used for game state synchronization, player actions, and chat.
-    *   **MongoDB:** NoSQL database used for storing game logs and top scores. Accessed via the official `mongodb` driver.
-    *   **JWT (JSON Web Tokens):** Appears to be used in some legacy/auth-related routes (`logInRoute`, `signUpRoute`, `logRoute`), though the primary game interaction doesn't seem to rely heavily on it.
-
-*   **Architecture & Components:**
-    *   **`server.ts`:** The main entry point.
-        *   Initializes Express app and HTTP server.
-        *   Sets up Socket.IO server with CORS configuration.
-        *   Initializes and wires services (`GameService`, `GameLogService`, `TopScoreService`) and controllers (`GameController`, `PlayerController`, `ChatController`). This follows a basic dependency injection pattern.
-        *   Connects to MongoDB via `initializeDbConnection`.
-        *   Registers Express routes defined in the `routes/` directory. Includes a specific route for spectating (`spectateGameRoute`).
-        *   Listens for Socket.IO connections (`io.on('connect', ...)`).
-        *   Delegates specific Socket.IO events (`sendToServer`, `sendToClients`) to the corresponding controllers based on the `action` field in the data payload.
-        *   Handles global events like disconnections via `GameService.handlePlayerDisconnect`.
-        *   Serves static files (likely the Flutter web build).
-    *   **`db.ts`:** Manages the MongoDB connection using the `mongodb` driver. Provides `initializeDbConnection` and `getDbConnection` functions. Connects to `mongodb://127.0.0.1:27017`. Mentions databases `yatzy-game-log-db`, `top-scores`, and potentially legacy `react-auth-db`.
-    *   **Controllers (`controllers/`):**
-        *   `GameController.ts`: Handles game-related Socket.IO events like `requestGame`, `requestJoinGame`, `sendDices`, `sendSelection`, and `spectateGame`. Interacts with `GameService` to modify game state and `GameLogService` to record actions.
-        *   `PlayerController.ts`: Primarily handles initial player connection events like `getId`. Most game actions are delegated elsewhere.
-        *   `ChatController.ts`: Manages `chatMessage` events received via `sendToServer` or `sendToClients`, using `GameService` to identify recipients within the same game and broadcasting messages via `io.to(playerId).emit`.
-    *   **Services (`services/`):**
-        *   `GameService.ts`: The core service for managing active games.
-            *   Holds game state in memory (`games: Map<number, Game>`).
-            *   Manages game lifecycle (creation, joining, removal).
-            *   Handles player connections, disconnections (including logging via `GameLogService`), and aborts.
-            *   Processes player actions (dice rolls, selections) received from `GameController`, updates the `Game` model state, advances turns, and logs moves.
-            *   Uses Socket.IO (`this.io`) to broadcast game list updates (`broadcastGameList`), game state changes (`notifyGameUpdate`), and game finished events (`notifyGameFinished`) to relevant players and spectators.
-            *   Manages spectators (`spectators: Map<number, Set<string>>`), adding/removing them and sending game updates.
-            *   Interacts with `TopScoreService` when a game finishes.
-        *   `GameLogService.ts`: Handles persistence of game events.
-            *   Interacts with the `game_moves` collection in the `yatzy-game-log-db` MongoDB database.
-            *   Logs game start (`logGameStart`), player moves (`logMove` - roll, select, disconnect, spectate), and game end (`logGameEnd`) with final scores.
-            *   Provides `getGameLog` to retrieve historical game data, crucial for spectators joining mid-game.
-        *   `TopScoreService.ts`: Manages top score lists.
-            *   Interacts with the `top-scores` MongoDB database, using separate collections for different game types (`ordinary`, `maxi`).
-            *   Provides methods to get (`getTopScores`, `getAllTopScores`) and update (`updateTopScore`) scores.
-            *   Crucially, it receives the `io` instance in its constructor and uses it to *broadcast* top score updates (`broadcastTopScores`) to all connected clients via Socket.IO when scores change.
-    *   **Models (`models/`):**
-        *   `Game.ts`: Represents the state of a single game instance (ID, type, players, max players, status flags, current player index, dice values, roll count, turn number). Includes `toJSON`/`fromJSON` for serialization and methods for state manipulation (e.g., `addPlayer`, `applySelection`, `advanceToNextActivePlayer`, `isGameFinished`).
-        *   `Player.ts`: Represents a player's state (ID, username, active status, scorecard represented by `cells: BoardCell[]`). Contains the `calculateScores` logic based on the `gameType` and `GameConfig`. `toJSON`/`fromJSON`.
-        *   `BoardCell.ts`: Represents a single cell on the scorecard (index, label, value, fixed status, non-score flag). `toJSON`/`fromJSON`.
-        *   `Dice.ts`: A simple model for server-side dice logic (potentially unused if client/Unity handles rolls).
-    *   **Routes (`routes/`):** Define REST API endpoints.
-        *   Auth: `logInRoute.ts`, `signUpRoute.ts`.
-        *   Logging: `logRoute.ts`, `getLogRoute.ts`. (Seems tied to the auth system).
-        *   Top Scores: `getTopScores.ts` (GET), `updateTopScore.ts` (POST). Takes `type` query/body parameter.
-        *   Spectating: `spectateGameRoute.ts` (GET): Provides a way to fetch game state and logs via HTTP, complementing the Socket.IO spectate mechanism. Initialized with `GameService` and `GameLogService` instances.
-    *   **Utilities (`utils/`):**
-        *   `gameConfig.ts`: Defines game parameters (cell labels, bonus rules, dice count) for 'Ordinary' and 'Maxi' types. Used by `Player` model for score calculation.
-        *   `yatzyMapping.ts`: Provides utility functions (`getSelectionLabel`, `getSelectionIndex`) to map between numerical cell indices and their string representations based on `gameType`. Used by `GameController` to interpret client selections and `GameService` to forward selection info.
-        *   `index.ts`: General utility functions (random, delay, etc.).
-
-*   **Communication Flow:**
-    1.  Client connects via Socket.IO.
-    2.  Client sends `getId` action via `sendToServer`. `PlayerController` responds with the socket ID.
-    3.  Client sends `requestGame` or `requestJoinGame` via `sendToServer`.
-    4.  `GameController` receives the request, uses `GameService` to create/find/join a game.
-    5.  `GameService` updates game state, potentially starts the game if full, logs events (`GameLogService`), and broadcasts updates (`onGameStart`, `onGameUpdate`, game list) via Socket.IO.
-    6.  During gameplay:
-        *   Client (or Unity via Flutter) determines dice roll results.
-        *   Client sends dice values (`sendDices` action) via `sendToClients`.
-        *   `GameController` receives, validates turn, calls `GameService.processDiceRoll`.
-        *   `GameService` logs the roll, updates game state (dice values, roll count), and broadcasts the update (`onGameUpdate` via `notifyGameUpdate`) and potentially forwards the raw `sendDices` event via `onClientMsg`.
-        *   Client displays potential scores. Player taps a cell.
-        *   Client sends selection (`sendSelection` action with *label* and score) via `sendToClients`.
-        *   `GameController` receives, validates turn, uses `yatzyMapping` to understand the label, calls `GameService.processSelection`.
-        *   `GameService` logs selection, applies it to the `Game` model (which updates `Player` cells/scores), checks for game end, advances turn, and broadcasts the full updated game state (`onGameUpdate` via `notifyGameUpdate`).
-    7.  Chat messages are sent via `sendToServer` or `sendToClients` with `chatMessage` action, handled by `ChatController`, which broadcasts to players in the same game.
-    8.  Spectators connect via `spectateGame` action (`GameController`) or potentially the HTTP route. `GameService` adds them, sends current state (potentially reconstructed using `GameLogService`), and includes them in future `notifyGameUpdate` broadcasts.
-    9.  Game finishes (all cells filled or players disconnect). `GameService` logs end state, updates top scores via `TopScoreService` (which then broadcasts updates), notifies clients (`onGameFinished`), and removes the game from memory.
-
-**2. Frontend (Flutter in `lib` folder)**
-
-The frontend is a Flutter application responsible for rendering the game interface, handling user input, interacting with the Unity component for dice rolling, and communicating with the backend via Socket.IO and HTTP.
-
-*   **Core Technologies:**
-    *   **Flutter:** UI framework for building cross-platform applications.
-    *   **Dart:** Programming language.
-    *   **`socket_io_client`:** Package for Socket.IO communication.
-    *   **`http`:** Package for making HTTP requests.
-    *   **`auto_route`:** Package for declarative routing and navigation.
-    *   **`flutter_bloc` / `bloc`:** Packages for state management (BLoC pattern and Cubits). `SetStateCubit` is used extensively as a general UI refresh trigger.
-    *   **`shared_preferences`:** For storing local user settings.
-    *   **`flutter_unity_widget`:** Package for embedding and communicating with the Unity project.
-    *   **`get_it` / `injectable`:** For dependency injection.
-
-*   **Architecture & Components:**
-    *   **`main.dart`:** Application entry point. Initializes BLoC providers (`LanguageBloc`, `SetStateCubit`), loads shared preferences, configures dependency injection (`getIt`), and runs `AppWidget`.
-    *   **`core/app_widget.dart`:** The root widget.
-        *   Initializes core application singletons/managers (`TopScore`, `AnimationsScroll`, `Tutorial`, `Dices`, `Application`, `Chat`).
-        *   Sets up `ServiceProvider` to provide services down the widget tree.
-        *   Initiates the `SocketService` connection after the first frame.
-        *   Connects `Application` instance to `SocketService`.
-    *   **`services/service_provider.dart`:** An `InheritedWidget` providing access to `SocketService` and `GameService`.
-    *   **`services/socket_service.dart`:** Manages the Socket.IO connection.
-        *   Uses `socket_io_client` to connect to the backend server (`localhost` variable).
-        *   Handles connection lifecycle events (`onConnect`, `onDisconnect`, `onConnectError`).
-        *   Sets up listeners for server events (`onClientMsg`, `onServerMsg`, `userId`, `gameUpdate`, `chatMessage`, `welcome`).
-        *   Crucially, it delegates the processing of these events to callbacks within the `Application` instance (`app.callbackOnServerMsg`, `app.callbackOnClientMsg`).
-        *   Provides methods (`sendToServer`, `sendToClients`) for sending data to the backend.
-        *   Manages connection state (`isConnected`, `socketId`).
-        *   Uses `SetStateCubit` to trigger UI updates upon receiving messages or connection status changes.
-    *   **`services/game_service.dart` (Frontend):** Acts as a wrapper around `SocketService` for game-specific actions (`createGame`, `joinGame`, `rollDice`, `selectCell`). It *does not* hold the primary game state but facilitates communication. It includes client-side score calculation (`calculateScoreForCell`) likely for displaying potential scores or optimistic updates.
-    *   **`services/http_service.dart`:** A utility class using the `http` package to make REST API calls to the backend (e.g., for `GetTopScores`, potentially login/signup).
-    *   **`application/application.dart`:** The central class holding the UI state and coordinating logic.
-        *   Stores game state variables received from the server (`gameId`, `myPlayerId`, `playerToMove`, `gameType`, `nrPlayers`, `cellValue`, `fixedCell`, `appText`, `appColors`, `gameData`, `userNames`, `playerIds`, `playerActive`, `gameStarted`, `gameFinished`, `isSpectating`, `spectatedGameId`).
-        *   Manages instances of `Dices`, `AnimationsApplication`, and `InputItems`.
-        *   `setup()`: Initializes the game board UI state based on `gameType` and `nrPlayers`.
-        *   `updateDiceValues()`: Called after a dice roll (local or from Unity) to calculate and display potential scores in unfilled cells using `application_functions_internal_calc_dice_values.dart`.
-        *   Relies heavily on `context.read<SetStateCubit>().setState()` to trigger UI rebuilds when its state changes.
-        *   Holds the reference to the initialized `SocketService`.
-    *   **`application/communication_application.dart`:** Extension methods for `Application` handling message processing.
-        *   `callbackOnServerMsg`: Handles messages like `onGetId`, `onGameStart`, `onRequestGames`, `onGameUpdate`, `onGameAborted`, `onGameFinished`, `onTopScoresUpdate`. Updates the `Application` state variables based on the received data. Navigates using `AppRouter` (e.g., to `ApplicationView` on game start). Handles spectator data updates.
-        *   `callbackOnClientMsg`: Handles messages forwarded by the server, such as other players' selections (`sendSelection`) and dice rolls (`sendDices`), and chat messages (`chatMessage`). Updates the UI to reflect these actions.
-        *   `chatCallbackOnSubmitted`: Sends the typed chat message to the server via `SocketService`.
-        *   `_checkIfPlayerAborted`: Logic to detect and handle player disconnects/aborts based on `onRequestGames` updates.
-        *   `_processGameUpdate`: Core logic for applying game state updates received from the server.
-    *   **`application/application_functions_internal.dart`:** Extension methods for `Application` handling internal UI logic.
-        *   `cellClick()`: Triggered when a player taps a score cell. Sends `sendSelection` message (including the cell's string *label* obtained via `yatzy_mapping_client.dart`) to the server via `SocketService`. Calls `applyLocalSelection` for immediate UI feedback.
-        *   `applyLocalSelection()`: Performs optimistic UI update: marks cell as fixed, updates color, recalculates local Sum/Bonus/Total, clears dice display, and optionally triggers board animation. *Does not* advance the turn.
-        *   `colorBoard()`: Updates the visual appearance (colors) of the game board cells based on the current player, fixed status, and player activity.
-    *   **`application/application_functions_internal_calc_dice_values.dart`:** Extension methods containing pure functions to calculate the score for every possible Yatzy category based on the current dice values held in `gameDices`.
-    *   **`dices/dices.dart`:** Manages the state of the dice (values, held status, rolls remaining). Contains logic for `rollDices()` (2D version) and methods for interacting with Unity (`initDices`, `clearDices`).
-    *   **`dices/unity_communication.dart`:** Extension for `Dices`. Uses `flutter_unity_widget`'s `unityWidgetController.postMessage` to send commands/data (reset, start, dice values, colors, settings) to the Unity project. Implements `onUnityMessage` to receive messages *from* Unity (primarily dice roll results after a 3D roll).
-    *   **`dices/widget_dices.dart`:** The UI widget responsible for displaying dice. It conditionally renders either 2D dice images (with tap-to-hold functionality) or embeds the `UnityWidget`. Handles the "Roll" button press, calling `app.gameDices.rollDices()` for 2D or triggering the roll in Unity.
-    *   **`chat/`:** Contains `chat.dart` (logic and state for chat messages) and `widget_chat.dart` (the UI component for displaying messages and the input field).
-    *   **`top_score/`:** Contains `top_score.dart` (logic for fetching/updating/storing top scores) and `widget_top_scores.dart` (UI widget to display the scores). Fetches initial scores via HTTP (`HttpService`) and receives real-time updates via `onTopScoresUpdate` WebSocket message.
-    *   **`views/`:**
-        *   `application_view.dart`: The main game screen. Builds the UI using `app.widgetScaffold`. Listens for `app.gameFinished` to show a completion dialog and navigate back to settings.
-        *   `settings_view.dart`: Screen for configuring game settings (type, players, username), viewing available games, joining games, spectating, and starting new games. Calls `app.widgetScaffoldSettings`. Displays the `SpectatorGameBoard` if `app.isSpectating` is true.
-    *   **`widgets/spectator_game_board.dart`:** A dedicated widget that takes `gameData` (received from the server when spectating) and renders a read-only view of the game board, including scores and current dice. Displays a "Game Over" overlay when the spectated game finishes.
-    *   **`states/`:**
-        *   `SetStateCubit`: A simple Cubit used throughout the app (`app`, `SocketService`, views) to trigger UI rebuilds by emitting an incrementing integer state.
-        *   `LanguageBloc`: Manages the application's language state, persisting the choice using `shared_preferences`.
-    *   **`utils/yatzy_mapping_client.dart`:** Client-side utility matching the backend's `yatzyMapping.ts`. Provides `getSelectionLabel` and `getSelectionIndex` to convert between cell indices and string labels for communication with the server.
-    *   **`shared_preferences.dart`:** Utility class for interacting with `SharedPreferences` to save/load user settings.
-    *   **`startup.dart`:** Defines global constants/variables (`localhost`, `isOnline`, `userName`, language settings) and initializes singleton instances used across the app (`inputItems`, `topScore`, `app`, `chat`, `dices`, etc.).
-
-*   **Communication Flow:**
-    1.  `AppWidget` initializes `SocketService` and connects.
-    2.  `SocketService` receives connection confirmation and ID, requests games list.
-    3.  `SettingsView` displays available games received via `onServerMsg` -> `app.callbackOnServerMsg`.
-    4.  User configures settings and clicks "Create Game" or joins an existing game.
-    5.  Action triggers `SocketService.sendToServer` (`requestGame` or `requestJoinGame`).
-    6.  Backend processes, `GameService` updates state and broadcasts `onGameStart` or `onGameUpdate`.
-    7.  `SocketService` receives the message, calls `app.callbackOnServerMsg`.
-    8.  `Application` updates its state (`gameId`, `myPlayerId`, etc.), calls `setup()`, triggers `SetStateCubit`, and navigates to `ApplicationView`.
-    9.  Gameplay:
-        *   If Unity is used, player interaction triggers Unity roll; Unity sends results back via `onUnityMessage` -> `Dices` -> `app.callbackUpdateDiceValues`. If 2D, `WidgetDices` roll button calls `app.gameDices.rollDices()` -> `app.callbackUpdateDiceValues`.
-        *   `app.updateDiceValues()` calculates potential scores and updates UI via `SetStateCubit`.
-        *   `Dices` or `Application` sends the dice results to others via `SocketService.sendToClients`.
-        *   Player taps a cell -> `app.cellClick()` -> sends `sendSelection` (with label) via `SocketService.sendToClients`. `applyLocalSelection` updates UI optimistically.
-        *   Backend processes selection, broadcasts `onGameUpdate`.
-        *   `SocketService` receives update -> `app.callbackOnServerMsg` -> `_processGameUpdate` updates `Application` state, including advancing `playerToMove` and applying the score definitively. `SetStateCubit` triggers UI rebuild.
-    10. Chat messages are sent/received via `SocketService` and handled by `Application` and `Chat` classes.
-    11. Top scores are fetched initially via `HttpService` and updated in real-time via `onTopScoresUpdate` from `SocketService`.
-
-**Key Interaction Points & Design Choices:**
-
-*   **Client-Server State Sync:** The backend holds the authoritative game state. The frontend primarily reflects this state, receiving updates via Socket.IO (`onGameUpdate`). Client-side calculations (potential scores) and optimistic UI updates (`applyLocalSelection`) enhance responsiveness.
-*   **Socket.IO Events:** Communication relies heavily on custom Socket.IO events (`sendToServer`, `sendToClients`) with an `action` payload determining the message type, supplemented by specific events (`onGameStart`, `onGameUpdate`, etc.).
-*   **Label-Based Selection:** The client sends the *string label* of the selected cell (e.g., "House") rather than just the index, using `yatzy_mapping_client.dart`. The backend uses `yatzyMapping.ts` to interpret this.
-*   **Unity Integration:** Unity is used optionally for 3D dice rendering. Communication is bidirectional via `flutter_unity_widget`. Flutter sends commands (start, reset, colors), Unity sends back dice results.
-*   **State Management:** Primarily uses `SetStateCubit` for broad UI refreshes triggered by state changes in `Application` or `SocketService`. `LanguageBloc` handles language state specifically.
-*   **Service Layer:** Both frontend and backend utilize service layers (`GameService`, `SocketService`, etc.) to encapsulate logic and manage dependencies.
-*   **Persistence:** Backend uses MongoDB for logs and top scores. Frontend uses `shared_preferences` for local settings.
-*   **Spectator Mode:** Implemented on both ends, allowing users to view ongoing games in read-only mode, receiving state updates via Socket.IO or fetching initial state via REST.
-
-This description covers the main technical aspects of the Flutter frontend and Express backend based on the provided code structure and snippets.
-
-```yaml
-DEPENDENCY_GRAPH:
-  VERSION: 1.0
-  ELEMENTS:
-    # --- Backend (TypeScript) ---
-    - ID: "backend/src/controllers/ChatController.ts:ChatController"
-      TYPE: CLASS
-      FILE: "backend/src/controllers/ChatController.ts"
-      LANGUAGE: TypeScript
-      MEMBERS:
-        io: { TYPE: PROPERTY, PROPERTY_TYPE: "socket.io:Server" }
-        gameService: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/services/GameService.ts:GameService" }
-      USES_TYPE:
-        - "socket.io:Server"
-        - "socket.io:Socket"
-        - "backend/src/services/GameService.ts:GameService"
-        - "backend/src/models/Game.ts:Game"
-        - "backend/src/models/Player.ts:Player"
-      INSTANTIATES: []
-      CALLS: [] # Constructor/methods call others
-
-    - ID: "backend/src/controllers/ChatController.ts:ChatController:constructor"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/ChatController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/ChatController.ts:ChatController"
-      USES_TYPE:
-        - "socket.io:Server"
-        - "backend/src/services/GameService.ts:GameService"
-      CALLS: []
-
-    - ID: "backend/src/controllers/ChatController.ts:ChatController:registerSocketHandlers"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/ChatController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/ChatController.ts:ChatController"
-      USES_TYPE: ["socket.io:Socket"]
-      CALLS:
-        - "built-in:console.log"
-        - "socket.io:Socket:on"
-        - "backend/src/controllers/ChatController.ts:ChatController:handleChatMessage" # Called from lambda
-        - "backend/src/controllers/ChatController.ts:ChatController:handleServerChatMessage" # Called from lambda
-      ACCESSES_MEMBER: ["socket.io:Socket:id"]
-
-    - ID: "backend/src/controllers/ChatController.ts:ChatController:handleChatMessage"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/ChatController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/ChatController.ts:ChatController"
-      USES_TYPE:
-        - "socket.io:Socket"
-        - "backend/src/services/GameService.ts:GameService"
-        - "backend/src/models/Game.ts:Game"
-        - "backend/src/models/Player.ts:Player"
-      CALLS:
-        - "built-in:console.log"
-        - "built-in:Array.isArray"
-        - "backend/src/services/GameService.ts:GameService:getGame"
-        - "socket.io:Server:to"
-        - "socket.io:Socket:emit"
-      ACCESSES_MEMBER:
-        - "socket.io:Socket:id"
-        - "backend/src/models/Game.ts:Game:players"
-        - "backend/src/models/Player.ts:Player:id"
-        - "backend/src/models/Player.ts:Player:isActive"
-
-    - ID: "backend/src/controllers/ChatController.ts:ChatController:handleServerChatMessage"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/ChatController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/ChatController.ts:ChatController"
-      USES_TYPE:
-        - "socket.io:Socket"
-        - "backend/src/services/GameService.ts:GameService"
-        - "backend/src/models/Game.ts:Game"
-        - "backend/src/models/Player.ts:Player"
-      CALLS:
-        - "built-in:console.log"
-        - "backend/src/services/GameService.ts:GameService:getGame"
-        - "socket.io:Server:to"
-        - "socket.io:Socket:emit"
-        - "socket.io:Socket:to" # For room broadcast
-      ACCESSES_MEMBER:
-        - "socket.io:Socket:id"
-        - "backend/src/models/Game.ts:Game:players"
-        - "backend/src/models/Player.ts:Player:id"
-        - "backend/src/models/Player.ts:Player:isActive"
-
-    - ID: "backend/src/controllers/ChatController.ts:ChatController:broadcastToPlayersInSameGame"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/ChatController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/ChatController.ts:ChatController"
-      USES_TYPE:
-        - "socket.io:Socket"
-        - "backend/src/services/GameService.ts:GameService"
-        - "backend/src/models/Game.ts:Game"
-        - "backend/src/models/Player.ts:Player"
-      CALLS:
-        - "built-in:console.log"
-        - "backend/src/services/GameService.ts:GameService:getAllGames"
-        - "socket.io:Server:to"
-        - "socket.io:Socket:emit"
-      ACCESSES_MEMBER:
-        - "socket.io:Socket:id"
-        - "backend/src/models/Game.ts:Game:players"
-        - "backend/src/models/Game.ts:Game:id"
-        - "backend/src/models/Player.ts:Player:id"
-        - "backend/src/models/Player.ts:Player:isActive"
-
-    - ID: "backend/src/controllers/GameController.ts:GameController"
-      TYPE: CLASS
-      FILE: "backend/src/controllers/GameController.ts"
-      LANGUAGE: TypeScript
-      MEMBERS:
-        gameService: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/services/GameService.ts:GameService" }
-        gameLogService: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/services/GameLogService.ts:GameLogService" }
-      USES_TYPE:
-        - "socket.io:Socket"
-        - "backend/src/services/GameService.ts:GameService"
-        - "backend/src/models/Player.ts:PlayerFactory"
-        - "backend/src/models/Player.ts:Player"
-        - "backend/src/services/GameLogService.ts:GameLogService"
-        - "backend/src/services/GameLogService.ts:GameMove"
-        - "backend/src/utils/yatzyMapping.ts:getSelectionLabel"
-        - "backend/src/models/Game.ts:Game"
-        - "backend/src/models/BoardCell.ts:BoardCell" # Used implicitly via Player/Game state
-      INSTANTIATES: [] # Instantiates Player via factory
-      CALLS: []
-
-    - ID: "backend/src/controllers/GameController.ts:GameController:constructor"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/GameController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
-      USES_TYPE:
-        - "backend/src/services/GameService.ts:GameService"
-        - "backend/src/services/GameLogService.ts:GameLogService"
-      CALLS: []
-
-    - ID: "backend/src/controllers/GameController.ts:GameController:registerSocketHandlers"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/GameController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
-      USES_TYPE: ["socket.io:Socket"]
-      CALLS:
-        - "socket.io:Socket:on"
-        - "backend/src/controllers/GameController.ts:GameController:handleRequestGame" # From lambda
-        - "backend/src/controllers/GameController.ts:GameController:handleRequestJoinGame" # From lambda
-        - "backend/src/controllers/GameController.ts:GameController:handleRemoveGame" # From lambda
-        - "backend/src/controllers/GameController.ts:GameController:handleSpectateGame" # From lambda
-        - "backend/src/controllers/GameController.ts:GameController:handleSendDices" # From lambda
-        - "backend/src/controllers/GameController.ts:GameController:handleSendSelection" # From lambda
-
-    - ID: "backend/src/controllers/GameController.ts:GameController:handleRequestGame"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/GameController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
-      USES_TYPE: ["socket.io:Socket", "backend/src/models/Player.ts:PlayerFactory", "backend/src/models/Player.ts:Player", "backend/src/services/GameService.ts:GameService"]
-      CALLS:
-        - "built-in:console.warn"
-        - "socket.io:Socket:emit"
-        - "backend/src/models/Player.ts:PlayerFactory:createPlayer"
-        - "backend/src/services/GameService.ts:GameService:createOrJoinGame"
-      ACCESSES_MEMBER: ["socket.io:Socket:id"]
-      INSTANTIATES: ["backend/src/models/Player.ts:Player"] # Via Factory
-
-    - ID: "backend/src/controllers/GameController.ts:GameController:handleRequestJoinGame"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/GameController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
-      USES_TYPE: ["socket.io:Socket", "backend/src/models/Game.ts:Game", "backend/src/models/Player.ts:PlayerFactory", "backend/src/models/Player.ts:Player", "backend/src/services/GameService.ts:GameService"]
-      CALLS:
-        - "backend/src/services/GameService.ts:GameService:getGame"
-        - "socket.io:Socket:emit"
-        - "backend/src/models/Game.ts:Game:isGameFull"
-        - "backend/src/models/Player.ts:PlayerFactory:createPlayer"
-        - "backend/src/services/GameService.ts:GameService:joinGame"
-        - "backend/src/services/GameService.ts:GameService:notifyGameUpdate"
-        - "backend/src/services/GameService.ts:GameService:broadcastGameList"
-        - "backend/src/models/Game.ts:Game:toJSON"
-        - "socket.io:Server:to" # Accessed via gameService['io']
-      ACCESSES_MEMBER:
-        - "backend/src/models/Game.ts:Game:gameStarted"
-        - "backend/src/models/Game.ts:Game:gameType"
-        - "backend/src/models/Game.ts:Game:players"
-        - "backend/src/models/Player.ts:Player:isActive"
-        - "backend/src/models/Player.ts:Player:id"
-        - "socket.io:Socket:id"
-      INSTANTIATES: ["backend/src/models/Player.ts:Player"] # Via Factory
-
-    - ID: "backend/src/controllers/GameController.ts:GameController:handleRemoveGame"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/GameController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
-      USES_TYPE: ["socket.io:Socket", "backend/src/models/Game.ts:Game", "backend/src/services/GameService.ts:GameService"]
-      CALLS:
-        - "built-in:console.log"
-        - "backend/src/services/GameService.ts:GameService:getGame"
-        - "backend/src/services/GameService.ts:GameService:removeGame"
-        - "backend/src/services/GameService.ts:GameService:broadcastGameList"
-      ACCESSES_MEMBER:
-        - "backend/src/models/Game.ts:Game:gameFinished"
-        - "backend/src/models/Game.ts:Game:id"
-        - "socket.io:Socket:id"
-
-    - ID: "backend/src/controllers/GameController.ts:GameController:handleSendDices"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/GameController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
-      USES_TYPE: ["socket.io:Socket", "backend/src/models/Game.ts:Game", "backend/src/services/GameService.ts:GameService"]
-      CALLS:
-        - "built-in:console.error"
-        - "backend/src/services/GameService.ts:GameService:getGame"
-        - "backend/src/models/Game.ts:Game:findPlayerIndex"
-        - "built-in:console.log"
-        - "backend/src/services/GameService.ts:GameService:processDiceRoll"
-      ACCESSES_MEMBER:
-        - "socket.io:Socket:id"
-        - "backend/src/models/Game.ts:Game:playerToMove"
-
-    - ID: "backend/src/controllers/GameController.ts:GameController:handleSendSelection"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/GameController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
-      USES_TYPE: ["socket.io:Socket", "backend/src/models/Game.ts:Game", "backend/src/services/GameService.ts:GameService"]
-      CALLS:
-        - "built-in:console.error"
-        - "backend/src/services/GameService.ts:GameService:getGame"
-        - "backend/src/models/Game.ts:Game:findPlayerIndex"
-        - "built-in:console.warn"
-        - "built-in:console.log"
-        - "backend/src/services/GameService.ts:GameService:processSelection"
-        - "backend/src/services/GameService.ts:GameService:forwardSelectionToPlayers"
-      ACCESSES_MEMBER:
-        - "socket.io:Socket:id"
-        - "backend/src/models/Game.ts:Game:playerToMove"
-
-    - ID: "backend/src/controllers/GameController.ts:GameController:handleSpectateGame"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/GameController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/GameController.ts:GameController"
-      USES_TYPE: ["socket.io:Socket", "backend/src/models/Game.ts:Game", "backend/src/services/GameService.ts:GameService", "backend/src/services/GameLogService.ts:GameLogService", "backend/src/services/GameLogService.ts:GameLog", "backend/src/services/GameLogService.ts:GameMove", "backend/src/models/Player.ts:Player", "backend/src/models/BoardCell.ts:BoardCell"]
-      CALLS:
-        - "built-in:console.error"
-        - "socket.io:Socket:emit"
-        - "built-in:console.log"
-        - "backend/src/services/GameService.ts:GameService:getGame"
-        - "backend/src/services/GameLogService.ts:GameLogService:getGameLog"
-        - "backend/src/models/Game.ts:Game:applySelection"
-        - "backend/src/models/Player.ts:Player:calculateScores"
-        - "backend/src/models/Game.ts:Game:toJSON"
-        - "backend/src/services/GameLogService.ts:GameLogService:logSpectate"
-        - "backend/src/services/GameService.ts:GameService:addSpectator"
-      ACCESSES_MEMBER:
-        - "socket.io:Socket:id"
-        - "backend/src/models/Game.ts:Game:id"
-        - "backend/src/models/Game.ts:Game:gameStarted"
-        - "backend/src/services/GameLogService.ts:GameLog:moves"
-        - "backend/src/services/GameLogService.ts:GameMove:action"
-        - "backend/src/services/GameLogService.ts:GameMove:playerIndex"
-        - "backend/src/services/GameLogService.ts:GameMove:selectionLabel"
-        - "backend/src/services/GameLogService.ts:GameMove:score"
-        - "backend/src/models/Game.ts:Game:players"
-        - "backend/src/models/Player.ts:Player:isActive"
-        - "backend/src/models/Player.ts:Player:cells"
-        - "backend/src/models/BoardCell.ts:BoardCell:label"
-        - "backend/src/models/BoardCell.ts:BoardCell:value"
-        - "backend/src/models/BoardCell.ts:BoardCell:fixed"
-        - "backend/src/models/Player.ts:Player:username"
-        - "backend/src/models/Player.ts:Player:score"
-
-    - ID: "backend/src/controllers/PlayerController.ts:PlayerController"
-      TYPE: CLASS
-      FILE: "backend/src/controllers/PlayerController.ts"
-      LANGUAGE: TypeScript
-      MEMBERS:
-        gameService: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/services/GameService.ts:GameService" }
-        gameLogService: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/services/GameLogService.ts:GameLogService" }
-        playerRegistry: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:Map" }
-      USES_TYPE:
-        - "socket.io:Socket"
-        - "backend/src/services/GameService.ts:GameService"
-        - "backend/src/models/Player.ts:PlayerFactory" # Imported but not directly used in shown methods
-        - "backend/src/services/GameLogService.ts:GameLogService"
-      INSTANTIATES: ["built-in:Map"]
-      CALLS: []
-
-    - ID: "backend/src/controllers/PlayerController.ts:PlayerController:constructor"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/PlayerController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/PlayerController.ts:PlayerController"
-      USES_TYPE:
-        - "backend/src/services/GameService.ts:GameService"
-        - "backend/src/services/GameLogService.ts:GameLogService"
-      CALLS: []
-
-    - ID: "backend/src/controllers/PlayerController.ts:PlayerController:registerSocketHandlers"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/PlayerController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/PlayerController.ts:PlayerController"
-      USES_TYPE: ["socket.io:Socket"]
-      CALLS:
-        - "socket.io:Socket:on"
-        - "built-in:console.log" # From lambda
-        - "built-in:console.error" # From lambda
-        - "backend/src/controllers/PlayerController.ts:PlayerController:handleGetId" # From lambda
-      ACCESSES_MEMBER: ["socket.io:Socket:id"]
-
-    - ID: "backend/src/controllers/PlayerController.ts:PlayerController:handleGetId"
-      TYPE: METHOD
-      FILE: "backend/src/controllers/PlayerController.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/controllers/PlayerController.ts:PlayerController"
-      USES_TYPE: ["socket.io:Socket"]
-      CALLS:
-        - "built-in:Map:has"
-        - "built-in:console.log"
-        - "socket.io:Socket:emit"
-        - "built-in:Map:set"
-      ACCESSES_MEMBER: ["socket.io:Socket:id"]
-
-    - ID: "backend/src/db.ts:initializeDbConnection"
-      TYPE: FUNCTION
-      FILE: "backend/src/db.ts"
-      LANGUAGE: TypeScript
-      USES_TYPE: ["mongodb:MongoClient", "mongodb:Db"]
-      CALLS:
-        - "built-in:console.log"
-        - "mongodb:MongoClient.connect"
-        - "mongodb:Db:collection"
-        - "mongodb:Collection:insertOne"
-        - "mongodb:Collection:countDocuments"
-        - "built-in:console.error"
-        - "backend/src/db.ts:getDbConnection" # Implicit via client.db
-      INSTANTIATES: ["built-in:Date"]
-
-    - ID: "backend/src/db.ts:getDbConnection"
-      TYPE: FUNCTION
-      FILE: "backend/src/db.ts"
-      LANGUAGE: TypeScript
-      USES_TYPE: ["mongodb:Db", "mongodb:MongoClient"]
-      CALLS:
-        - "built-in:console.error"
-        - "mongodb:MongoClient:db"
-
-    - ID: "backend/src/models/BoardCell.ts:BoardCell"
-      TYPE: CLASS
-      FILE: "backend/src/models/BoardCell.ts"
-      LANGUAGE: TypeScript
-      MEMBERS:
-        index: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:number" }
-        label: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:string" }
-        value: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:number" }
-        fixed: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:boolean" }
-        isNonScoreCell: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:boolean" }
-      USES_TYPE: []
-      INSTANTIATES: []
-      CALLS: [] # Constructor calls built-ins
-
-    - ID: "backend/src/models/BoardCell.ts:BoardCell:constructor"
-      TYPE: METHOD
-      FILE: "backend/src/models/BoardCell.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/BoardCell.ts:BoardCell"
-      CALLS: ["built-in:string:toLowerCase", "built-in:string:includes"]
-
-    - ID: "backend/src/models/BoardCell.ts:BoardCell:toJSON"
-      TYPE: METHOD
-      FILE: "backend/src/models/BoardCell.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/BoardCell.ts:BoardCell"
-      CALLS: []
-
-    - ID: "backend/src/models/BoardCell.ts:BoardCell:fromJson"
-      TYPE: METHOD # Static
-      FILE: "backend/src/models/BoardCell.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/BoardCell.ts:BoardCell" # Conceptually static member
-      USES_TYPE: ["backend/src/models/BoardCell.ts:BoardCell"]
-      INSTANTIATES: ["backend/src/models/BoardCell.ts:BoardCell"]
-      CALLS: []
-
-    - ID: "backend/src/models/Dice.ts:Dice"
-      TYPE: CLASS
-      FILE: "backend/src/models/Dice.ts"
-      LANGUAGE: TypeScript
-      MEMBERS:
-        values: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:number[]" }
-        diceCount: { TYPE: PROPERTY, PROPERTY_TYPE: "built-in:number" }
-      USES_TYPE: []
-      INSTANTIATES: ["built-in:Array"]
-      CALLS: [] # Constructor calls reset
-
-    - ID: "backend/src/models/Dice.ts:Dice:constructor"
-      TYPE: METHOD
-      FILE: "backend/src/models/Dice.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Dice.ts:Dice"
-      CALLS: ["backend/src/models/Dice.ts:Dice:reset"]
-
-    - ID: "backend/src/models/Dice.ts:Dice:roll"
-      TYPE: METHOD
-      FILE: "backend/src/models/Dice.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Dice.ts:Dice"
-      CALLS: ["built-in:Math.floor", "built-in:Math.random", "backend/src/models/Dice.ts:Dice:getValues"]
-
-    - ID: "backend/src/models/Dice.ts:Dice:rollSelected"
-      TYPE: METHOD
-      FILE: "backend/src/models/Dice.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Dice.ts:Dice"
-      CALLS: ["built-in:Math.floor", "built-in:Math.random", "backend/src/models/Dice.ts:Dice:getValues"]
-
-    - ID: "backend/src/models/Dice.ts:Dice:getValues"
-      TYPE: METHOD
-      FILE: "backend/src/models/Dice.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Dice.ts:Dice"
-      CALLS: []
-
-    - ID: "backend/src/models/Dice.ts:Dice:setValues"
-      TYPE: METHOD
-      FILE: "backend/src/models/Dice.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Dice.ts:Dice"
-      CALLS: []
-
-    - ID: "backend/src/models/Dice.ts:Dice:reset"
-      TYPE: METHOD
-      FILE: "backend/src/models/Dice.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Dice.ts:Dice"
-      CALLS: ["built-in:Array:fill"]
-      INSTANTIATES: ["built-in:Array"]
-
-    - ID: "backend/src/models/Game.ts:Game"
-      TYPE: CLASS
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBERS: # (Many members, simplified)
-        players: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/models/Player.ts:Player[]" }
-      USES_TYPE:
-        - "backend/src/models/Player.ts:Player"
-        - "backend/src/models/Player.ts:PlayerFactory"
-        - "backend/src/utils/yatzyMapping.ts:getSelectionIndex"
-        - "backend/src/models/BoardCell.ts:BoardCell" # Implicit via Player
-      INSTANTIATES: ["built-in:Array"] # In constructor and fromJSON
-      CALLS: [] # Methods call others
-
-    - ID: "backend/src/models/Game.ts:Game:constructor"
-      TYPE: METHOD
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Game.ts:Game"
-      USES_TYPE: ["backend/src/models/Player.ts:PlayerFactory", "backend/src/models/Player.ts:Player"]
-      CALLS: ["backend/src/models/Player.ts:PlayerFactory:createEmptyPlayer"]
-      INSTANTIATES: ["built-in:Array", "backend/src/models/Player.ts:Player"] # Via Factory
-
-    - ID: "backend/src/models/Game.ts:Game:addPlayer"
-      TYPE: METHOD
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Game.ts:Game"
-      USES_TYPE: ["backend/src/models/Player.ts:Player"]
-      CALLS: ["backend/src/models/Game.ts:Game:findEmptySlot"]
-
-    - ID: "backend/src/models/Game.ts:Game:removePlayer"
-      TYPE: METHOD
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Game.ts:Game"
-      USES_TYPE: ["backend/src/models/Player.ts:Player"]
-      CALLS:
-        - "backend/src/models/Game.ts:Game:findPlayerIndex"
-        - "built-in:console.log"
-        - "backend/src/models/Game.ts:Game:advanceToNextActivePlayer"
-        - "built-in:Array:filter"
-      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:isActive"]
-
-    - ID: "backend/src/models/Game.ts:Game:markPlayerAborted"
-      TYPE: METHOD
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Game.ts:Game"
-      USES_TYPE: ["backend/src/models/Player.ts:Player"]
-      CALLS:
-        - "backend/src/models/Game.ts:Game:findPlayerIndex"
-        - "backend/src/models/Game.ts:Game:advanceToNextActivePlayer"
-        - "built-in:Array:filter"
-      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:isActive"]
-
-    - ID: "backend/src/models/Game.ts:Game:findPlayerIndex"
-      TYPE: METHOD
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Game.ts:Game"
-      USES_TYPE: ["backend/src/models/Player.ts:Player"]
-      CALLS: ["built-in:Array:findIndex"]
-      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:id"]
-
-    - ID: "backend/src/models/Game.ts:Game:findEmptySlot"
-      TYPE: METHOD
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Game.ts:Game"
-      USES_TYPE: ["backend/src/models/Player.ts:Player"]
-      CALLS: ["built-in:Array:findIndex"]
-      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:id", "backend/src/models/Player.ts:Player:isActive"]
-
-    - ID: "backend/src/models/Game.ts:Game:isGameFull"
-      TYPE: METHOD
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Game.ts:Game"
-      CALLS: []
-
-    - ID: "backend/src/models/Game.ts:Game:getCurrentTurnNumber"
-      TYPE: METHOD
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Game.ts:Game"
-      CALLS: []
-
-    - ID: "backend/src/models/Game.ts:Game:incrementRollCount"
-      TYPE: METHOD
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Game.ts:Game"
-      CALLS: []
-
-    - ID: "backend/src/models/Game.ts:Game:advanceToNextActivePlayer"
-      TYPE: METHOD
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Game.ts:Game"
-      USES_TYPE: ["backend/src/models/Player.ts:Player"]
-      CALLS: ["built-in:console.log", "built-in:Array:filter"]
-      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:isActive"]
-
-    - ID: "backend/src/models/Game.ts:Game:applySelection"
-      TYPE: METHOD
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Game.ts:Game"
-      USES_TYPE: ["backend/src/utils/yatzyMapping.ts:getSelectionIndex", "backend/src/models/Player.ts:Player", "backend/src/models/BoardCell.ts:BoardCell"]
-      CALLS:
-        - "backend/src/utils/yatzyMapping.ts:getSelectionIndex"
-        - "built-in:console.log"
-        - "backend/src/models/Player.ts:Player:calculateScores"
-        - "built-in:console.warn"
-        - "built-in:console.error"
-      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:cells", "backend/src/models/BoardCell.ts:BoardCell:fixed", "backend/src/models/BoardCell.ts:BoardCell:value"]
-
-    - ID: "backend/src/models/Game.ts:Game:isGameFinished"
-      TYPE: METHOD
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Game.ts:Game"
-      USES_TYPE: ["backend/src/models/Player.ts:Player"]
-      CALLS: ["built-in:Array:filter", "built-in:Array:every", "backend/src/models/Player.ts:Player:hasCompletedGame"]
-      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:isActive"]
-
-    - ID: "backend/src/models/Game.ts:Game:setDiceValues"
-      TYPE: METHOD
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Game.ts:Game"
-      CALLS: ["built-in:console.error"]
-
-    - ID: "backend/src/models/Game.ts:Game:toJSON"
-      TYPE: METHOD
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Game.ts:Game"
-      USES_TYPE: ["backend/src/models/Player.ts:Player"]
-      CALLS: ["built-in:Array:map", "backend/src/models/Player.ts:Player:toJSON", "backend/src/models/Game.ts:Game:isGameFinished"]
-
-    - ID: "backend/src/models/Game.ts:Game:fromJSON"
-      TYPE: METHOD # Static
-      FILE: "backend/src/models/Game.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Game.ts:Game"
-      USES_TYPE: ["backend/src/models/Game.ts:Game", "backend/src/models/Player.ts:Player", "backend/src/models/Player.ts:PlayerFactory"]
-      INSTANTIATES: ["backend/src/models/Game.ts:Game", "built-in:Array", "backend/src/models/Player.ts:Player"] # Player via fromJSON or Factory
-      CALLS: ["backend/src/models/Player.ts:Player:fromJSON", "backend/src/models/Player.ts:PlayerFactory:createEmptyPlayer", "backend/src/models/Player.ts:PlayerFactory:createPlayer", "built-in:Array:filter"]
-      ACCESSES_MEMBER: ["backend/src/models/Player.ts:Player:id", "backend/src/models/Player.ts:Player:username", "backend/src/models/Player.ts:Player:isActive"]
-
-    - ID: "backend/src/models/Player.ts:Player"
-      TYPE: CLASS
-      FILE: "backend/src/models/Player.ts"
-      LANGUAGE: TypeScript
-      MEMBERS: # (Many members, simplified)
-        cells: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/models/BoardCell.ts:BoardCell[]" }
-      USES_TYPE:
-        - "backend/src/models/BoardCell.ts:BoardCell"
-        - "backend/src/utils/gameConfig.ts:GameConfig"
-        - "backend/src/utils/gameConfig.ts:getBaseGameType"
-      INSTANTIATES: [] # Cells instantiated in constructor or fromJson
-      CALLS: [] # Methods call others
-
-    - ID: "backend/src/models/Player.ts:Player:constructor"
-      TYPE: METHOD
-      FILE: "backend/src/models/Player.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Player.ts:Player"
-      USES_TYPE: ["backend/src/models/BoardCell.ts:BoardCell", "backend/src/utils/gameConfig.ts:GameConfig", "backend/src/utils/gameConfig.ts:getBaseGameType"]
-      CALLS: ["backend/src/utils/gameConfig.ts:getBaseGameType", "built-in:Array:map"]
-      INSTANTIATES: ["backend/src/models/BoardCell.ts:BoardCell"]
-
-    - ID: "backend/src/models/Player.ts:Player:calculateScores"
-      TYPE: METHOD
-      FILE: "backend/src/models/Player.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Player.ts:Player"
-      USES_TYPE: ["backend/src/utils/gameConfig.ts:GameConfig", "backend/src/utils/gameConfig.ts:getBaseGameType", "backend/src/models/BoardCell.ts:BoardCell"]
-      CALLS: ["backend/src/utils/gameConfig.ts:getBaseGameType", "built-in:Array:findIndex", "built-in:Array:slice", "built-in:Array:every", "built-in:console.log"]
-      ACCESSES_MEMBER: ["backend/src/models/BoardCell.ts:BoardCell:fixed", "backend/src/models/BoardCell.ts:BoardCell:value", "backend/src/models/BoardCell.ts:BoardCell:label"]
-
-    - ID: "backend/src/models/Player.ts:Player:hasCompletedGame"
-      TYPE: METHOD
-      FILE: "backend/src/models/Player.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Player.ts:Player"
-      USES_TYPE: ["backend/src/models/BoardCell.ts:BoardCell"]
-      CALLS: ["built-in:Array:every"]
-      ACCESSES_MEMBER: ["backend/src/models/BoardCell.ts:BoardCell:fixed", "backend/src/models/BoardCell.ts:BoardCell:isNonScoreCell"]
-
-    - ID: "backend/src/models/Player.ts:Player:getScore"
-      TYPE: METHOD
-      FILE: "backend/src/models/Player.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Player.ts:Player"
-      CALLS: []
-
-    - ID: "backend/src/models/Player.ts:Player:toJSON"
-      TYPE: METHOD
-      FILE: "backend/src/models/Player.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Player.ts:Player"
-      USES_TYPE: ["backend/src/models/BoardCell.ts:BoardCell"]
-      CALLS: ["built-in:Array:map", "backend/src/models/BoardCell.ts:BoardCell:toJSON"]
-
-    - ID: "backend/src/models/Player.ts:Player:fromJSON"
-      TYPE: METHOD # Static
-      FILE: "backend/src/models/Player.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Player.ts:Player"
-      USES_TYPE: ["backend/src/models/Player.ts:Player", "backend/src/utils/gameConfig.ts:GameConfig", "backend/src/utils/gameConfig.ts:getBaseGameType", "backend/src/models/BoardCell.ts:BoardCell"]
-      INSTANTIATES: ["backend/src/models/Player.ts:Player"]
-      CALLS: ["backend/src/utils/gameConfig.ts:getBaseGameType", "built-in:Array:map", "backend/src/models/BoardCell.ts:BoardCell:fromJson"]
-
-    - ID: "backend/src/models/Player.ts:PlayerFactory"
-      TYPE: CLASS
-      FILE: "backend/src/models/Player.ts"
-      LANGUAGE: TypeScript
-      USES_TYPE: ["backend/src/models/Player.ts:Player", "backend/src/utils/gameConfig.ts:getBaseGameType", "backend/src/utils/gameConfig.ts:GameConfig", "backend/src/models/BoardCell.ts:BoardCell"]
-      CALLS: [] # Static methods only
-
-    - ID: "backend/src/models/Player.ts:PlayerFactory:createPlayer"
-      TYPE: METHOD # Static
-      FILE: "backend/src/models/Player.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Player.ts:PlayerFactory"
-      USES_TYPE: ["backend/src/models/Player.ts:Player", "backend/src/utils/gameConfig.ts:getBaseGameType"]
-      INSTANTIATES: ["backend/src/models/Player.ts:Player"]
-      CALLS: ["backend/src/utils/gameConfig.ts:getBaseGameType", "built-in:Array:includes", "built-in:console.warn"]
-
-    - ID: "backend/src/models/Player.ts:PlayerFactory:createEmptyPlayer"
-      TYPE: METHOD # Static
-      FILE: "backend/src/models/Player.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/models/Player.ts:PlayerFactory"
-      USES_TYPE: ["backend/src/models/Player.ts:Player", "backend/src/utils/gameConfig.ts:getBaseGameType", "backend/src/utils/gameConfig.ts:GameConfig", "backend/src/models/BoardCell.ts:BoardCell"]
-      INSTANTIATES: ["backend/src/models/Player.ts:Player", "backend/src/models/BoardCell.ts:BoardCell"]
-      CALLS: ["backend/src/utils/gameConfig.ts:getBaseGameType", "built-in:Array:includes", "built-in:console.warn", "built-in:Array:map"]
-
-    - ID: "backend/src/routes/getLogRoute.ts:getLogRoute"
-      TYPE: VARIABLE # Route object definition
-      FILE: "backend/src/routes/getLogRoute.ts"
-      LANGUAGE: TypeScript
-      USES_TYPE: ["jsonwebtoken", "backend/src/db.ts:getDbConnection", "mongodb:Db", "mongodb:Collection", "mongodb:Cursor"]
-      CALLS:
-        - "built-in:console.log"
-        - "express:Response:status"
-        - "express:Response:json"
-        - "jsonwebtoken:verify"
-        - "backend/src/db.ts:getDbConnection"
-        - "mongodb:Db:collection"
-        - "mongodb:Collection:find"
-        - "mongodb:Cursor:toArray"
-
-    - ID: "backend/src/routes/getTopScores.ts:getTopScores"
-      TYPE: VARIABLE # Route object definition
-      FILE: "backend/src/routes/getTopScores.ts"
-      LANGUAGE: TypeScript
-      USES_TYPE: ["backend/src/db.ts:getDbConnection", "mongodb:Db", "mongodb:Collection"]
-      CALLS:
-        - "backend/src/db.ts:getDbConnection"
-        - "built-in:console.warn"
-        - "express:Response:status"
-        - "express:Response:json"
-        - "built-in:console.log"
-        - "mongodb:Db:collection"
-        - "mongodb:Collection:find"
-        - "mongodb:Collection:sort"
-        - "mongodb:Collection:toArray"
-        - "express:Response:sendStatus"
-
-    - ID: "backend/src/routes/index.ts:routes"
-      TYPE: FUNCTION
-      FILE: "backend/src/routes/index.ts"
-      LANGUAGE: TypeScript
-      IMPORTS: # Imports route objects
-        - "backend/src/routes/logInRoute.ts"
-        - "backend/src/routes/logRoute.ts"
-        - "backend/src/routes/getLogRoute.ts"
-        - "backend/src/routes/signUpRoute.ts"
-        - "backend/src/routes/getTopScores.ts"
-        - "backend/src/routes/updateTopScore.ts"
-        - "backend/src/routes/spectateGameRoute.ts" # Although not explicitly in the return array, it's imported in server.ts
-      CALLS: [] # Returns an array of route objects
-
-    - ID: "backend/src/routes/logInRoute.ts:logInRoute"
-      TYPE: VARIABLE # Route object definition
-      FILE: "backend/src/routes/logInRoute.ts"
-      LANGUAGE: TypeScript
-      USES_TYPE: ["bcrypt", "jsonwebtoken", "backend/src/db.ts:getDbConnection", "mongodb:Db", "mongodb:Collection"]
-      CALLS:
-        - "backend/src/db.ts:getDbConnection"
-        - "mongodb:Db:collection"
-        - "mongodb:Collection:findOne"
-        - "express:Response:sendStatus"
-        - "bcrypt:compare"
-        - "jsonwebtoken:sign"
-        - "express:Response:status"
-        - "express:Response:json"
-
-    - ID: "backend/src/routes/logRoute.ts:logRoute"
-      TYPE: VARIABLE # Route object definition
-      FILE: "backend/src/routes/logRoute.ts"
-      LANGUAGE: TypeScript
-      USES_TYPE: ["jsonwebtoken", "backend/src/db.ts:getDbConnection", "mongodb:Db", "mongodb:Collection"]
-      CALLS:
-        - "built-in:console.log"
-        - "express:Response:status"
-        - "express:Response:json"
-        - "jsonwebtoken:verify"
-        - "backend/src/db.ts:getDbConnection"
-        - "mongodb:Db:collection"
-        - "mongodb:Collection:findOneAndUpdate"
-
-    - ID: "backend/src/routes/signUpRoute.ts:signUpRoute"
-      TYPE: VARIABLE # Route object definition
-      FILE: "backend/src/routes/signUpRoute.ts"
-      LANGUAGE: TypeScript
-      USES_TYPE: ["bcrypt", "jsonwebtoken", "backend/src/db.ts:getDbConnection", "mongodb:Db", "mongodb:Collection"]
-      CALLS:
-        - "backend/src/db.ts:getDbConnection"
-        - "mongodb:Db:collection"
-        - "mongodb:Collection:findOne"
-        - "built-in:console.log"
-        - "express:Response:sendStatus"
-        - "bcrypt:hash"
-        - "mongodb:Collection:insertOne"
-        - "jsonwebtoken:sign"
-        - "express:Response:status"
-        - "express:Response:send"
-        - "express:Response:json"
-
-    - ID: "backend/src/routes/spectateGameRoute.ts:initializeSpectateRoute"
-      TYPE: FUNCTION
-      FILE: "backend/src/routes/spectateGameRoute.ts"
-      LANGUAGE: TypeScript
-      USES_TYPE: ["backend/src/services/GameService.ts:GameService", "backend/src/services/GameLogService.ts:GameLogService"]
-      CALLS: []
-
-    - ID: "backend/src/routes/spectateGameRoute.ts:spectateGameRoute"
-      TYPE: VARIABLE # Route object definition
-      FILE: "backend/src/routes/spectateGameRoute.ts"
-      LANGUAGE: TypeScript
-      USES_TYPE: ["express:Request", "express:Response", "backend/src/services/GameService.ts:GameService", "backend/src/services/GameLogService.ts:GameLogService", "backend/src/models/Game.ts:Game", "backend/src/models/Player.ts:Player", "backend/src/models/BoardCell.ts:BoardCell", "backend/src/services/GameLogService.ts:GameLog", "backend/src/services/GameLogService.ts:GameMove"]
-      CALLS: # Calls are made via gameServiceInstance and gameLogServiceInstance
-        - "built-in:console.log"
-        - "built-in:parseInt"
-        - "built-in:isNaN"
-        - "built-in:console.error"
-        - "express:Response:status"
-        - "express:Response:json"
-        - "backend/src/services/GameService.ts:GameService:getGame" # Via instance
-        - "backend/src/models/Player.ts:Player:calculateScores" # Via instance
-        - "backend/src/models/Game.ts:Game:toJSON" # Via instance
-        - "backend/src/services/GameLogService.ts:GameLogService:getGameLog" # Via instance
-
-    - ID: "backend/src/routes/updateTopScore.ts:updateTopScore"
-      TYPE: VARIABLE # Route object definition
-      FILE: "backend/src/routes/updateTopScore.ts"
-      LANGUAGE: TypeScript
-      USES_TYPE: ["backend/src/db.ts:getDbConnection", "mongodb:Db", "mongodb:Collection"]
-      CALLS:
-        - "backend/src/db.ts:getDbConnection"
-        - "built-in:console.warn"
-        - "express:Response:status"
-        - "express:Response:json"
-        - "mongodb:Db:collection"
-        - "mongodb:Collection:insertOne"
-        - "mongodb:Collection:find"
-        - "mongodb:Collection:sort"
-        - "mongodb:Collection:toArray"
-        - "built-in:console.log"
-        - "express:Response:sendStatus"
-
-    - ID: "backend/src/server.ts:server" # Represents the main server setup script execution
-      TYPE: SCRIPT
-      FILE: "backend/src/server.ts"
-      LANGUAGE: TypeScript
-      IMPORTS:
-        - "express"
-        - "backend/src/routes/index.ts"
-        - "backend/src/db.ts"
-        - "path"
-        - "cors"
-        - "socket.io"
-        - "http"
-        - "backend/src/services/GameService.ts"
-        - "backend/src/services/GameLogService.ts"
-        - "backend/src/services/TopScoreService.ts"
-        - "backend/src/controllers/GameController.ts"
-        - "backend/src/controllers/PlayerController.ts"
-        - "backend/src/controllers/ChatController.ts"
-        - "backend/src/routes/spectateGameRoute.ts"
-      INSTANTIATES:
-        - "express:Application"
-        - "http:Server"
-        - "socket.io:Server"
-        - "backend/src/services/GameLogService.ts:GameLogService"
-        - "backend/src/services/TopScoreService.ts:TopScoreService"
-        - "backend/src/services/GameService.ts:GameService"
-        - "backend/src/controllers/GameController.ts:GameController"
-        - "backend/src/controllers/PlayerController.ts:PlayerController"
-        - "backend/src/controllers/ChatController.ts:ChatController"
-      USES_TYPE: # Many types used through instances
-        - "backend/src/routes/index.ts:routes"
-        - "backend/src/routes/spectateGameRoute.ts:spectateGameRoute"
-      CALLS:
-        - "express:Application:use"
-        - "http:createServer"
-        - "backend/src/routes/index.ts:routes"
-        - "express:Application:get" # etc. for routes
-        - "backend/src/routes/spectateGameRoute.ts:initializeSpectateRoute"
-        - "socket.io:Server:use"
-        - "socket.io:Server:on"
-        - "socket.io:Socket:emit"
-        - "socket.io:Socket:on"
-        - "backend/src/controllers/GameController.ts:GameController:registerSocketHandlers" # via io.on('connect')
-        - "backend/src/controllers/PlayerController.ts:PlayerController:registerSocketHandlers" # via io.on('connect')
-        - "backend/src/controllers/ChatController.ts:ChatController:registerSocketHandlers" # via io.on('connect')
-        - "backend/src/services/TopScoreService.ts:TopScoreService:getTopScores" # via io.on('connect') lambda
-        - "backend/src/services/GameService.ts:GameService:handlePlayerDisconnect" # via io.on('connect') lambda
-        - "express:Application:get"
-        - "express:Response:sendFile"
-        - "backend/src/db.ts:initializeDbConnection"
-        - "backend/src/services/GameLogService.ts:GameLogService:getCollection"
-        - "backend/src/services/GameLogService.ts:GameLogService:getDatabaseName"
-        - "backend/src/services/GameLogService.ts:GameLogService:getCollectionName"
-        - "http:Server:listen"
-        - "built-in:console.log"
-        - "built-in:console.error"
-        - "built-in:process.exit"
-
-    - ID: "backend/src/services/GameLogService.ts:GameMove"
-      TYPE: INTERFACE
-      FILE: "backend/src/services/GameLogService.ts"
-      LANGUAGE: TypeScript
-
-    - ID: "backend/src/services/GameLogService.ts:GameLog"
-      TYPE: INTERFACE
-      FILE: "backend/src/services/GameLogService.ts"
-      LANGUAGE: TypeScript
-      USES_TYPE: ["backend/src/services/GameLogService.ts:GameMove"]
-
-    - ID: "backend/src/services/GameLogService.ts:GameLogService"
-      TYPE: CLASS
-      FILE: "backend/src/services/GameLogService.ts"
-      LANGUAGE: TypeScript
-      USES_TYPE: ["mongodb:Collection", "backend/src/db.ts:getDbConnection", "backend/src/models/Game.ts:Game", "backend/src/services/GameLogService.ts:GameMove", "backend/src/services/GameLogService.ts:GameLog", "backend/src/models/Player.ts:Player"]
-      CALLS: [] # Methods call DB operations
-
-    - ID: "backend/src/services/GameLogService.ts:GameLogService:getCollection"
-      TYPE: METHOD
-      FILE: "backend/src/services/GameLogService.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/services/GameLogService.ts:GameLogService"
-      USES_TYPE: ["mongodb:Collection", "backend/src/services/GameLogService.ts:GameLog", "backend/src/db.ts:getDbConnection", "mongodb:Db"]
-      CALLS: ["backend/src/db.ts:getDbConnection", "mongodb:Db:collection"]
-
-    - ID: "backend/src/services/GameLogService.ts:GameLogService:logGameStart"
-      TYPE: METHOD
-      FILE: "backend/src/services/GameLogService.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/services/GameLogService.ts:GameLogService"
-      USES_TYPE: ["backend/src/models/Game.ts:Game", "backend/src/services/GameLogService.ts:GameLog", "backend/src/models/Player.ts:Player"]
-      CALLS:
-        - "built-in:console.log"
-        - "backend/src/services/GameLogService.ts:GameLogService:getCollection"
-        - "built-in:Array:map"
-        - "mongodb:Collection:replaceOne"
-        - "built-in:console.error"
-      ACCESSES_MEMBER: ["backend/src/models/Game.ts:Game:id", "backend/src/models/Game.ts:Game:gameType", "backend/src/models/Game.ts:Game:maxPlayers", "backend/src/models/Game.ts:Game:players", "backend/src/models/Player.ts:Player:username", "backend/src/models/Player.ts:Player:id"]
-      INSTANTIATES: ["built-in:Date"]
-
-    - ID: "backend/src/services/GameLogService.ts:GameLogService:logMove"
-      TYPE: METHOD
-      FILE: "backend/src/services/GameLogService.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/services/GameLogService.ts:GameLogService"
-      USES_TYPE: ["backend/src/services/GameLogService.ts:GameMove", "mongodb:Collection", "backend/src/services/GameLogService.ts:GameLog", "backend/src/db.ts:getDbConnection", "mongodb:Db"]
-      CALLS:
-        - "built-in:console.log"
-        - "backend/src/services/GameLogService.ts:GameLogService:getCollection"
-        - "backend/src/db.ts:getDbConnection" # Direct check
-        - "mongodb:Collection:findOne"
-        - "mongodb:Collection:insertOne"
-        - "mongodb:Collection:updateOne"
-        - "built-in:console.error"
-      INSTANTIATES: ["built-in:Date"] # For placeholder
-
-    - ID: "backend/src/services/GameLogService.ts:GameLogService:logGameEnd"
-      TYPE: METHOD
-      FILE: "backend/src/services/GameLogService.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/services/GameLogService.ts:GameLogService"
-      USES_TYPE: ["mongodb:Collection", "backend/src/services/GameLogService.ts:GameLog"]
-      CALLS:
-        - "built-in:console.log"
-        - "backend/src/services/GameLogService.ts:GameLogService:getCollection"
-        - "mongodb:Collection:updateOne"
-        - "built-in:console.error"
-      INSTANTIATES: ["built-in:Date"]
-
-    - ID: "backend/src/services/GameLogService.ts:GameLogService:getGameLog"
-      TYPE: METHOD
-      FILE: "backend/src/services/GameLogService.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/services/GameLogService.ts:GameLogService"
-      USES_TYPE: ["mongodb:Collection", "backend/src/services/GameLogService.ts:GameLog", "backend/src/services/GameLogService.ts:GameMove"]
-      CALLS:
-        - "built-in:console.log"
-        - "backend/src/services/GameLogService.ts:GameLogService:getCollection"
-        - "mongodb:Collection:findOne"
-        - "built-in:console.error"
-      ACCESSES_MEMBER: ["backend/src/services/GameLogService.ts:GameLog:moves", "backend/src/services/GameLogService.ts:GameMove:action", "backend/src/services/GameLogService.ts:GameMove:playerIndex", "backend/src/services/GameLogService.ts:GameMove:selectionLabel", "backend/src/services/GameLogService.ts:GameMove:score"]
-
-    - ID: "backend/src/services/GameLogService.ts:GameLogService:logSpectate"
-      TYPE: METHOD
-      FILE: "backend/src/services/GameLogService.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/services/GameLogService.ts:GameLogService"
-      USES_TYPE: ["backend/src/services/GameLogService.ts:GameMove", "backend/src/services/GameLogService.ts:GameLog", "mongodb:Collection"]
-      CALLS:
-        - "built-in:console.log"
-        - "backend/src/services/GameLogService.ts:GameLogService:getGameLog"
-        - "built-in:console.error"
-        - "backend/src/services/GameLogService.ts:GameLogService:getCollection"
-        - "mongodb:Collection:updateOne"
-      ACCESSES_MEMBER: ["backend/src/services/GameLogService.ts:GameLog:moves"]
-      INSTANTIATES: ["built-in:Date"]
-
-    - ID: "backend/src/services/GameService.ts:GameService"
-      TYPE: CLASS
-      FILE: "backend/src/services/GameService.ts"
-      LANGUAGE: TypeScript
-      MEMBERS: # Simplified
-        games: { TYPE: PROPERTY, PROPERTY_TYPE: "Map<number, Game>" }
-        spectators: { TYPE: PROPERTY, PROPERTY_TYPE: "Map<number, Set<string>>" }
-        io: { TYPE: PROPERTY, PROPERTY_TYPE: "socket.io:Server" }
-        gameLogService: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/services/GameLogService.ts:GameLogService" }
-        topScoreService: { TYPE: PROPERTY, PROPERTY_TYPE: "backend/src/services/TopScoreService.ts:TopScoreService" }
-      USES_TYPE:
-        - "backend/src/models/Game.ts:Game"
-        - "backend/src/models/Player.ts:Player"
-        - "backend/src/models/Player.ts:PlayerFactory"
-        - "socket.io:Server"
-        - "socket.io:Socket"
-        - "backend/src/services/GameLogService.ts:GameLogService"
-        - "backend/src/services/GameLogService.ts:GameMove"
-        - "backend/src/services/TopScoreService.ts:TopScoreService"
-        - "backend/src/utils/yatzyMapping.ts:getSelectionLabel"
-      INSTANTIATES: ["built-in:Map", "built-in:Set"] # In members
-      CALLS: [] # Methods call others
-
-    - ID: "backend/src/services/GameService.ts:GameService:constructor"
-      TYPE: METHOD
-      FILE: "backend/src/services/GameService.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/services/GameService.ts:GameService"
-      USES_TYPE: ["socket.io:Server", "backend/src/services/GameLogService.ts:GameLogService", "backend/src/services/TopScoreService.ts:TopScoreService"]
-
-    # ... (Skipping detailed breakdown of every method in GameService, TopScoreService for brevity, highlighting key interactions)
-
-    - ID: "backend/src/services/GameService.ts:GameService:createOrJoinGame"
-      TYPE: METHOD
-      FILE: "backend/src/services/GameService.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/services/GameService.ts:GameService"
-      USES_TYPE: ["backend/src/models/Game.ts:Game", "backend/src/models/Player.ts:Player", "backend/src/services/GameLogService.ts:GameLogService", "socket.io:Server"]
-      CALLS:
-        - "backend/src/services/GameService.ts:GameService:handlePlayerStartingNewGame"
-        - "backend/src/services/GameService.ts:GameService:findAvailableGame"
-        - "backend/src/services/GameService.ts:GameService:createGame"
-        - "backend/src/models/Game.ts:Game:addPlayer"
-        - "backend/src/services/GameLogService.ts:GameLogService:logGameStart"
-        - "backend/src/models/Game.ts:Game:isGameFull"
-        - "backend/src/models/Game.ts:Game:toJSON"
-        - "socket.io:Server:to"
-        - "socket.io:Server:emit"
-        - "backend/src/services/GameService.ts:GameService:notifyGameUpdate"
-        - "backend/src/services/GameService.ts:GameService:broadcastGameList"
-      ACCESSES_MEMBER: ["backend/src/models/Game.ts:Game:gameStarted", "backend/src/models/Game.ts:Game:players", "backend/src/models/Player.ts:Player:isActive", "backend/src/models/Player.ts:Player:id"]
-
-    - ID: "backend/src/services/GameService.ts:GameService:processSelection"
-      TYPE: METHOD
-      FILE: "backend/src/services/GameService.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/services/GameService.ts:GameService"
-      USES_TYPE: ["backend/src/models/Game.ts:Game", "backend/src/models/Player.ts:Player", "backend/src/services/GameLogService.ts:GameLogService", "backend/src/services/GameLogService.ts:GameMove", "backend/src/services/GameLogService.ts:GameLog", "backend/src/models/BoardCell.ts:BoardCell", "socket.io:Server"]
-      CALLS:
-        - "backend/src/services/GameService.ts:GameService:getGame"
-        - "backend/src/models/Game.ts:Game:findPlayerIndex"
-        - "backend/src/services/GameLogService.ts:GameLogService:logMove"
-        - "backend/src/services/GameLogService.ts:GameLogService:getGameLog"
-        - "backend/src/models/Game.ts:Game:applySelection"
-        - "backend/src/models/Game.ts:Game:isGameFinished"
-        - "backend/src/services/GameService.ts:GameService:notifyGameUpdate"
-        - "backend/src/services/GameService.ts:GameService:handleGameFinished"
-        - "backend/src/models/Game.ts:Game:setDiceValues"
-        - "backend/src/models/Game.ts:Game:advanceToNextActivePlayer"
-        - "backend/src/models/Game.ts:Game:toJSON"
-        - "socket.io:Server:to"
-        - "socket.io:Server:emit"
-      ACCESSES_MEMBER: ["backend/src/models/Game.ts:Game:playerToMove", "backend/src/models/Game.ts:Game:diceValues", "backend/src/models/Player.ts:Player:cells", "backend/src/models/BoardCell.ts:BoardCell:label", "backend/src/models/BoardCell.ts:BoardCell:value", "backend/src/models/BoardCell.ts:BoardCell:fixed"]
-      INSTANTIATES: ["built-in:Date"]
-
-    - ID: "backend/src/services/GameService.ts:GameService:handleGameFinished"
-      TYPE: METHOD
-      FILE: "backend/src/services/GameService.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/services/GameService.ts:GameService"
-      USES_TYPE: ["backend/src/models/Game.ts:Game", "backend/src/models/Player.ts:Player", "backend/src/services/GameLogService.ts:GameLogService", "backend/src/services/TopScoreService.ts:TopScoreService"]
-      CALLS:
-        - "backend/src/models/Player.ts:Player:getScore"
-        - "backend/src/services/GameLogService.ts:GameLogService:logGameEnd"
-        - "backend/src/services/TopScoreService.ts:TopScoreService:updateTopScore"
-        - "built-in:Promise.all"
-        - "backend/src/services/GameService.ts:GameService:notifyGameFinished"
-        - "built-in:Map:delete"
-        - "built-in:Map:has"
-        - "backend/src/services/GameService.ts:GameService:broadcastGameList"
-      ACCESSES_MEMBER: ["backend/src/models/Game.ts:Game:players", "backend/src/models/Player.ts:Player:id", "backend/src/models/Player.ts:Player:username", "backend/src/models/Game.ts:Game:id", "backend/src/models/Game.ts:Game:gameType"]
-
-    - ID: "backend/src/services/TopScoreService.ts:TopScoreService"
-      TYPE: CLASS
-      FILE: "backend/src/services/TopScoreService.ts"
-      LANGUAGE: TypeScript
-      MEMBERS:
-        io: { TYPE: PROPERTY, PROPERTY_TYPE: "socket.io:Server" }
-      USES_TYPE: ["socket.io:Server", "mongodb:Db", "mongodb:Collection", "backend/src/db.ts:getDbConnection", "backend/src/services/TopScoreService.ts:TopScoreEntry"]
-      CALLS: []
-
-    - ID: "backend/src/services/TopScoreService.ts:TopScoreService:broadcastTopScores"
-      TYPE: METHOD
-      FILE: "backend/src/services/TopScoreService.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/services/TopScoreService.ts:TopScoreService"
-      USES_TYPE: ["socket.io:Server"]
-      CALLS:
-        - "backend/src/services/TopScoreService.ts:TopScoreService:getAllTopScores"
-        - "socket.io:Server:emit"
-
-    - ID: "backend/src/services/TopScoreService.ts:TopScoreService:updateTopScore"
-      TYPE: METHOD
-      FILE: "backend/src/services/TopScoreService.ts"
-      LANGUAGE: TypeScript
-      MEMBER_OF: "backend/src/services/TopScoreService.ts:TopScoreService"
-      USES_TYPE: ["mongodb:Collection"]
-      CALLS:
-        - "backend/src/services/TopScoreService.ts:TopScoreService:getCollection"
-        - "mongodb:Collection:insertOne"
-
-    # --- Frontend (Dart) ---
-    - ID: "lib/application/application.dart:Application"
-      TYPE: CLASS
-      FILE: "lib/application/application.dart"
-      LANGUAGE: Dart
-      WITH_MIXIN: ["lib/application/languages_application.dart:LanguagesApplication"]
-      MEMBERS: # Simplified
-        gameDices: { TYPE: PROPERTY, PROPERTY_TYPE: "lib/dices/dices.dart:Dices" }
-        inputItems: { TYPE: PROPERTY, PROPERTY_TYPE: "lib/input_items/input_items.dart:InputItems" }
-        socketService: { TYPE: PROPERTY, PROPERTY_TYPE: "lib/services/socket_service.dart:SocketService" }
-        animation: { TYPE: PROPERTY, PROPERTY_TYPE: "lib/application/animations_application.dart:AnimationsApplication" }
-      USES_TYPE:
-        - "package:flutter/material.dart:BuildContext"
-        - "package:flutter_bloc/flutter_bloc.dart"
-        - "lib/dices/dices.dart:Dices"
-        - "lib/input_items/input_items.dart:InputItems"
-        - "lib/services/socket_service.dart:SocketService"
-        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
-        - "lib/application/animations_application.dart:AnimationsApplication"
-        - "lib/application/languages_application.dart:LanguagesApplication"
-        - "lib/utils/yatzy_mapping_client.dart:getSelectionLabel"
-      INSTANTIATES: ["lib/application/animations_application.dart:AnimationsApplication"] # Possibly others in setup
-      CALLS: # Methods call others
-
-    - ID: "lib/application/application.dart:Application:constructor"
-      TYPE: METHOD
-      FILE: "lib/application/application.dart"
-      LANGUAGE: Dart
-      MEMBER_OF: "lib/application/application.dart:Application"
-      USES_TYPE: ["package:flutter/material.dart:BuildContext", "lib/dices/dices.dart:Dices", "lib/input_items/input_items.dart:InputItems"]
-      CALLS:
-        - "lib/dices/dices.dart:Dices:setCallbacks"
-        - "lib/application/languages_application.dart:LanguagesApplication:languagesSetup" # Via mixin
-        - "lib/application/application.dart:Application:getChosenLanguage"
-        - "lib/application/application.dart:Application:getStandardLanguage"
-
-    - ID: "lib/application/application.dart:Application:setSocketService"
-      TYPE: METHOD
-      FILE: "lib/application/application.dart"
-      LANGUAGE: Dart
-      MEMBER_OF: "lib/application/application.dart:Application"
-      USES_TYPE: ["lib/services/socket_service.dart:SocketService"]
-      CALLS: ["built-in:print"]
-
-    - ID: "lib/application/application.dart:Application:setup"
-      TYPE: METHOD
-      FILE: "lib/application/application.dart"
-      LANGUAGE: Dart
-      MEMBER_OF: "lib/application/application.dart:Application"
-      USES_TYPE:
-        - "lib/top_score/top_score.dart:TopScore"
-        - "lib/dices/dices.dart:Dices"
-        - "lib/dices/unity_communication.dart:UnityCommunication" # Extension methods
-        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
-        - "lib/application/application_functions_internal_calc_dice_values.dart" # Extension methods
-      CALLS:
-        - "lib/top_score/top_score.dart:TopScore:loadTopScoreFromServer"
-        - "lib/dices/dices.dart:Dices:initDices"
-        - "lib/application/application_functions_internal_calc_dice_values.dart:calcOnes" # etc.
-        - "lib/application/application.dart:Application:setAppText"
-        - "lib/application/application_functions_internal.dart:ApplicationFunctionsInternal:clearFocus"
-        - "lib/dices/unity_communication.dart:UnityCommunication:sendResetToUnity"
-        - "lib/dices/unity_communication.dart:UnityCommunication:sendStartToUnity"
-      INSTANTIATES: ["built-in:List", "package:flutter/material.dart:GlobalKey"]
-
-    - ID: "lib/application/application_functions_internal.dart:ApplicationFunctionsInternal:cellClick"
-      TYPE: METHOD # Extension Method
-      FILE: "lib/application/application_functions_internal.dart"
-      LANGUAGE: Dart
-      MEMBER_OF: "lib/application/application.dart:Application"
-      USES_TYPE:
-        - "lib/utils/yatzy_mapping_client.dart:getSelectionLabel"
-        - "lib/services/socket_service.dart:SocketService"
-        - "lib/dices/dices.dart:Dices"
-        - "lib/dices/unity_communication.dart:UnityCommunication"
-        - "lib/application/animations_application.dart:AnimationsApplication"
-        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
-      CALLS:
-        - "lib/utils/yatzy_mapping_client.dart:getSelectionLabel"
-        - "built-in:print"
-        - "lib/services/socket_service.dart:SocketService:sendToClients"
-        - "lib/application/application_functions_internal.dart:ApplicationFunctionsInternal:applyLocalSelection"
-      ACCESSES_MEMBER:
-        - "lib/application/application.dart:Application:playerToMove"
-        - "lib/application/application.dart:Application:myPlayerId"
-        - "lib/application/application.dart:Application:fixedCell"
-        - "lib/application/application.dart:Application:cellValue"
-        - "lib/application/application.dart:Application:gameDices"
-        - "lib/dices/dices.dart:Dices:diceValue"
-        - "lib/application/application.dart:Application:gameId"
-        - "lib/application/application.dart:Application:socketService"
-        - "lib/services/socket_service.dart:SocketService:isConnected"
-
-    - ID: "lib/application/communication_application.dart:CommunicationApplication:callbackOnServerMsg"
-      TYPE: METHOD # Extension Method
-      FILE: "lib/application/communication_application.dart"
-      LANGUAGE: Dart
-      MEMBER_OF: "lib/application/application.dart:Application"
-      USES_TYPE:
-        - "lib/router/router.gr.dart:SettingsView"
-        - "lib/router/router.gr.dart:ApplicationView"
-        - "lib/router/router.dart:AppRouter"
-        - "lib/injection.dart:getIt"
-        - "lib/services/service_provider.dart:ServiceProvider"
-        - "lib/services/socket_service.dart:SocketService"
-        - "lib/shared_preferences.dart:SharedPrefProvider"
-        - "lib/application/application.dart:Application"
-        - "lib/top_score/top_score.dart:TopScore"
-        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
-        - "package:flutter/material.dart:Route"
-      CALLS:
-        - "built-in:print"
-        - "lib/injection.dart:getIt"
-        - "lib/services/service_provider.dart:ServiceProvider.of"
-        - "lib/shared_preferences.dart:SharedPrefProvider.fetchPrefObject"
-        - "lib/application/application.dart:Application:setup"
-        - "lib/router/router.dart:AppRouter:pushAndPopUntil" # Via getIt
-        - "lib/application/communication_application.dart:CommunicationApplication:_checkIfPlayerAborted"
-        - "lib/application/communication_application.dart:CommunicationApplication:_processGameUpdate"
-        - "lib/top_score/top_score.dart:TopScore:updateScoresFromData"
-        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit:setState" # Via context.read
-        - "lib/services/socket_service.dart:SocketService:sendToServer"
-      ACCESSES_MEMBER:
-        - "lib/services/socket_service.dart:SocketService:socketId"
-        - "lib/application/application.dart:Application:gameId"
-        - "lib/application/application.dart:Application:gameStarted"
-        - "lib/application/application.dart:Application:isSpectating"
-
-    - ID: "lib/application/communication_application.dart:CommunicationApplication:callbackOnClientMsg"
-      TYPE: METHOD # Extension Method
-      FILE: "lib/application/communication_application.dart"
-      LANGUAGE: Dart
-      MEMBER_OF: "lib/application/application.dart:Application"
-      USES_TYPE:
-        - "lib/dices/dices.dart:Dices"
-        - "lib/dices/unity_communication.dart:UnityCommunication"
-        - "lib/application/application_functions_internal.dart:ApplicationFunctionsInternal"
-        - "lib/router/router.gr.dart:SettingsView"
-        - "lib/injection.dart:getIt"
-        - "lib/router/router.dart:AppRouter"
-      CALLS:
-        - "built-in:print"
-        - "lib/application/communication_application.dart:CommunicationApplication:resetDices"
-        - "lib/application/application.dart:Application:updateDiceValues"
-        - "lib/dices/dices.dart:Dices:updateDiceImages"
-        - "lib/dices/unity_communication.dart:UnityCommunication:sendDicesToUnity"
-        - "lib/application/communication_application.dart:CommunicationApplication:updateChat"
-        - "lib/application/application_functions_internal.dart:ApplicationFunctionsInternal:applyLocalSelection"
-        - "lib/injection.dart:getIt"
-        - "lib/router/router.dart:AppRouter:push" # Via getIt
-      ACCESSES_MEMBER:
-        - "lib/application/application.dart:Application:playerActive"
-        - "lib/application/application.dart:Application:myPlayerId"
-        - "lib/dices/dices.dart:Dices:diceValue"
-        - "lib/application/application.dart:Application:appColors"
-        - "lib/application/application.dart:Application:fixedCell"
-        - "lib/application/application.dart:Application:totalFields"
-        - "lib/application/application.dart:Application:appText"
-        - "lib/application/application.dart:Application:cellValue"
-        - "lib/application/application.dart:Application:nrPlayers"
-        - "lib/dices/dices.dart:Dices:nrRolls"
-        - "lib/dices/dices.dart:Dices:unityDices"
-
-    - ID: "lib/services/socket_service.dart:SocketService"
-      TYPE: CLASS
-      FILE: "lib/services/socket_service.dart"
-      LANGUAGE: Dart
-      MEMBERS: # Simplified
-        socket: { TYPE: PROPERTY, PROPERTY_TYPE: "package:socket_io_client:Socket" }
-        onGameUpdate: { TYPE: PROPERTY, PROPERTY_TYPE: "Function" }
-        onChatMessage: { TYPE: PROPERTY, PROPERTY_TYPE: "Function" }
-      USES_TYPE:
-        - "package:flutter/material.dart:BuildContext"
-        - "package:socket_io_client:Socket"
-        - "package:flutter_bloc/flutter_bloc.dart"
-        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
-        - "lib/application/application.dart:Application" # Through global 'app'
-        - "lib/application/communication_application.dart:CommunicationApplication" # Extension methods on 'app'
-        - "lib/models/game.dart:Game"
-      INSTANTIATES: ["package:socket_io_client:Socket"]
-      CALLS: # Methods call socket events/methods
-
-    - ID: "lib/services/socket_service.dart:SocketService:connect"
-      TYPE: METHOD
-      FILE: "lib/services/socket_service.dart"
-      LANGUAGE: Dart
-      MEMBER_OF: "lib/services/socket_service.dart:SocketService"
-      USES_TYPE: ["package:socket_io_client:Socket"]
-      INSTANTIATES: ["package:socket_io_client:Socket"]
-      CALLS:
-        - "built-in:print"
-        - "package:socket_io_client:Socket:connect"
-        - "lib/services/socket_service.dart:SocketService:_clearEventHandlers"
-        - "lib/services/socket_service.dart:SocketService:_setupEventHandlers"
-        - "package:socket_io_client:Socket:onConnect" # Callback setup
-        - "package:socket_io_client:Socket:onConnectError" # Callback setup
-
-    - ID: "lib/services/socket_service.dart:SocketService:_setupEventHandlers"
-      TYPE: METHOD
-      FILE: "lib/services/socket_service.dart"
-      LANGUAGE: Dart
-      MEMBER_OF: "lib/services/socket_service.dart:SocketService"
-      USES_TYPE: ["package:socket_io_client:Socket"]
-      CALLS:
-        - "built-in:print"
-        - "package:socket_io_client:Socket:onConnect"
-        - "package:socket_io_client:Socket:onDisconnect"
-        - "package:socket_io_client:Socket:onConnectError"
-        - "package:socket_io_client:Socket:on" # For custom events
-        - "lib/services/socket_service.dart:SocketService:_sendEcho" # In onConnect
-        - "lib/services/socket_service.dart:SocketService:_requestId" # In onConnect
-        - "lib/services/socket_service.dart:SocketService:_updateState" # In various handlers
-        - "lib/services/socket_service.dart:SocketService:_handleClientMessage" # Handler
-        - "lib/services/socket_service.dart:SocketService:_handleServerMessage" # Handler
-        - "lib/services/socket_service.dart:SocketService:_handleUserId" # Handler
-        - "lib/services/socket_service.dart:SocketService:_handleGameUpdate" # Handler
-        - "lib/services/socket_service.dart:SocketService:_handleChatMessage" # Handler
-
-    - ID: "lib/services/socket_service.dart:SocketService:_handleServerMessage"
-      TYPE: METHOD
-      FILE: "lib/services/socket_service.dart"
-      LANGUAGE: Dart
-      MEMBER_OF: "lib/services/socket_service.dart:SocketService"
-      USES_TYPE: ["lib/application/application.dart:Application"] # Global 'app'
-      CALLS:
-        - "built-in:print"
-        - "lib/application/communication_application.dart:CommunicationApplication:callbackOnServerMsg" # Called on global 'app'
-        - "lib/services/socket_service.dart:SocketService:_updateState"
-
-    - ID: "lib/services/socket_service.dart:SocketService:sendToClients"
-      TYPE: METHOD
-      FILE: "lib/services/socket_service.dart"
-      LANGUAGE: Dart
-      MEMBER_OF: "lib/services/socket_service.dart:SocketService"
-      USES_TYPE: ["package:socket_io_client:Socket"]
-      CALLS:
-        - "built-in:print"
-        - "package:socket_io_client:Socket:emit"
-
-    - ID: "lib/services/socket_service.dart:SocketService:sendToServer"
-      TYPE: METHOD
-      FILE: "lib/services/socket_service.dart"
-      LANGUAGE: Dart
-      MEMBER_OF: "lib/services/socket_service.dart:SocketService"
-      USES_TYPE: ["package:socket_io_client:Socket", "dart:convert"]
-      CALLS:
-        - "built-in:print"
-        - "dart:convert:jsonEncode"
-        - "package:socket_io_client:Socket:emit"
-
-    - ID: "lib/core/app_widget.dart:AppWidget"
-      TYPE: CLASS
-      FILE: "lib/core/app_widget.dart"
-      LANGUAGE: Dart
-      EXTENDS: "package:flutter/material.dart:StatelessWidget"
-      MEMBERS:
-        _appRouter: { TYPE: PROPERTY, PROPERTY_TYPE: "lib/router/router.dart:AppRouter" }
-      USES_TYPE:
-        - "package:flutter/material.dart"
-        - "package:flutter_bloc/flutter_bloc.dart"
-        - "lib/application/communication_application.dart:CommunicationApplication"
-        - "lib/dices/dices.dart:Dices"
-        - "lib/services/service_provider.dart:ServiceProvider"
-        - "lib/application/application.dart:Application"
-        - "lib/chat/chat.dart:Chat"
-        - "lib/injection.dart:getIt"
-        - "lib/router/router.dart:AppRouter"
-        - "lib/scroll/animations_scroll.dart:AnimationsScroll"
-        - "lib/startup.dart" # Global variables
-        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
-        - "lib/top_score/top_score.dart:TopScore"
-        - "lib/tutorial/tutorial.dart:Tutorial"
-        - "lib/input_items/input_items.dart:InputItems"
-        - "lib/services/socket_service.dart:SocketService"
-      INSTANTIATES:
-        - "lib/router/router.dart:AppRouter" # Via getIt
-        - "lib/top_score/top_score.dart:TopScore"
-        - "lib/scroll/animations_scroll.dart:AnimationsScroll"
-        - "lib/tutorial/tutorial.dart:Tutorial"
-        - "lib/dices/dices.dart:Dices"
-        - "lib/application/application.dart:Application"
-        - "lib/chat/chat.dart:Chat"
-        - "lib/input_items/input_items.dart:InputItems"
-      CALLS:
-        - "lib/injection.dart:getIt"
-        - "lib/core/app_widget.dart:AppWidget:getChosenLanguage"
-        - "package:flutter/material.dart:WidgetsBinding.instance.addPostFrameCallback"
-        - "lib/services/service_provider.dart:ServiceProvider.of"
-        - "lib/services/socket_service.dart:SocketService:connect"
-        - "lib/application/application.dart:Application:setSocketService"
-
-    - ID: "lib/main.dart:main"
-      TYPE: FUNCTION
-      FILE: "lib/main.dart"
-      LANGUAGE: Dart
-      USES_TYPE:
-        - "package:flutter/material.dart"
-        - "package:flutter_bloc/flutter_bloc.dart"
-        - "lib/states/bloc/language/language_bloc.dart:LanguageBloc"
-        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
-        - "package:injectable/injectable.dart:Environment"
-        - "lib/core/app_widget.dart:AppWidget"
-        - "lib/injection.dart:configureInjection"
-        - "lib/shared_preferences.dart:SharedPrefProvider"
-      CALLS:
-        - "package:flutter/material.dart:WidgetsFlutterBinding.ensureInitialized"
-        - "lib/shared_preferences.dart:SharedPrefProvider.loadPrefs"
-        - "lib/injection.dart:configureInjection"
-        - "package:flutter/material.dart:runApp"
-      INSTANTIATES:
-        - "package:flutter_bloc/flutter_bloc.dart:MultiBlocProvider"
-        - "package:flutter_bloc/flutter_bloc.dart:BlocProvider" # For LanguageBloc, SetStateCubit
-        - "lib/core/app_widget.dart:AppWidget"
-
-    # --- Unity (C#) ---
-    - ID: "unity/yatzy/Assets/FlutterUnityIntegration/Demo/GameManager.cs:GameManager"
-      TYPE: CLASS
-      FILE: "unity/yatzy/Assets/FlutterUnityIntegration/Demo/GameManager.cs"
-      LANGUAGE: CSharp
-      EXTENDS: "UnityEngine:MonoBehaviour"
-      USES_TYPE: ["FlutterUnityIntegration:UnityMessageManager"]
-      CALLS: ["UnityEngine:GameObject:AddComponent", "UnityEngine:Time:timeScale.set", "UnityEngine:Application:Unload", "UnityEngine:Application:Quit"]
-      RECEIVES_MESSAGE_FLUTTER: ["HandleWebFnCall"] # Implicit via SendMessage in Flutter
-
-    - ID: "unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs:NativeAPI"
-      TYPE: CLASS
-      FILE: "unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs"
-      LANGUAGE: CSharp
-      USES_TYPE: ["UnityEngine:SceneManagement:Scene", "UnityEngine:SceneManagement:LoadSceneMode", "UnityEngine:AndroidJavaClass", "UnityEngine:AndroidJavaObject", "System:Exception"]
-      CALLS:
-        - "UnityEngine:Debug:Log"
-        - "UnityEngine:AndroidJavaClass:.ctor"
-        - "UnityEngine:AndroidJavaClass:CallStatic" # To Java side
-        - "UnityEngine:AndroidJavaObject:Call" # To Java side
-        - "unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs:OnUnityMessageWeb" # DLLImport
-        - "unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs:OnUnitySceneLoadedWeb" # DLLImport
-        - "unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs:OnUnityMessage" # DLLImport (__Internal iOS)
-        - "unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs:OnUnitySceneLoaded" # DLLImport (__Internal iOS)
-
-    - ID: "unity/yatzy/Assets/FlutterUnityIntegration/SingletonMonoBehaviour.cs:SingletonMonoBehaviour<T>"
-      TYPE: CLASS
-      FILE: "unity/yatzy/Assets/FlutterUnityIntegration/SingletonMonoBehaviour.cs"
-      LANGUAGE: CSharp
-      EXTENDS: "UnityEngine:MonoBehaviour"
-      USES_TYPE: ["System:Lazy", "UnityEngine:GameObject"]
-      CALLS: ["UnityEngine:GameObject:.ctor", "UnityEngine:GameObject:AddComponent", "UnityEngine:Object:DontDestroyOnLoad"]
-
-    - ID: "unity/yatzy/Assets/FlutterUnityIntegration/UnityMessageManager.cs:UnityMessageManager"
-      TYPE: CLASS
-      FILE: "unity/yatzy/Assets/FlutterUnityIntegration/UnityMessageManager.cs"
-      LANGUAGE: CSharp
-      EXTENDS: "FlutterUnityIntegration:SingletonMonoBehaviour<UnityMessageManager>"
-      USES_TYPE: ["Newtonsoft.Json.Linq:JObject", "Newtonsoft.Json.Linq:JToken", "UnityEngine:SceneManagement:Scene", "UnityEngine:SceneManagement:LoadSceneMode", "FlutterUnityIntegration:NativeAPI", "FlutterUnityIntegration:MessageHandler", "FlutterUnityIntegration:UnityMessage"]
-      CALLS:
-        - "UnityEngine:SceneManagement:SceneManager:add_sceneLoaded"
-        - "FlutterUnityIntegration:NativeAPI:OnSceneLoaded"
-        - "FlutterUnityIntegration:NativeAPI:ShowHostMainWindow"
-        - "FlutterUnityIntegration:NativeAPI:UnloadMainWindow"
-        - "FlutterUnityIntegration:NativeAPI:QuitUnityWindow"
-        - "FlutterUnityIntegration:NativeAPI:SendMessageToFlutter"
-        - "Newtonsoft.Json.Linq:JObject:FromObject"
-        - "FlutterUnityIntegration:MessageHandler:Deserialize"
-      RECEIVES_MESSAGE_FLUTTER: ["onFlutterMessage"] # Primary entry point from Flutter
-
-    - ID: "unity/yatzy/Assets/Scripts/GameManagerScript.cs:GameManagerScript"
-      TYPE: CLASS
-      FILE: "unity/yatzy/Assets/Scripts/GameManagerScript.cs"
-      LANGUAGE: CSharp
-      EXTENDS: "UnityEngine:MonoBehaviour"
-      USES_TYPE: ["UnityEngine:GameObject", "UnityEngine:Rigidbody", "UnityEngine:Animator", "UnityEngine:Quaternion", "UnityEngine:Vector3", "Newtonsoft.Json:JsonConvert", "Newtonsoft.Json.Linq:JObject", "Newtonsoft.Json.Linq:JArray", "FlutterUnityIntegration:UnityMessageManager", "unity/yatzy/Assets/Scripts/DiceScript.cs:DiceScript", "unity/yatzy/Assets/Scripts/CircularMotionScript.cs:CircularMotionScript"]
-      CALLS:
-        - "UnityEngine:Debug:Log"
-        - "UnityEngine:GameObject:AddComponent"
-        - "UnityEngine:GameObject:Find"
-        - "UnityEngine:GameObject:GetComponent<DiceScript>"
-        - "UnityEngine:GameObject:GetComponent<Animator>"
-        - "UnityEngine:GameObject:GetComponent<CircularMotionScript>"
-        - "UnityEngine:Transform:Find" # Implicit in GameObject.Find with path
-        - "UnityEngine:Transform:GetChild"
-        - "UnityEngine:GameObject:SetActive"
-        - "UnityEngine:Time:timeScale.set"
-        - "UnityEngine:Physics:gravity.set"
-        - "unity/yatzy/Assets/Scripts/GameManagerScript.cs:GameManagerScript:InitDices"
-        - "unity/yatzy/Assets/Scripts/DiceScript.cs:DiceScript:GetDiceNumber"
-        - "unity/yatzy/Assets/Scripts/GameManagerScript.cs:GameManagerScript:jsonCommunicator:.ctor"
-        - "Newtonsoft.Json:JsonConvert:SerializeObject"
-        - "FlutterUnityIntegration:UnityMessageManager:SendMessageToFlutter" # Via Instance
-        - "UnityEngine:Random:Range"
-        - "unity/yatzy/Assets/Scripts/DiceScript.cs:DiceScript:SetDiceNumber"
-        - "UnityEngine:Animator:Play"
-      RECEIVES_MESSAGE_FLUTTER: ["flutterMessage"]
-      SENDS_MESSAGE_FLUTTER: ["results", "unityIdentifier"] # Via UnityMessageManager
-
-    - ID: "unity/yatzy/Assets/Scripts/DiceScript.cs:DiceScript"
-      TYPE: CLASS
-      FILE: "unity/yatzy/Assets/Scripts/DiceScript.cs"
-      LANGUAGE: CSharp
-      EXTENDS: "UnityEngine:MonoBehaviour"
-      USES_TYPE: ["UnityEngine:Vector3", "UnityEngine:GameObject", "UnityEngine:Quaternion"]
-      CALLS: ["UnityEngine:GameObject:Find", "UnityEngine:GameObject:GetComponent<DiceScript>", "built-in:string:Replace"]
-      ACCESSES_MEMBER: ["UnityEngine:Transform:position", "UnityEngine:Transform:rotation", "UnityEngine:Transform:name"]
-      RECEIVES_MESSAGE_UNITY: ["OnMouseDown"] # Unity event
-
-    - ID: "unity/yatzy/Assets/Scripts/DiceCheckZoneScript.cs:DiceCheckZoneScript"
-      TYPE: CLASS
-      FILE: "unity/yatzy/Assets/Scripts/DiceCheckZoneScript.cs"
-      LANGUAGE: CSharp
-      EXTENDS: "UnityEngine:MonoBehaviour"
-      USES_TYPE: ["UnityEngine:Collider", "UnityEngine:Rigidbody", "UnityEngine:Vector3", "unity/yatzy/Assets/Scripts/DiceScript.cs:DiceScript"]
-      CALLS: ["UnityEngine:GameObject:GetComponentInParent<DiceScript>", "UnityEngine:GameObject:GetComponentInParent<Rigidbody>", "unity/yatzy/Assets/Scripts/DiceScript.cs:DiceScript:GetDiceNumber", "unity/yatzy/Assets/Scripts/DiceScript.cs:DiceScript:SetDiceNumber", "UnityEngine:Mathf:Abs"]
-      RECEIVES_MESSAGE_UNITY: ["OnTriggerStay"] # Unity event
-
-    - ID: "unity/yatzy/Assets/Scripts/ThrowDices.cs:ThrowDices"
-      TYPE: CLASS
-      FILE: "unity/yatzy/Assets/Scripts/ThrowDices.cs"
-      LANGUAGE: CSharp
-      EXTENDS: "UnityEngine:MonoBehaviour"
-      USES_TYPE: ["UnityEngine:GameObject", "unity/yatzy/Assets/Scripts/GameManagerScript.cs:GameManagerScript"]
-      CALLS: ["UnityEngine:GameObject:Find", "UnityEngine:GameObject:GetComponent<GameManagerScript>", "UnityEngine:Debug:Log"]
-      RECEIVES_MESSAGE_UNITY: ["OnMouseDown"] # Unity event
-      ACCESSES_MEMBER: ["unity/yatzy/Assets/Scripts/GameManagerScript.cs:GameManagerScript:throwActive", "unity/yatzy/Assets/Scripts/GameManagerScript.cs:GameManagerScript:throwDices"]
-
-    - ID: "unity/yatzy/Assets/WebSocket/WebSocket.cs:WebSocket" # NativeWebSocket.WebSocket
-      TYPE: CLASS
-      FILE: "unity/yatzy/Assets/WebSocket/WebSocket.cs"
-      LANGUAGE: CSharp
-      IMPLEMENTS: ["NativeWebSocket:IWebSocket"]
-      USES_TYPE: ["System:Uri", "System:Net:WebSockets:ClientWebSocket", "System:Threading:CancellationTokenSource", "System:Threading:CancellationToken", "System:IO:MemoryStream", "System:Exception", "NativeWebSocket:WebSocketState", "NativeWebSocket:WebSocketCloseCode", "NativeWebSocket:WebSocketReceiveResult", "System:Net:WebSockets:WebSocketMessageType", "System:Net:WebSockets:WebSocketCloseStatus"]
-      INSTANTIATES: ["System:Uri", "System:Collections:Generic:Dictionary", "System:Collections:Generic:List", "System:Net:WebSockets:ClientWebSocket", "System:Threading:CancellationTokenSource", "System:Text:UTF8Encoding"] # Implicit via GetBytes
-      CALLS:
-        - "System:Net:WebSockets:ClientWebSocket:ConnectAsync"
-        - "System:Net:WebSockets:ClientWebSocket:ReceiveAsync"
-        - "System:Net:WebSockets:ClientWebSocket:SendAsync"
-        - "System:Net:WebSockets:ClientWebSocket:CloseAsync"
-        - "System:IO:MemoryStream:Write"
-        - "System:IO:MemoryStream:Seek"
-        - "System:Threading:Monitor:TryEnter"
-        - "System:Threading:Monitor:Exit"
-        - "System:Text:Encoding:UTF8:GetBytes"
-        - "NativeWebSocket:WebSocket:Receive" # Recursive async call
-        - "NativeWebSocket:WebSocket:SendMessage"
-        - "NativeWebSocket:WebSocket:HandleQueue"
-      ACCESSES_MEMBER: ["NativeWebSocket:WebSocket:State", "System:Net:WebSockets:ClientWebSocket:State"]
-
-  # --- Other Key Files (Example: Services, Models) ---
-    - ID: "lib/services/game_service.dart:GameService"
-      TYPE: CLASS
-      FILE: "lib/services/game_service.dart"
-      LANGUAGE: Dart
-      MEMBERS:
-        socketService: { TYPE: PROPERTY, PROPERTY_TYPE: "lib/services/socket_service.dart:SocketService" }
-        _game: { TYPE: PROPERTY, PROPERTY_TYPE: "lib/models/game.dart:Game" }
-        onGameUpdated: { TYPE: PROPERTY, PROPERTY_TYPE: "Function" }
-        onError: { TYPE: PROPERTY, PROPERTY_TYPE: "Function" }
-      USES_TYPE:
-        - "lib/models/game.dart:Game"
-        - "lib/models/board_cell.dart:BoardCell"
-        - "lib/services/socket_service.dart:SocketService"
-      CALLS:
-        - "lib/services/socket_service.dart:SocketService:createGame"
-        - "lib/services/socket_service.dart:SocketService:joinGame"
-        - "lib/services/socket_service.dart:SocketService:rollDice"
-        - "lib/services/socket_service.dart:SocketService:selectCell"
-        - "lib/services/game_service.dart:GameService:_reportError"
-        - "lib/services/game_service.dart:GameService:_calculatePairScore" # etc. for score helpers
-        - "lib/services/game_service.dart:GameService:_handleGameUpdate" # Assigned as callback
-
-    - ID: "lib/models/game.dart:Game"
-      TYPE: CLASS
-      FILE: "lib/models/game.dart"
-      LANGUAGE: Dart
-      MEMBERS: # Simplified
-        players: { TYPE: PROPERTY, PROPERTY_TYPE: "List<Player>" }
-      USES_TYPE: ["lib/models/board_cell.dart:BoardCell", "lib/models/player.dart:Player", "package:flutter/foundation.dart:VoidCallback"]
-      CALLS:
-        - "lib/models/player.dart:Player:calculateScores"
-        - "lib/models/game.dart:Game:advanceToNextPlayer"
-        - "lib/models/game.dart:Game:checkGameFinished"
-        - "lib/models/game.dart:Game:_getCellLabelsForGameType" # Static
-      INSTANTIATES: ["lib/models/player.dart:Player", "lib/models/board_cell.dart:BoardCell"] # In fromJson
-
-    - ID: "lib/models/player.dart:Player"
-      TYPE: CLASS
-      FILE: "lib/models/player.dart"
-      LANGUAGE: Dart
-      MEMBERS: # Simplified
-        cells: { TYPE: PROPERTY, PROPERTY_TYPE: "List<BoardCell>" }
-      USES_TYPE: ["lib/models/board_cell.dart:BoardCell"]
-      CALLS: ["built-in:List:every"]
-      INSTANTIATES: ["lib/models/board_cell.dart:BoardCell"] # In fromJson
-
-    # --- UI Views (Example) ---
-    - ID: "lib/views/application_view.dart:ApplicationView"
-      TYPE: CLASS
-      FILE: "lib/views/application_view.dart"
-      LANGUAGE: Dart
-      EXTENDS: "package:flutter/material.dart:StatefulWidget"
-      USES_TYPE:
-        - "package:auto_route/auto_route.dart"
-        - "package:flutter/material.dart"
-        - "package:flutter_bloc/flutter_bloc.dart"
-        - "lib/application/widget_application_scaffold.dart:WidgetApplicationScaffold" # Extension method
-        - "lib/router/router.gr.dart:SettingsView"
-        - "lib/injection.dart:getIt"
-        - "lib/router/router.dart:AppRouter"
-        - "lib/startup.dart" # Global 'app'
-        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
-        - "lib/tutorial/tutorial.dart:Tutorial"
-        - "lib/scroll/animations_scroll.dart:AnimationsScroll"
-        - "lib/application/application.dart:Application" # Global 'app'
-      CALLS:
-        - "lib/tutorial/tutorial.dart:Tutorial:setup"
-        - "package:flutter/material.dart:WidgetsBinding.instance.addPostFrameCallback"
-        - "lib/application/animations_application.dart:AnimationsApplication:setupAnimation" # Via app.animation
-        - "lib/views/application_view.dart:_ApplicationViewState:_showGameFinishedDialog"
-        - "lib/application/widget_application_scaffold.dart:WidgetApplicationScaffold:widgetScaffold" # Via app
-        - "package:flutter_bloc/flutter_bloc.dart:BlocBuilder"
-        - "package:flutter/material.dart:showDialog"
-        - "lib/injection.dart:getIt"
-        - "lib/router/router.dart:AppRouter:pushAndPopUntil"
-
-    - ID: "lib/views/settings_view.dart:SettingsView"
-      TYPE: CLASS
-      FILE: "lib/views/settings_view.dart"
-      LANGUAGE: Dart
-      EXTENDS: "package:flutter/material.dart:StatefulWidget"
-      USES_TYPE:
-        - "package:auto_route/auto_route.dart"
-        - "package:flutter/material.dart"
-        - "package:flutter_bloc/flutter_bloc.dart"
-        - "lib/application/widget_application_settings.dart:WidgetApplicationSettings" # Extension method
-        - "lib/startup.dart" # Global 'app'
-        - "lib/states/cubit/state/state_cubit.dart:SetStateCubit"
-        - "lib/application/application.dart:Application" # Global 'app'
-      CALLS:
-        - "package:flutter/material.dart:TabController"
-        - "lib/application/widget_application_settings.dart:WidgetApplicationSettings:widgetScaffoldSettings" # Via app
-        - "package:flutter_bloc/flutter_bloc.dart:BlocBuilder"
-      INSTANTIATES: ["package:flutter/material.dart:TabController"]
-
-    - ID: "lib/widgets/spectator_game_board.dart:SpectatorGameBoard"
-      TYPE: CLASS
-      FILE: "lib/widgets/spectator_game_board.dart"
-      LANGUAGE: Dart
-      EXTENDS: "package:flutter/material.dart:StatefulWidget"
-      USES_TYPE: ["package:flutter/material.dart"]
-      CALLS:
-        - "lib/widgets/spectator_game_board.dart:_SpectatorGameBoardState:buildScoreTable"
-        - "lib/widgets/spectator_game_board.dart:_SpectatorGameBoardState:getDiceFace"
-      INSTANTIATES: ["package:flutter/material.dart:ScrollController"]
-
-    # Add entries for interfaces, enums, other functions/classes as needed...
+Okay, let's break down the technical architecture of this Yatzy project, focusing on the Flutter frontend and the Express backend.
+
+**I. Overall Architecture**
+
+This project implements a client-server architecture for a multiplayer Yatzy game.
+
+1.  **Frontend (Client):** A Flutter application responsible for the user interface, user interactions, displaying game state, and communicating with the backend. It also integrates a Unity component for 3D dice rendering.
+2.  **Backend (Server):** A Node.js application using the Express framework and TypeScript. It manages game logic, player connections, real-time communication via WebSockets (Socket.IO), and data persistence (likely MongoDB based on `db.ts` and service patterns).
+3.  **Communication:**
+    *   **HTTP REST API:** Used for non-real-time actions like user login/signup (inferred from `/api/login`, `/api/signup`), fetching/updating top scores (`/GetTopScores`, `/UpdateTopScore`), and potentially fetching initial spectator data (`/api/spectate/:gameId`).
+    *   **WebSockets (Socket.IO):** The primary communication channel for real-time game events, chat messages, and state synchronization between the server and connected clients (players and spectators). Events are typically structured with `action` fields (e.g., `requestGame`, `sendDices`, `sendSelection`, `chatMessage`). Messages flow via `sendToServer` (client to server) and `sendToClients` / `onServerMsg` / `onClientMsg` (server to clients or client-to-client forwarding via server).
+4.  **Database:** MongoDB is used for storing persistent data like game logs (`GameLogService`) and top scores (`TopScoreService`). User authentication data might also be stored here.
+
+**II. Backend (Express in `backend` folder)**
+
+The backend is built with Node.js, Express, and TypeScript, using Socket.IO for real-time features and MongoDB for persistence.
+
+1.  **Core Technologies:**
+    *   **Node.js:** JavaScript runtime environment.
+    *   **Express:** Web application framework for handling HTTP requests and routing.
+    *   **TypeScript:** Superset of JavaScript adding static typing.
+    *   **Socket.IO:** Library for real-time, bidirectional event-based communication (WebSockets with fallbacks).
+    *   **MongoDB:** NoSQL database accessed via the `mongodb` driver (`db.ts`).
+
+2.  **Directory Structure & Key Components:**
+    *   `server.ts`: The main entry point. Initializes Express, Socket.IO (with CORS), database connection (`initializeDbConnection`), sets up middleware, registers HTTP routes (`routes/index.ts`), and configures Socket.IO event listeners. It instantiates services and controllers and registers socket handlers. It also includes specific logic for handling `requestTopScores` directly.
+    *   `db.ts`: Handles MongoDB connection initialization and provides a function (`getDbConnection`) to access database instances.
+    *   `controllers/`: Contain classes responsible for handling specific Socket.IO events related to different domains.
+        *   `ChatController.ts`: Manages incoming chat messages (`sendToServer`, `sendToClients` with `action: 'chatMessage'`) and broadcasts them to relevant players within a game, using `GameService` to identify recipients.
+        *   `GameController.ts`: Handles core game actions received via WebSocket (`requestGame`, `requestJoinGame`, `removeGame`, `spectateGame`, `sendDices`, `sendSelection`). It validates requests, interacts with `GameService` to modify game state, and uses `GameLogService` for logging actions.
+        *   `PlayerController.ts`: Handles player-specific events like requesting an ID (`getId`). Other player actions (join, roll, select) are largely delegated to `GameController`.
+    *   `models/`: Define the data structures and associated logic for core game entities.
+        *   `Game.ts`: Represents a single Yatzy game instance. Holds players, game state (started, finished, playerToMove, rollCount, turnNumber), game type, max players, dice values. Includes methods for adding/removing players, advancing turns (`advanceToNextActivePlayer`), applying selections (`applySelection`), checking game completion (`isGameFinished`), and serialization (`toJSON`, `fromJSON`).
+        *   `Player.ts`: Represents a player. Holds ID, username, score (`score`), upper section sum (`upperSum`), bonus status (`bonusAchieved`), scorecard (`cells`), and game type context. Crucially, it contains the logic for calculating potential scores (`calculatePotentialScores`), calculating final scores (`calculateScores`, `calculateDerivedScores`), and determining game completion (`hasCompletedGame`). Includes a factory (`PlayerFactory`) for creating instances.
+        *   `BoardCell.ts`: Represents a single cell on the player's scorecard (e.g., 'Ones', 'Pair', 'Sum'). Holds index, label, value, fixed status, and whether it's a non-scoring cell (Sum, Bonus, Total).
+        *   `Dice.ts`: A simple model for handling dice rolling logic (though much of the rolling seems client-initiated or Unity-driven in this setup).
+    *   `routes/`: Define the HTTP REST endpoints.
+        *   `index.ts`: Aggregates all route definitions.
+        *   `logInRoute.ts`, `signUpRoute.ts`: Handle user authentication (likely using bcrypt for hashing and JWT for sessions).
+        *   `getTopScores.ts`, `updateTopScore.ts`: Fetch and update top scores based on game type (`Ordinary`, `Maxi`) from the database.
+        *   `logRoute.ts`, `getLogRoute.ts`: Likely related to application-level logging, potentially tied to user auth.
+        *   `spectateGameRoute.ts`: An HTTP endpoint (`/api/spectate/:gameId`) to fetch combined data from the active game state (memory, via `GameService`) and the game log (DB, via `GameLogService`) for spectators joining via HTTP request (perhaps before establishing a WebSocket).
+    *   `services/`: Encapsulate business logic and interact with the database or other services.
+        *   `GameService.ts`: Central service for managing the lifecycle of games. Creates, finds, joins, and removes games (`games` Map). Manages player connections/disconnections (`handlePlayerDisconnect`), tracks spectators (`spectators` Map), broadcasts game list updates and game state changes (`notifyGameUpdate`, `notifyGameFinished`). Processes core game actions like dice rolls (`processDiceRoll`) and selections (`processSelection`), coordinating with `GameLogService` and `TopScoreService`.
+        *   `GameLogService.ts`: Responsible for interacting with the MongoDB `game_moves` collection. Logs game start, player moves (roll, select, disconnect, spectate), game end, and retrieves game logs.
+        *   `TopScoreService.ts`: Manages interaction with the `top-scores` database. Fetches top scores for specific game types, updates scores, and broadcasts updates (`broadcastTopScores`) to connected clients via Socket.IO.
+    *   `utils/`: Utility functions and configuration.
+        *   `gameConfig.ts`: Defines configurations for different Yatzy game types (Ordinary, Maxi), including cell labels, bonus thresholds, dice count, etc.
+        *   `yatzyMapping.ts`: Provides utility functions (`getSelectionLabel`, `getSelectionIndex`) to map between the numerical index of a scorecard cell and its string label (e.g., 0 -> 'Ones', 8 -> 'Pair'), crucial for interpreting client selections.
+        *   `index.ts`: General utility functions (currently basic like `randomInt`, `delay`).
+
+3.  **Workflow Example (Joining Game):**
+    1.  Client (Flutter) sends `sendToServer` event with `action: 'requestGame'` or `action: 'requestJoinGame'` via Socket.IO.
+    2.  Backend (`server.ts`) receives the event.
+    3.  `GameController`'s handler (`handleRequestGame`/`handleRequestJoinGame`) is invoked.
+    4.  `GameController` validates the request and calls `GameService.createOrJoinGame` or `GameService.joinGame`.
+    5.  `GameService` finds or creates a `Game` instance, adds the `Player`, updates game state.
+    6.  If the game becomes full/starts, `GameService` updates the game state (`gameStarted = true`) and logs the start/update via `GameLogService`.
+    7.  `GameService` calls `notifyGameUpdate` or sends an `onGameStart` message.
+    8.  `GameService` uses `this.io.emit` or `this.io.to(playerId).emit` to send the updated game state (`onServerMsg` event with game data) back to the relevant client(s).
+    9.  `GameService` calls `broadcastGameList` to update the list of available games for all clients.
+
+**III. Frontend (Flutter in `lib` folder)**
+
+The frontend is a Flutter application responsible for UI, state management, and communication with the backend and the integrated Unity view.
+
+1.  **Core Technologies:**
+    *   **Flutter & Dart:** UI toolkit and programming language.
+    *   **State Management:** Uses BLoC/Cubit (`states/` folder) for managing application state (like language) and likely a simpler `SetStateCubit` for triggering general UI refreshes. The core `Application` class (`application/application.dart`) also acts as a central state holder for game-specific data.
+    *   **Routing:** `auto_route` (`router/`) for navigation between views.
+    *   **Networking:** Custom `HttpService` (`services/http_service.dart`) for REST API calls and `SocketService` (`services/socket_service.dart`) for WebSocket communication via the `socket_io_client` package. A `ServiceProvider` (`services/service_provider.dart`) likely manages access to these services.
+    *   **Unity Integration:** `flutter_unity_widget` package used to embed and communicate with the Unity view (`dices/` folder).
+    *   **Dependency Injection:** `injectable` and `get_it` (`injection.dart`) are used for managing dependencies like the router and BLoCs.
+
+2.  **Directory Structure & Key Components:**
+    *   `main.dart`: Entry point, initializes dependency injection, BLoC providers, and runs the main `AppWidget`.
+    *   `core/app_widget.dart`: Sets up the main `MaterialApp.router`, initializes core application components (`Application`, `Dices`, `Chat`, `TopScore`, `Tutorial`, `AnimationsScroll`), and initializes the `ServiceProvider` which includes the `SocketService` and connects it upon build.
+    *   `application/`: Contains the core application logic and state.
+        *   `application.dart`: The central class holding much of the application and game state (game type, player info, scores, dice state). It initializes other components like `Dices`. Contains `setup` logic for initializing game boards. Crucially, it has `callbackOnServerMsg` and `callbackOnClientMsg` methods that are invoked by `SocketService` to process incoming messages.
+        *   `communication_application.dart`: Extension on `Application` specifically handling the logic within `callbackOnServerMsg` and `callbackOnClientMsg` (parsing actions like `onGameStart`, `onGameUpdate`, `sendSelection`, `sendDices`, `chatMessage`). It updates the internal state based on these messages and triggers UI updates via `SetStateCubit`. Also handles sending chat messages (`chatCallbackOnSubmitted`).
+        *   `application_functions_internal.dart`: Extension containing helper functions like `cellClick` (which formats and sends the `sendSelection` message via `SocketService`) and `clearFocus`.
+        *   `widget_application.dart`, `widget_application_scaffold.dart`, `widget_application_settings.dart`: Define the UI structure for the main game screen and the settings screen, composing various sub-widgets. `widgetScaffoldSettings` includes logic for displaying available games and initiating join/create requests. It also handles the display of the `SpectatorGameBoard`.
+        *   `animations_application.dart`: Manages animations, potentially for the game board cells.
+        *   `languages_application.dart`: Mixin for handling localization strings within the Application UI.
+    *   `services/`: Handles communication and potentially other background tasks.
+        *   `socket_service.dart`: Manages the Socket.IO client connection lifecycle (`connect`, `disconnect`). Listens for server events (`onConnect`, `onServerMsg`, `onClientMsg`, etc.) and invokes callbacks in the `Application` class. Provides methods (`sendToServer`, `sendToClients`) used by `Application` to send data to the backend.
+        *   `http_service.dart`: Provides methods for making HTTP GET/POST requests to the backend REST API (e.g., for `GetTopScores`).
+        *   `service_provider.dart`: An `InheritedWidget` used to make `SocketService` and potentially `GameService` (client-side version, though its usage seems limited) accessible throughout the widget tree.
+        *   `game_service.dart` (Client-side): Appears to be a higher-level abstraction over `SocketService` for game-specific actions. However, much of the direct socket interaction seems to happen within `Application` / `communication_application.dart`. It includes client-side score calculation logic (`calculateScoreForCell`).
+    *   `dices/`: Related to dice display and Unity integration.
+        *   `dices.dart`: Manages the state of the dice (values, held status, rolls). Includes logic for 2D dice (`rollDices`, `updateDiceImages`) and interacts with the Unity communication layer.
+        *   `widget_dices.dart`: The Flutter widget that either displays 2D dice images or embeds the `UnityWidget` based on the `unityDices` flag. Handles user interaction for rolling (button press).
+        *   `unity_communication.dart`: Extension on `Dices` containing methods (`sendResetToUnity`, `sendStartToUnity`, `sendDicesToUnity`) to send formatted messages *to* the Unity instance via `unityWidgetController.postMessage`. Also includes `onUnityMessage` to handle messages *from* Unity (e.g., dice roll results).
+        *   `unity_message.dart`: Defines the structure of messages exchanged with Unity.
+        *   `languages_dices.dart`: Localization mixin for dice-related UI text.
+    *   `chat/`: Components for the chat interface.
+        *   `chat.dart`: Manages chat messages (`ChatMessage` list) and input state.
+        *   `widget_chat.dart`: The UI widget for displaying chat messages and the input field.
+        *   `languages_chat.dart`: Localization mixin.
+    *   `models/`: Client-side data models.
+        *   `game.dart`, `player.dart`, `board_cell.dart`: Simpler representations of the backend models, primarily focused on holding data needed for the UI. `Game` includes methods like `fromJson` to parse server data. `Player` includes score calculation.
+    *   `router/`: Defines navigation routes using `auto_route`.
+        *   `router.dart`, `router.gr.dart`: Configuration and generated code for routing between `SettingsView` and `ApplicationView`.
+    *   `states/`: State management using BLoC/Cubit.
+        *   `bloc/language/`: BLoC for managing the application's language state.
+        *   `cubit/state/`: A simple `SetStateCubit` used extensively to trigger UI rebuilds when state changes in `Application` or other components.
+    *   `top_score/`: Components for displaying top scores.
+        *   `top_score.dart`: Manages fetching (`loadTopScoreFromServer` via `HttpService`) and storing top score data. Includes `updateScoresFromData` to handle updates pushed via WebSocket.
+        *   `widget_top_scores.dart`: UI widget to display the fetched top scores.
+        *   `languages_top_score.dart`: Localization mixin.
+    *   `views/`: The main screens/pages of the application.
+        *   `application_view.dart`: The main game screen, built using `WidgetApplicationScaffold`.
+        *   `settings_view.dart`: The settings/lobby screen, built using `WidgetApplicationSettings`. Allows game configuration, joining games, and spectating.
+    *   `widgets/`: Reusable custom widgets.
+        *   `spectator_game_board.dart`: A dedicated widget to display the game state (scores, dice) for a spectator, parsing data received in `Application.gameData`.
+    *   `utils/yatzy_mapping_client.dart`: Client-side version of the utility to map between cell index and label, ensuring consistency with the backend.
+
+3.  **Workflow Example (Selecting a Cell):**
+    1.  User taps on a valid cell in the `WidgetSetupGameBoard`.
+    2.  The `onTap` handler calls `app.cellClick(playerIndex, cellIndex)`.
+    3.  `app.cellClick` (in `application_functions_internal.dart`) checks if it's the player's turn and the cell is valid.
+    4.  It retrieves the `selectionLabel` using `getSelectionLabel` from `yatzy_mapping_client.dart`.
+    5.  It formats a message containing `action: 'sendSelection'`, `gameId`, `player` index, `selectionLabel`, current `diceValue`, and calculated `score`.
+    6.  It calls `socketService.sendToClients(msg)` (Note: It uses `sendToClients` here, the backend's `ChatController` and `GameController` differentiate based on the `action` within the `sendToClients` payload).
+    7.  The backend receives the message, `GameController` processes it, calls `GameService.processSelection`.
+    8.  `GameService` updates the game state, applies the score using `game.applySelection`, logs the move, advances the turn, resets dice, and clears potential scores.
+    9.  `GameService` calls `notifyGameUpdate`.
+    10. The backend sends an `onServerMsg` event with the updated game state to all clients (including the sender).
+    11. Frontend (`SocketService`) receives the `onServerMsg`.
+    12. `SocketService` calls `app.callbackOnServerMsg`.
+    13. `app.callbackOnServerMsg` (in `communication_application.dart`) processes the `onGameUpdate` action, updates the local `app.gameData`, synchronizes `fixedCell`, `cellValue`, `appText`, handles turn changes, potentially resets dice via `Dices` class, and triggers a UI refresh using `context.read<SetStateCubit>().setState()`.
+
+**IV. Unity Integration**
+
+*   **Role:** Primarily used for rendering the 3D dice (`unity/yatzy/Assets/Scripts/DiceScript.cs`, `GameManagerScript.cs`).
+*   **Communication (Flutter -> Unity):** Flutter (`dices/unity_communication.dart`) sends messages using `unityWidgetController.postMessage` to the `GameManager` object in Unity. Messages include actions like `reset`, `start` (enable throwing), `setProperty` (update dice values, colors, settings like light motion, snow effect).
+*   **Communication (Unity -> Flutter):** Unity (`GameManagerScript.cs`) sends messages back to Flutter using `UnityMessageManager.Instance.SendMessageToFlutter`. This is primarily used to send the `results` of a dice roll after the physics simulation settles (`DiceCheckZoneScript.cs`). Flutter (`dices/unity_communication.dart` -> `onUnityMessage`) receives these results and updates the application state.
+
+**V. Data Models (Conceptual)**
+
+While both frontend and backend have models for `Game`, `Player`, and `BoardCell`, their implementations differ:
+
+*   **Backend:** Models contain full game logic (scoring, turn advancement) and are designed for server-side state management and persistence.
+*   **Frontend:** Models are generally simpler, focusing on holding the data received from the server needed to render the UI. Some logic (like potential score calculation preview) might exist, but the authoritative state comes from the server.
+
+This detailed description covers the core technical aspects of the frontend and backend, highlighting their responsibilities, key components, technologies, and interactions within the Yatzy game project.
+
+```markdown
+DEPENDENCY_GRAPH
+================
+
+File: backend/src/controllers/ChatController.ts
+  Imports:
+    - Server, Socket from socket.io
+    - GameService from ../services/GameService.ts
+  Classes:
+    CLASS ChatController
+      Fields:
+        - io [type: socket.io:Server]
+        - gameService [type: backend/src/services/GameService.ts:GameService]
+      Methods:
+        METHOD constructor(io, gameService?)
+          Assigns:
+            - this.io
+            - this.gameService
+        METHOD registerSocketHandlers(socket)
+          Calls:
+            - console.log
+            - socket.on [event: 'sendToClients']
+              Calls (callback):
+                - this.handleChatMessage [conditional: true]
+            - socket.on [event: 'sendToServer']
+              Calls (callback):
+                - this.handleServerChatMessage [conditional: true]
+        METHOD handleChatMessage(socket, data)
+          Accesses:
+            - data.chatMessage
+            - data.playerIds
+            - data.gameId
+            - data.message
+            - data.sender
+            - socket.id
+            - this.gameService
+            - game.players
+            - player.id
+            - player.isActive
+            - Array.isArray
+          Calls:
+            - console.log
+            - this.gameService.getGame [conditional: true]
+            - this.io.to(<target_id>).emit [event: 'onClientMsg'] [conditional: true]
+        METHOD handleServerChatMessage(socket, data)
+          Accesses:
+            - data.gameId
+            - data.message
+            - data.sender
+            - socket.id
+            - this.gameService
+            - game.players
+            - player.isActive
+            - player.id
+          Calls:
+            - console.log
+            - this.gameService.getGame [conditional: true]
+            - this.io.to(<target_id>).emit [event: 'onClientMsg'] [conditional: true]
+            - socket.to(<room_id>).emit [event: 'onClientMsg'] [conditional: true]
+        METHOD broadcastToPlayersInSameGame(socket, data)
+          Accesses:
+            - this.gameService
+            - game.players
+            - game.id
+            - player.id
+            - player.isActive
+            - socket.id
+            - data.chatMessage
+          Calls:
+            - console.log
+            - this.gameService.getAllGames [conditional: true]
+            - game.players.some [conditional: true]
+            - this.io.to(<target_id>).emit [event: 'onClientMsg'] [conditional: true]
+
+File: backend/src/controllers/GameController.ts
+  Imports:
+    - Socket from socket.io
+    - GameService from ../services/GameService.ts
+    - Player, PlayerFactory from ../models/Player.ts
+    - GameLogService, GameMove from ../services/GameLogService.ts
+    - getSelectionLabel from ../utils/yatzyMapping.ts
+    - Game from ../models/Game.ts
+  Classes:
+    CLASS GameController
+      Fields:
+        - gameService [type: backend/src/services/GameService.ts:GameService]
+        - gameLogService [type: backend/src/services/GameLogService.ts:GameLogService]
+      Methods:
+        METHOD constructor(gameService, gameLogService)
+          Assigns:
+            - this.gameService
+            - this.gameLogService
+        METHOD registerSocketHandlers(socket)
+          Calls:
+            - socket.on [event: 'sendToServer']
+              Calls (callback):
+                - this.handleRequestGame [conditional: true]
+                - this.handleRequestJoinGame [conditional: true]
+                - this.handleRemoveGame [conditional: true]
+                - this.handleSpectateGame [conditional: true]
+            - socket.on [event: 'sendToClients']
+              Calls (callback):
+                - this.handleSendDices [conditional: true]
+                - this.handleSendSelection [conditional: true]
+        METHOD handleRequestGame(socket, data)
+          Accesses:
+            - data.gameType
+            - data.nrPlayers
+            - data.userName
+            - socket.id
+          Calls:
+            - console.warn [conditional: true]
+            - socket.emit [event: 'onServerMsg'] [conditional: true]
+            - backend/src/models/Player.ts:PlayerFactory.createPlayer
+            - this.gameService.createOrJoinGame
+        METHOD handleRequestJoinGame(socket, data)
+          Accesses:
+            - data.gameId
+            - data.userName
+            - socket.id
+            - game.gameStarted
+            - joinedGame.gameStarted
+            - game.gameType
+            - p.isActive
+            - p.id
+          Calls:
+            - this.gameService.getGame
+            - socket.emit [event: 'onServerMsg'] [conditional: true]
+            - game.isGameFull [conditional: true]
+            - backend/src/models/Player.ts:PlayerFactory.createPlayer
+            - this.gameService.joinGame
+            - this.gameService.notifyGameUpdate [conditional: true]
+            - joinedGame.toJSON [conditional: true]
+            - this.gameService.io.to(<target_id>).emit [event: 'onServerMsg'] [conditional: true]
+            - this.gameService.broadcastGameList [conditional: true]
+        METHOD handleRemoveGame(socket, data)
+          Accesses:
+            - data.gameId
+            - socket.id
+            - game.gameFinished
+          Calls:
+            - console.log
+            - this.gameService.getGame
+            - this.gameService.removeGame [conditional: true]
+            - this.gameService.broadcastGameList [conditional: true]
+        METHOD handleSendDices(socket, data)
+          Accesses:
+            - data.gameId
+            - data.diceValue
+            - data.keptDice
+            - socket.id
+            - game.playerToMove
+          Calls:
+            - console.error [conditional: true]
+            - this.gameService.getGame
+            - game.findPlayerIndex [conditional: true]
+            - console.log
+            - this.gameService.processDiceRoll
+        METHOD handleSendSelection(socket, data)
+          Accesses:
+            - data.gameId
+            - data.selectionLabel
+            - data.player
+            - data.diceValue
+            - data.score
+            - socket.id
+            - game.playerToMove
+          Calls:
+            - console.error [conditional: true]
+            - this.gameService.getGame
+            - game.findPlayerIndex [conditional: true]
+            - console.warn [conditional: true]
+            - console.log
+            - this.gameService.processSelection
+            - this.gameService.forwardSelectionToPlayers [conditional: true]
+        METHOD handleSpectateGame(socket, data)
+          Accesses:
+            - data.gameId
+            - data.userName
+            - socket.id
+            - game.gameStarted
+            - game.id
+            - gameLog.moves
+            - move.action
+            - move.playerIndex
+            - move.selectionLabel
+            - move.score
+            - game.players
+            - player.isActive
+            - player.cells
+            - cell.label
+            - cell.value
+            - cell.fixed
+            - player.username
+            - player.score
+          Calls:
+            - console.error [conditional: true]
+            - socket.emit [event: 'onServerMsg'] [conditional: true]
+            - console.log
+            - this.gameService.getGame
+            - this.gameLogService.getGameLog
+            - gameLog.moves.filter [conditional: true]
+            - gameLog.moves.forEach [conditional: true]
+            - game.applySelection [conditional: true]
+            - player.calculateScores [loop: true]
+            - player.cells.find [loop: true, conditional: true]
+            - game.toJSON
+            - game.players.forEach [loop: true]
+            - player.cells.forEach [loop: true, conditional: true]
+            - this.gameLogService.logSpectate
+            - this.gameService.addSpectator
+
+File: backend/src/controllers/PlayerController.ts
+  Imports:
+    - Socket from socket.io
+    - GameService from ../services/GameService.ts
+    - PlayerFactory from ../models/Player.ts
+    - GameLogService from ../services/GameLogService.ts
+  Classes:
+    CLASS PlayerController
+      Fields:
+        - gameService [type: backend/src/services/GameService.ts:GameService]
+        - gameLogService [type: backend/src/services/GameLogService.ts:GameLogService]
+        - playerRegistry [type: Map]
+      Methods:
+        METHOD constructor(gameService, gameLogService)
+          Assigns:
+            - this.gameService
+            - this.gameLogService
+        METHOD registerSocketHandlers(socket)
+          Calls:
+            - socket.on [event: 'sendToServer']
+              Calls (callback):
+                - console.log
+                - console.error [conditional: true]
+                - this.handleGetId [conditional: true]
+                - console.log [conditional: true]
+        METHOD handleGetId(socket)
+          Accesses:
+            - socket.id
+          Calls:
+            - this.playerRegistry.has
+            - console.log
+            - socket.emit [event: 'onServerMsg']
+            - this.playerRegistry.set
+            - socket.emit [event: 'userId']
+
+File: backend/src/db.ts
+  Imports:
+    - Db, MongoClient from mongodb
+  Functions:
+    FUNCTION initializeDbConnection()
+      Calls:
+        - console.log
+        - MongoClient.connect
+        - console.error [conditional: true]
+        - client.db
+        - testDb.collection
+        - testCollection.insertOne
+        - movesCollection.countDocuments
+    FUNCTION getDbConnection(dbName)
+      Accesses:
+        - client
+      Calls:
+        - console.error [conditional: true]
+        - client.db [conditional: true]
+        - console.error [conditional: true]
+
+File: backend/src/models/BoardCell.ts
+  Classes:
+    CLASS BoardCell
+      Fields:
+        - index [type: number]
+        - label [type: string]
+        - value [type: number]
+        - fixed [type: boolean]
+        - isNonScoreCell [type: boolean]
+      Methods:
+        METHOD constructor(index, label, isNonScoreCell?)
+          Accesses:
+            - label.toLowerCase
+          Assigns:
+            - this.index
+            - this.label
+            - this.value
+            - this.fixed
+            - this.isNonScoreCell
+        METHOD toJSON()
+          Accesses:
+            - this.index
+            - this.label
+            - this.value
+            - this.fixed
+            - this.isNonScoreCell
+          Returns: object
+        METHOD fromJson(data, defaultLabel?) [static]
+          Accesses:
+            - data.index
+            - data.label
+            - data.isNonScoreCell
+            - data.value
+            - data.fixed
+          Instantiates:
+            - backend/src/models/BoardCell.ts:BoardCell
+          Assigns:
+            - cell.value
+            - cell.fixed
+          Returns: BoardCell
+
+File: backend/src/models/Dice.ts
+  Classes:
+    CLASS Dice
+      Fields:
+        - values [type: number[]]
+        - diceCount [type: number]
+      Methods:
+        METHOD constructor(diceCount?)
+          Assigns:
+            - this.diceCount
+          Calls:
+            - this.reset
+        METHOD roll()
+          Accesses:
+            - this.diceCount
+          Assigns:
+            - this.values[]
+          Calls:
+            - Math.floor
+            - Math.random
+            - this.getValues
+        METHOD rollSelected(keptDice)
+          Accesses:
+            - this.diceCount
+            - keptDice[]
+          Assigns:
+            - this.values[] [conditional: true]
+          Calls:
+            - Math.floor
+            - Math.random
+            - this.getValues
+        METHOD getValues()
+          Accesses:
+            - this.values
+          Returns: number[]
+        METHOD setValues(values)
+          Accesses:
+            - values
+          Assigns:
+            - this.values
+        METHOD reset()
+          Accesses:
+            - this.diceCount
+          Instantiates:
+            - Array
+          Assigns:
+            - this.values
+
+File: backend/src/models/Game.ts
+  Imports:
+    - Player, PlayerFactory from ./Player.ts
+    - uuidv4 from uuid
+    - getSelectionIndex from ../utils/yatzyMapping.ts
+  Classes:
+    CLASS Game
+      Fields:
+        - id [type: number]
+        - gameType [type: string]
+        - players [type: backend/src/models/Player.ts:Player[]]
+        - maxPlayers [type: number]
+        - connectedPlayers [type: number]
+        - gameStarted [type: boolean]
+        - gameFinished [type: boolean]
+        - playerToMove [type: number]
+        - diceValues [type: number[]]
+        - userNames [type: string[]]
+        - gameId [type: number]
+        - playerIds [type: string[]]
+        - abortedPlayers [type: boolean[]]
+        - rollCount [type: number]
+        - turnNumber [type: number]
+      Methods:
+        METHOD constructor(id, gameType, maxPlayers)
+          Assigns:
+            - this.id
+            - this.gameId
+            - this.gameType
+            - this.maxPlayers
+            - this.players
+            - this.playerIds
+            - this.userNames
+            - this.abortedPlayers
+            - this.connectedPlayers
+            - this.gameStarted
+            - this.gameFinished
+            - this.playerToMove
+            - this.diceValues
+            - this.rollCount
+            - this.turnNumber
+          Calls:
+            - Array.map
+            - backend/src/models/Player.ts:PlayerFactory.createEmptyPlayer
+            - Array.fill
+        METHOD addPlayer(player, position?)
+          Accesses:
+            - this.connectedPlayers
+            - this.maxPlayers
+            - player.id
+            - player.username
+          Assigns:
+            - this.players[]
+            - this.playerIds[]
+            - this.userNames[]
+            - this.connectedPlayers
+            - this.abortedPlayers[]
+            - player.isActive
+          Calls:
+            - this.findEmptySlot
+          Returns: boolean
+        METHOD removePlayer(playerId)
+          Accesses:
+            - this.players[]
+            - this.id
+            - this.gameFinished
+            - this.playerToMove
+            - this.maxPlayers
+          Assigns:
+            - this.players[].isActive
+            - this.abortedPlayers[]
+            - this.connectedPlayers
+            - this.gameFinished [conditional: true]
+          Calls:
+            - this.findPlayerIndex
+            - console.log
+            - this.advanceToNextActivePlayer [conditional: true]
+            - this.players.filter
+          Returns: boolean
+        METHOD markPlayerAborted(playerId)
+          Accesses:
+            - this.players[]
+            - this.gameFinished
+            - this.playerToMove
+            - this.maxPlayers
+          Assigns:
+            - this.players[].isActive [conditional: true]
+            - this.abortedPlayers[] [conditional: true]
+            - this.connectedPlayers [conditional: true]
+            - this.gameFinished [conditional: true]
+          Calls:
+            - this.findPlayerIndex
+            - this.advanceToNextActivePlayer [conditional: true]
+            - this.players.filter [conditional: true]
+          Returns: boolean
+        METHOD findPlayerIndex(playerId)
+          Accesses:
+            - this.players[]
+            - player.id
+          Calls:
+            - this.players.findIndex
+          Returns: number
+        METHOD findEmptySlot()
+          Accesses:
+            - this.players[]
+            - player.isActive
+            - player.id
+          Calls:
+            - this.players.findIndex
+          Returns: number
+        METHOD isGameFull()
+          Accesses:
+            - this.connectedPlayers
+            - this.maxPlayers
+          Returns: boolean
+        METHOD getCurrentTurnNumber()
+          Accesses:
+            - this.turnNumber
+          Returns: number
+        METHOD incrementRollCount()
+          Assigns:
+            - this.rollCount
+        METHOD advanceToNextActivePlayer()
+          Accesses:
+            - this.gameFinished
+            - this.playerToMove
+            - this.maxPlayers
+            - this.players[]
+            - this.abortedPlayers[]
+            - player.isActive
+          Assigns:
+            - this.playerToMove [conditional: true]
+            - this.rollCount
+            - this.turnNumber [conditional: true]
+            - this.gameFinished [conditional: true]
+          Calls:
+            - console.log
+            - this.players.filter
+        METHOD applySelection(playerIndex, selectionLabel, score)
+          Accesses:
+            - this.gameType
+            - this.players[]
+            - player.cells[]
+            - cell.fixed
+          Assigns:
+            - player.cells[].value [conditional: true]
+            - player.cells[].fixed [conditional: true]
+          Calls:
+            - backend/src/utils/yatzyMapping.ts:getSelectionIndex
+            - console.log
+            - player.calculateScores [conditional: true]
+            - console.warn [conditional: true]
+            - console.error [conditional: true]
+        METHOD isGameFinished()
+          Accesses:
+            - this.gameFinished
+            - this.players[]
+            - player.isActive
+          Assigns:
+            - this.gameFinished [conditional: true]
+          Calls:
+            - this.players.filter
+            - activePlayers.every [conditional: true]
+            - player.hasCompletedGame
+          Returns: boolean
+        METHOD setDiceValues(values)
+          Accesses:
+            - values.length
+          Assigns:
+            - this.diceValues
+          Calls:
+            - console.error [conditional: true]
+        METHOD toJSON()
+          Accesses:
+            - this.players
+            - this.id
+            - this.gameType
+            - this.maxPlayers
+            - this.connectedPlayers
+            - this.playerIds
+            - this.userNames
+            - this.diceValues
+            - this.rollCount
+            - this.turnNumber
+            - this.abortedPlayers
+          Calls:
+            - this.players.map
+            - player.toJSON
+            - this.isGameFinished
+          Returns: any
+        METHOD fromJSON(data) [static]
+          Accesses:
+            - data.gameId
+            - data.gameType
+            - data.nrPlayers
+            - data.gameStarted
+            - data.gameFinished
+            - data.playerToMove
+            - data.connected
+            - data.diceValues
+            - data.rollCount
+            - data.turnNumber
+            - data.abortedPlayers
+            - data.players
+            - data.playerIds
+            - data.userNames
+          Instantiates:
+            - backend/src/models/Game.ts:Game
+            - Array
+          Assigns:
+            - game (properties)
+            - game.players[]
+            - game.playerIds[]
+            - game.userNames[]
+            - game.connectedPlayers
+          Calls:
+            - Array.isArray [conditional: true]
+            - backend/src/models/Player.ts:Player.fromJSON [loop: true, conditional: true]
+            - backend/src/models/Player.ts:PlayerFactory.createEmptyPlayer [loop: true, conditional: true]
+            - game.players.filter [conditional: true]
+            - backend/src/models/Player.ts:PlayerFactory.createPlayer [loop: true, conditional: true]
+          Returns: Game
+
+File: backend/src/models/Player.ts
+  Imports:
+    - BoardCell from ./BoardCell.ts
+    - GameConfig, getBaseGameType from ../utils/gameConfig.ts
+  Classes:
+    CLASS Player
+      Fields:
+        - id [type: string]
+        - username [type: string]
+        - isActive [type: boolean]
+        - cells [type: backend/src/models/BoardCell.ts:BoardCell[]]
+        - score [type: number]
+        - upperSum [type: number]
+        - bonusAchieved [type: boolean]
+        - gameType [type: string] (private)
+      Methods:
+        METHOD _countDice(diceValues) [private]
+          Accesses:
+            - diceValues
+          Returns: number[]
+        METHOD _calculateUpperSection(diceValues, faceValue) [private]
+          Accesses:
+            - diceValues
+          Returns: number
+        METHOD _calculatePairScore(diceValues) [private]
+          Calls:
+            - this._countDice
+          Returns: number
+        METHOD _calculateTwoPairsScore(diceValues) [private]
+          Accesses:
+            - this.gameType
+          Calls:
+            - this._countDice
+          Returns: number
+        METHOD _calculateThreeOfKindScore(diceValues) [private]
+          Calls:
+            - this._countDice
+          Returns: number
+        METHOD _calculateFourOfKindScore(diceValues) [private]
+          Calls:
+            - this._countDice
+          Returns: number
+        METHOD _calculateFullHouseScore(diceValues) [private]
+          Calls:
+            - this._countDice
+          Returns: number
+        METHOD _calculateSmallStraightScore(diceValues) [private]
+          Accesses:
+            - diceValues
+          Calls:
+            - Set
+            - Array.sort
+            - Array.includes
+          Returns: number
+        METHOD _calculateLargeStraightScore(diceValues) [private]
+          Accesses:
+            - diceValues
+          Calls:
+            - Set
+            - Array.sort
+            - Array.includes
+          Returns: number
+        METHOD _calculateChanceScore(diceValues) [private]
+          Accesses:
+            - diceValues
+          Calls:
+            - Array.reduce
+          Returns: number
+        METHOD _calculateYatzyScore(diceValues) [private]
+          Accesses:
+            - this.gameType
+            - GameConfig[<type>].diceCount
+            - GameConfig[<type>].cellLabels
+          Calls:
+            - this._countDice
+            - backend/src/utils/gameConfig.ts:getBaseGameType
+            - Array.includes
+          Returns: number
+        METHOD _calculateThreePairsScore(diceValues) [private]
+          Accesses:
+            - this.gameType
+          Calls:
+            - this._countDice
+          Returns: number
+        METHOD _calculateFiveOfKindScore(diceValues) [private]
+          Accesses:
+            - this.gameType
+          Calls:
+            - this._countDice
+          Returns: number
+        METHOD _calculateFullStraightScore(diceValues) [private]
+          Accesses:
+            - this.gameType
+            - diceValues
+          Calls:
+            - Set
+            - Array.sort
+          Returns: number
+        METHOD _calculateHouse32Score(diceValues) [private]
+          Calls:
+            - this._calculateFullHouseScore
+          Returns: number
+        METHOD _calculateHouse33Score(diceValues) [private]
+          Accesses:
+            - this.gameType
+          Calls:
+            - this._countDice
+          Returns: number
+        METHOD _calculateHouse24Score(diceValues) [private]
+          Accesses:
+            - this.gameType
+          Calls:
+            - this._countDice
+          Returns: number
+        METHOD _getScoreFunction(label) [private]
+          Accesses:
+            - label
+          Calls:
+            - this._calculateUpperSection.bind
+            - this._calculatePairScore.bind
+            - this._calculateTwoPairsScore.bind
+            - this._calculateThreeOfKindScore.bind
+            - this._calculateFourOfKindScore.bind
+            - this._calculateFullHouseScore.bind
+            - this._calculateSmallStraightScore.bind
+            - this._calculateLargeStraightScore.bind
+            - this._calculateChanceScore.bind
+            - this._calculateYatzyScore.bind
+            - this._calculateThreePairsScore.bind
+            - this._calculateFiveOfKindScore.bind
+            - this._calculateFullStraightScore.bind
+            - this._calculateHouse32Score.bind
+            - this._calculateHouse33Score.bind
+            - this._calculateHouse24Score.bind
+          Returns: function
+        METHOD constructor(id, username, gameType?, isActive?, cells?, score?, upperSum?, bonusAchieved?)
+          Assigns:
+            - this.id
+            - this.username
+            - this.gameType
+            - this.isActive
+            - this.cells
+            - this.score
+            - this.upperSum
+            - this.bonusAchieved
+          Accesses:
+            - this.gameType
+            - GameConfig[<type>].cellLabels
+            - GameConfig[<type>].nonNumericCells
+            - GameConfig[<type>].bonusThreshold
+          Calls:
+            - backend/src/utils/gameConfig.ts:getBaseGameType
+            - this.cells.forEach [conditional: true]
+            - Array.includes [loop: true, conditional: true]
+            - Array.map [conditional: true]
+            - backend/src/models/BoardCell.ts:BoardCell [loop: true, conditional: true]
+            - this.calculateScores
+        METHOD calculatePotentialScores(diceValues)
+          Accesses:
+            - diceValues
+            - this.cells
+            - cell.fixed
+            - cell.isNonScoreCell
+            - cell.label
+          Assigns:
+            - cell.value [loop: true, conditional: true]
+          Calls:
+            - Array.every
+            - this.clearPotentialScores [conditional: true]
+            - this.cells.forEach
+            - this._getScoreFunction [loop: true, conditional: true]
+            - calculateFunc(diceValues) [loop: true, conditional: true]
+        METHOD clearPotentialScores()
+          Accesses:
+            - this.username
+            - this.cells
+            - cell.fixed
+            - cell.isNonScoreCell
+          Assigns:
+            - cell.value [loop: true, conditional: true]
+          Calls:
+            - console.log
+            - this.cells.forEach
+            - this.calculateScores
+        METHOD calculateScores()
+          Accesses:
+            - this.gameType
+            - this.cells
+            - GameConfig[<type>].upperSectionEndIndex
+            - GameConfig[<type>].bonusThreshold
+            - GameConfig[<type>].bonusAmount
+            - cell.label
+            - cell.fixed
+            - cell.isNonScoreCell
+            - cell.value
+          Assigns:
+            - this.cells[<sum_index>].value [conditional: true]
+            - this.cells[<sum_index>].fixed [conditional: true]
+            - this.cells[<sum_index>].isNonScoreCell [conditional: true]
+            - this.cells[<bonus_index>].value [conditional: true]
+            - this.cells[<bonus_index>].fixed [conditional: true]
+            - this.cells[<bonus_index>].isNonScoreCell [conditional: true]
+            - this.cells[<total_index>].value [conditional: true]
+            - this.cells[<total_index>].fixed [conditional: true]
+            - this.cells[<total_index>].isNonScoreCell [conditional: true]
+            - this.upperSum
+            - this.score
+            - this.bonusAchieved
+          Calls:
+            - backend/src/utils/gameConfig.ts:getBaseGameType
+            - this.cells.findIndex
+            - this.cells.slice.every [conditional: true]
+        METHOD hasCompletedGame()
+          Accesses:
+            - this.cells
+            - cell.fixed
+            - cell.isNonScoreCell
+          Calls:
+            - this.cells.every
+          Returns: boolean
+        METHOD getScore()
+          Accesses:
+            - this.score
+          Returns: number
+        METHOD calculateDerivedScores()
+          Accesses:
+            - this.gameType
+            - this.cells
+            - GameConfig[<type>].upperSectionEndIndex
+            - GameConfig[<type>].bonusThreshold
+            - GameConfig[<type>].bonusAmount
+            - cell.label
+            - cell.fixed
+            - cell.isNonScoreCell
+            - cell.value
+          Assigns:
+            - this.cells[<sum_index>].value [conditional: true]
+            - this.cells[<sum_index>].fixed [conditional: true]
+            - this.cells[<bonus_index>].value [conditional: true]
+            - this.cells[<bonus_index>].fixed [conditional: true]
+            - this.cells[<total_index>].value [conditional: true]
+            - this.cells[<total_index>].fixed [conditional: true]
+            - this.upperSum
+            - this.score
+            - this.bonusAchieved
+          Calls:
+            - backend/src/utils/gameConfig.ts:getBaseGameType
+            - this.cells.findIndex
+            - this.cells.slice.every [conditional: true]
+        METHOD toJSON()
+          Accesses:
+            - this.id
+            - this.username
+            - this.isActive
+            - this.cells
+            - this.score
+            - this.upperSum
+            - this.bonusAchieved
+          Calls:
+            - this.cells.map
+            - cell.toJSON
+          Returns: any
+        METHOD fromJSON(data, gameType?) [static]
+          Accesses:
+            - data.cells
+            - data.id
+            - data.username
+            - data.isActive
+            - data.score
+            - data.upperSum
+            - data.bonusAchieved
+            - GameConfig[<type>].cellLabels
+          Instantiates:
+            - backend/src/models/Player.ts:Player
+          Calls:
+            - backend/src/utils/gameConfig.ts:getBaseGameType
+            - data.cells.map [conditional: true]
+            - backend/src/models/BoardCell.ts:BoardCell.fromJson [loop: true, conditional: true]
+          Returns: Player
+    CLASS PlayerFactory [static]
+      Methods:
+        METHOD createPlayer(id, username, gameType?) [static]
+          Accesses:
+            - gameType
+          Instantiates:
+            - backend/src/models/Player.ts:Player
+          Calls:
+            - backend/src/utils/gameConfig.ts:getBaseGameType
+            - console.warn [conditional: true]
+          Returns: Player
+        METHOD createEmptyPlayer(gameType?) [static]
+          Accesses:
+            - gameType
+            - GameConfig[<type>].cellLabels
+            - GameConfig[<type>].nonNumericCells
+          Instantiates:
+            - backend/src/models/Player.ts:Player
+            - backend/src/models/BoardCell.ts:BoardCell [loop: true]
+          Calls:
+            - backend/src/utils/gameConfig.ts:getBaseGameType
+            - console.warn [conditional: true]
+            - Array.map
+            - Array.includes [loop: true]
+          Returns: Player
+
+File: backend/src/routes/getLogRoute.ts
+  Imports:
+    - jwt from jsonwebtoken
+    - getDbConnection from ../db.ts
+  Objects:
+    OBJECT getLogRoute
+      Fields:
+        - path [value: "/api/getLog/:userId"]
+        - method [value: "get"]
+        - handler [type: function]
+          Calls (async):
+            - console.log
+            - req.headers (access)
+            - req.params (access)
+            - res.status().json() [conditional: true]
+            - authorization.split
+            - jwt.verify
+              Calls (callback):
+                - console.log
+                - res.status().json() [conditional: true]
+                - backend/src/db.ts:getDbConnection
+                - db.collection().find()
+                - cursor.toArray()
+                - res.status().json()
+
+File: backend/src/routes/getTopScores.ts
+  Imports:
+    - getDbConnection from ../db.ts
+  Objects:
+    OBJECT getTopScores
+      Fields:
+        - path [value: "/GetTopScores"]
+        - method [value: "get"]
+        - handler [type: function]
+          Calls (async):
+            - backend/src/db.ts:getDbConnection
+            - req.query.type (access)
+            - console.warn [conditional: true]
+            - res.status().json() [conditional: true]
+            - console.log
+            - db.collection().find().sort().toArray()
+            - res.status().json()
+            - console.log [conditional: true]
+            - res.sendStatus() [conditional: true]
+
+File: backend/src/routes/index.ts
+  Imports:
+    - logInRoute from ./logInRoute.ts
+    - logRoute from ./logRoute.ts
+    - getLogRoute from ./getLogRoute.ts
+    - signUpRoute from ./signUpRoute.ts
+    - getTopScores from ./getTopScores.ts
+    - updateTopScore from ./updateTopScore.ts
+  Functions:
+    FUNCTION routes()
+      Accesses:
+        - backend/src/routes/logRoute.ts:logRoute
+        - backend/src/routes/getLogRoute.ts:getLogRoute
+        - backend/src/routes/logInRoute.ts:logInRoute
+        - backend/src/routes/signUpRoute.ts:signUpRoute
+        - backend/src/routes/getTopScores.ts:getTopScores
+        - backend/src/routes/updateTopScore.ts:updateTopScore
+      Returns: Array
+
+File: backend/src/routes/logInRoute.ts
+  Imports:
+    - bcrypt from bcrypt
+    - jwt from jsonwebtoken
+    - getDbConnection from ../db.ts
+  Objects:
+    OBJECT logInRoute
+      Fields:
+        - path [value: "/api/login"]
+        - method [value: "post"]
+        - handler [type: function]
+          Calls (async):
+            - req.body (access)
+            - backend/src/db.ts:getDbConnection
+            - db.collection().findOne()
+            - res.sendStatus() [conditional: true]
+            - bcrypt.compare()
+            - jwt.sign [conditional: true]
+              Calls (callback):
+                - res.status().json()
+
+File: backend/src/routes/logRoute.ts
+  Imports:
+    - jwt from jsonwebtoken
+    - getDbConnection from ../db.ts
+  Objects:
+    OBJECT logRoute
+      Fields:
+        - path [value: "/api/log/:userId"]
+        - method [value: "post"]
+        - handler [type: function]
+          Calls (async):
+            - req.headers (access)
+            - req.params (access)
+            - req.body (access)
+            - console.log
+            - res.status().json() [conditional: true]
+            - authorization.split
+            - jwt.verify
+              Calls (callback):
+                - console.log
+                - res.status().json() [conditional: true]
+                - backend/src/db.ts:getDbConnection
+                - db.collection().findOneAndUpdate()
+                - res.status().json()
+
+File: backend/src/routes/signUpRoute.ts
+  Imports:
+    - bcrypt from bcrypt
+    - jwt from jsonwebtoken
+    - getDbConnection from ../db.ts
+  Objects:
+    OBJECT signUpRoute
+      Fields:
+        - path [value: "/api/signup"]
+        - method [value: "post"]
+        - handler [type: function]
+          Calls (async):
+            - req.body (access)
+            - backend/src/db.ts:getDbConnection
+            - db.collection().findOne()
+            - console.log
+            - res.sendStatus() [conditional: true]
+            - bcrypt.hash()
+            - db.collection().insertOne()
+            - jwt.sign
+              Calls (callback):
+                - res.status().send() [conditional: true]
+                - res.status().json() [conditional: true]
+
+File: backend/src/routes/spectateGameRoute.ts
+  Imports:
+    - Request, Response from express
+    - GameService from ../services/GameService.ts
+    - GameLogService from ../services/GameLogService.ts
+    - getDbConnection from ../db.ts
+  Variables:
+    - gameServiceInstance [type: backend/src/services/GameService.ts:GameService]
+    - gameLogServiceInstance [type: backend/src/services/GameLogService.ts:GameLogService]
+  Functions:
+    FUNCTION initializeSpectateRoute(gs, gls)
+      Assigns:
+        - gameServiceInstance
+        - gameLogServiceInstance
+  Objects:
+    OBJECT spectateGameRoute
+      Fields:
+        - path [value: "/api/spectate/:gameId"]
+        - method [value: "get"]
+        - handler [type: function]
+          Calls (async):
+            - req.params.gameId (access)
+            - parseInt
+            - console.log
+            - req.ip (access)
+            - req.headers (access)
+            - isNaN
+            - console.error [conditional: true]
+            - res.status().json() [conditional: true]
+            - gameServiceInstance.getGame
+            - player.calculateScores [loop: true, conditional: true]
+            - player.cells.forEach [loop: true, conditional: true]
+            - game.toJSON [conditional: true]
+            - gameLogServiceInstance.getGameLog
+            - gameLog.moves.filter [conditional: true]
+            - gameLog.moves.forEach [conditional: true]
+            - res.status().json()
+
+File: backend/src/routes/updateTopScore.ts
+  Imports:
+    - getDbConnection from ../db.ts
+  Objects:
+    OBJECT updateTopScore
+      Fields:
+        - path [value: "/UpdateTopScore"]
+        - method [value: "post"]
+        - handler [type: function]
+          Calls (async):
+            - backend/src/db.ts:getDbConnection
+            - req.body.type (access)
+            - console.warn [conditional: true]
+            - res.status().json() [conditional: true]
+            - db.collection()
+            - collection.insertOne()
+            - collection.find().sort().toArray()
+            - res.status().json()
+            - console.log [conditional: true]
+            - res.sendStatus() [conditional: true]
+
+File: backend/src/server.ts
+  Imports:
+    - express from express
+    - routes from ./routes/index.ts
+    - initializeDbConnection from ./db.ts
+    - path from path
+    - cors from cors
+    - Server from socket.io
+    - createServer from http
+    - GameService from ./services/GameService.ts
+    - GameLogService from ./services/GameLogService.ts
+    - TopScoreService from ./services/TopScoreService.ts
+    - GameController from ./controllers/GameController.ts
+    - PlayerController from ./controllers/PlayerController.ts
+    - ChatController from ./controllers/ChatController.ts
+    - spectateGameRoute, initializeSpectateRoute from ./routes/spectateGameRoute.ts
+  Variables:
+    - PORT [value: 8000]
+    - app [type: express.Application]
+    - httpServer [type: http.Server]
+    - isOnline [type: boolean]
+    - localFlutterDir [type: string]
+    - localReactDir [type: string]
+    - io [type: socket.io:Server]
+    - gameLogService [type: backend/src/services/GameLogService.ts:GameLogService]
+    - topScoreService [type: backend/src/services/TopScoreService.ts:TopScoreService]
+    - gameService [type: backend/src/services/GameService.ts:GameService]
+    - gameController [type: backend/src/controllers/GameController.ts:GameController]
+    - playerController [type: backend/src/controllers/PlayerController.ts:PlayerController]
+    - chatController [type: backend/src/controllers/ChatController.ts:ChatController]
+  Execution Flow:
+    - Instantiates: express.Application
+    - Calls: app.use(cors())
+    - Calls: createServer(app)
+    - Calls: console.log
+    - Calls: app.use(express.static()) [conditional: true]
+    - Calls: app.use(express.json())
+    - Calls: backend/src/routes/index.ts:routes()
+    - Calls: app[<method>]() [loop: true]
+    - Calls: console.error [conditional: true]
+    - Calls: app.get() [route: spectateGameRoute.path]
+    - Instantiates: socket.io:Server
+    - Calls: io.use()
+      Calls (callback):
+        - console.log
+        - next()
+    - Instantiates: backend/src/services/GameLogService.ts:GameLogService
+    - Instantiates: backend/src/services/TopScoreService.ts:TopScoreService
+    - Instantiates: backend/src/services/GameService.ts:GameService
+    - Instantiates: backend/src/controllers/GameController.ts:GameController
+    - Instantiates: backend/src/controllers/PlayerController.ts:PlayerController
+    - Instantiates: backend/src/controllers/ChatController.ts:ChatController
+    - Calls: backend/src/routes/spectateGameRoute.ts:initializeSpectateRoute
+    - Calls: io.on [event: 'connect']
+      Calls (callback):
+        - console.log
+        - socket.emit [event: 'welcome']
+        - gameService.broadcastGameListToPlayer
+        - console.error [conditional: true]
+        - socket.on [event: 'echo']
+          Calls (callback):
+            - console.log
+            - socket.emit [event: 'echo']
+        - gameController.registerSocketHandlers
+        - playerController.registerSocketHandlers
+        - chatController.registerSocketHandlers
+        - socket.on [event: 'sendToServer']
+          Calls (callback):
+            - console.log
+            - topScoreService.getTopScores [conditional: true]
+              Calls (callback):
+                - socket.emit [event: 'onServerMsg']
+                - console.log
+              Calls (catch):
+                - console.error
+                - socket.emit [event: 'errorMsg']
+            - console.log [conditional: true]
+        - socket.on [event: 'sendToClients']
+          Calls (callback):
+            - console.log
+        - socket.on [event: 'disconnect']
+          Calls (callback):
+            - console.log
+            - gameService.handlePlayerDisconnect
+    - Calls: app.get [route: '/']
+      Calls (callback):
+        - res.sendFile()
+    - Calls: backend/src/db.ts:initializeDbConnection
+      Calls (then):
+        - console.log
+        - gameLogService.getCollection
+        - console.error [conditional: true]
+        - httpServer.listen
+          Calls (callback):
+            - console.log
+            - gameLogService.getDatabaseName
+            - gameLogService.getCollectionName
+      Calls (catch):
+        - console.error
+        - process.exit
+
+File: backend/src/services/GameLogService.ts
+  Imports:
+    - Collection from mongodb
+    - getDbConnection from ../db.ts
+    - Game from ../models/Game.ts
+  Interfaces:
+    - GameMove
+    - GameLog
+  Classes:
+    CLASS GameLogService
+      Methods:
+        METHOD getCollection()
+          Calls:
+            - backend/src/db.ts:getDbConnection
+            - db.collection
+          Returns: Collection<GameLog>
+        METHOD getDatabaseName()
+          Returns: string
+        METHOD getCollectionName()
+          Returns: string
+        METHOD logGameStart(game)
+          Accesses:
+            - game.id
+            - game.gameType
+            - game.maxPlayers
+            - game.players
+            - p.username
+            - p.id
+          Instantiates:
+            - Date
+          Calls:
+            - console.log
+            - this.getCollection
+            - collection.replaceOne
+            - console.error [conditional: true]
+        METHOD logMove(gameId, move)
+          Accesses:
+            - move.action
+            - move.selectionLabel
+            - move.score
+            - move.diceValues
+            - move.keptDice
+            - DB_NAME
+            - COLLECTION_NAME
+            - move.playerIndex
+            - move.timestamp
+            - gameExists.moves
+          Instantiates:
+            - Date
+          Calls:
+            - console.log
+            - backend/src/db.ts:getDbConnection
+            - console.error [conditional: true]
+            - this.getCollection
+            - collection.findOne
+            - collection.insertOne [conditional: true]
+            - console.error [conditional: true]
+            - collection.updateOne
+            - JSON.stringify
+        METHOD logGameEnd(gameId, finalScores)
+          Instantiates:
+            - Date
+          Calls:
+            - console.log
+            - this.getCollection
+            - collection.updateOne
+            - console.error [conditional: true]
+        METHOD getGameLog(gameId)
+          Accesses:
+            - gameLog.moves
+            - move.action
+            - move.selectionLabel
+            - move.score
+            - move.playerIndex
+          Calls:
+            - console.log
+            - this.getCollection
+            - collection.findOne
+            - gameLog.moves.forEach [loop: true, conditional: true]
+            - console.error [conditional: true]
+          Returns: Promise<GameLog | null>
+        METHOD logSpectate(gameId, spectatorId, spectatorName)
+          Accesses:
+            - game.moves
+          Instantiates:
+            - Date
+          Calls:
+            - console.log
+            - this.getGameLog
+            - console.error [conditional: true]
+            - this.getCollection
+            - collection.updateOne [conditional: true]
+            - console.error [conditional: true]
+
+File: backend/src/services/GameService.ts
+  Imports:
+    - Game from ../models/Game.ts
+    - Player, PlayerFactory from ../models/Player.ts
+    - Server, Socket from socket.io
+    - GameLogService, GameMove from ./GameLogService.ts
+    - TopScoreService from ./TopScoreService.ts
+    - getSelectionLabel from ../utils/yatzyMapping.ts
+    - GameConfig, getBaseGameType from ../utils/gameConfig.ts
+  Classes:
+    CLASS GameService
+      Fields:
+        - games [type: Map<number, Game>]
+        - spectators [type: Map<number, Set<string>>]
+        - gameIdCounter [type: number]
+        - io [type: socket.io:Server]
+        - gameLogService [type: backend/src/services/GameLogService.ts:GameLogService]
+        - topScoreService [type: backend/src/services/TopScoreService.ts:TopScoreService]
+      Methods:
+        METHOD constructor(io, gameLogService, topScoreService)
+          Assigns:
+            - this.io
+            - this.gameLogService
+            - this.topScoreService
+        METHOD addSpectator(gameId, spectatorId)
+          Accesses:
+            - this.games
+            - game.gameFinished
+            - this.spectators
+            - gameSpectators.size
+          Calls:
+            - this.games.get
+            - console.log
+            - this.spectators.has
+            - this.spectators.set [conditional: true]
+            - this.spectators.get
+            - gameSpectators.has
+            - gameSpectators.add [conditional: true]
+            - game.toJSON
+            - this.io.to(<target_id>).emit [event: 'onServerMsg']
+          Returns: boolean
+        METHOD removeSpectator(spectatorId)
+          Accesses:
+            - this.spectators
+            - gameSpectators.size
+          Calls:
+            - this.spectators.entries
+            - gameSpectators.delete [loop: true]
+            - console.log [loop: true, conditional: true]
+            - this.spectators.delete [loop: true, conditional: true]
+        METHOD createGame(gameType, maxPlayers)
+          Assigns:
+            - this.gameIdCounter
+          Instantiates:
+            - backend/src/models/Game.ts:Game
+          Calls:
+            - this.games.set
+            - console.log
+            - this.gameLogService.logGameStart
+              Calls (then):
+                - console.log
+              Calls (catch):
+                - console.error
+          Returns: Game
+        METHOD findAvailableGame(gameType, maxPlayers)
+          Accesses:
+            - this.games
+            - game.gameType
+            - game.maxPlayers
+            - game.gameStarted
+          Calls:
+            - this.games.values [iterator]
+            - game.isGameFull [loop: true]
+          Returns: Game | null
+        METHOD getGame(gameId)
+          Calls:
+            - this.games.get
+          Returns: Game | undefined
+        METHOD getAllGames()
+          Calls:
+            - Array.from
+            - this.games.values
+          Returns: Game[]
+        METHOD removeGame(gameId)
+          Accesses:
+            - this.games
+            - game.gameFinished
+            - game.players
+            - p.id
+            - p.username
+          Calls:
+            - this.games.get
+            - game.players.filter [conditional: true]
+            - p.getScore [loop: true, conditional: true]
+            - console.log [conditional: true]
+            - this.gameLogService.logGameEnd [conditional: true]
+              Calls (then):
+                - console.log
+              Calls (catch):
+                - console.error
+            - this.games.delete
+          Returns: boolean
+        METHOD joinGame(gameId, player)
+          Accesses:
+            - this.games
+            - game.gameStarted
+          Calls:
+            - this.games.get
+            - game.isGameFull [conditional: true]
+            - game.addPlayer [conditional: true]
+            - this.gameLogService.logGameStart [conditional: true]
+              Calls (then):
+                - console.log
+              Calls (catch):
+                - console.error
+          Returns: Game | null
+        METHOD handlePlayerDisconnect(playerId)
+          Accesses:
+            - this.games
+            - game.players[]
+            - game.gameFinished
+          Instantiates:
+            - Date
+          Calls:
+            - this.games.entries [iterator]
+            - game.findPlayerIndex [loop: true]
+            - console.log [loop: true, conditional: true]
+            - affectedGames.push [loop: true, conditional: true]
+            - game.getCurrentTurnNumber [loop: true, conditional: true]
+            - this.gameLogService.logMove [loop: true, conditional: true]
+              Calls (then):
+                - console.log
+              Calls (catch):
+                - console.error
+            - game.markPlayerAborted [loop: true, conditional: true]
+            - this.handleGameFinished [loop: true, conditional: true]
+            - this.notifyGameUpdate [loop: true, conditional: true]
+            - this.broadcastGameList [conditional: true]
+            - this.removeSpectator
+        METHOD broadcastGameList()
+          Calls:
+            - Array.from
+            - this.games.values
+            - Array.filter
+            - game.toJSON [loop: true]
+            - this.io.emit [event: 'onServerMsg']
+            - console.log
+        METHOD broadcastGameListToPlayer(playerId)
+          Calls:
+            - Array.from
+            - this.games.values
+            - Array.filter
+            - game.toJSON [loop: true]
+            - this.io.to(<target_id>).emit [event: 'onServerMsg']
+            - console.log
+        METHOD notifyGameUpdate(game)
+          Accesses:
+            - game.players
+            - game.id
+            - player.id
+            - this.spectators
+          Calls:
+            - game.players.forEach
+            - p.calculateDerivedScores [loop: true, conditional: true]
+            - game.toJSON
+            - this.io.to(<target_id>).emit [event: 'onServerMsg'] [loop: true]
+            - this.spectators.get
+            - gameSpectators.values [iterator] [conditional: true]
+        METHOD handlePlayerStartingNewGame(playerId)
+          Calls:
+            - console.log
+            - this.handlePlayerDisconnect
+        METHOD handlePlayerAbort(playerId)
+          Calls:
+            - console.log
+            - this.handlePlayerDisconnect
+        METHOD handleGameFinished(game)
+          Accesses:
+            - game.id
+            - game.players
+            - p.id
+            - p.username
+            - game.gameType
+            - this.spectators
+          Calls:
+            - console.log
+            - game.players.filter
+            - p.getScore [loop: true]
+            - this.gameLogService.logGameEnd
+              Calls (then):
+                - console.log
+              Calls (catch):
+                - console.error
+            - finalScores.map
+            - this.topScoreService.updateTopScore [loop: true, conditional: true]
+              Calls (then):
+                - console.log
+              Calls (catch):
+                - console.error
+            - Promise.all
+              Calls (then):
+                - console.log
+            - this.notifyGameFinished
+            - this.games.delete
+            - this.spectators.has
+            - this.spectators.get [conditional: true]
+            - this.spectators.delete [conditional: true]
+            - this.broadcastGameList
+        METHOD notifyGameFinished(game)
+          Accesses:
+            - game.id
+            - game.players
+            - player.id
+            - this.spectators
+          Calls:
+            - game.toJSON
+            - console.log
+            - this.io.to(<target_id>).emit [event: 'onServerMsg'] [loop: true]
+            - this.spectators.get
+            - gameSpectators.values [iterator] [conditional: true]
+        METHOD processDiceRoll(gameId, playerId, diceValues, keptDice, isRegret?, isExtra?)
+          Accesses:
+            - this.games
+            - game.playerToMove
+            - game.diceValues
+            - game.rollCount
+            - game.id
+            - game.players
+            - player.id
+          Instantiates:
+            - Date
+          Calls:
+            - this.games.get
+            - console.error [conditional: true]
+            - game.findPlayerIndex
+            - game.getCurrentTurnNumber
+            - console.log
+            - this.gameLogService.logMove
+              Calls (catch):
+                - console.error
+            - game.setDiceValues
+            - game.incrementRollCount
+            - game.players.forEach
+            - p.clearPotentialScores [loop: true, conditional: true]
+            - currentPlayer.calculatePotentialScores [conditional: true]
+            - currentPlayer.calculateScores [conditional: true]
+            - this.notifyGameUpdate
+          Returns: Promise<boolean>
+        METHOD processSelection(gameId, playerId, selectionLabel, score)
+          Accesses:
+            - this.games
+            - game.playerToMove
+            - game.diceValues
+            - game.id
+            - game.players
+            - game.gameType
+          Instantiates:
+            - Date
+          Calls:
+            - this.games.get
+            - console.error [conditional: true]
+            - game.findPlayerIndex
+            - console.log
+            - game.getCurrentTurnNumber
+            - this.gameLogService.logMove
+              Calls (catch):
+                - console.error
+            - this.gameLogService.getGameLog [conditional: true]
+            - game.applySelection
+            - game.players.forEach
+            - p.clearPotentialScores [loop: true, conditional: true]
+            - player.cells.forEach [loop: true, conditional: true]
+            - game.isGameFinished
+            - this.handleGameFinished [conditional: true]
+            - game.advanceToNextActivePlayer [conditional: true]
+            - nextPlayer.clearPotentialScores [conditional: true]
+            - backend/src/utils/gameConfig.ts:getBaseGameType [conditional: true]
+            - Array [conditional: true]
+            - game.setDiceValues [conditional: true]
+            - this.notifyGameUpdate [conditional: true]
+          Returns: Promise<boolean>
+        METHOD forwardSelectionToPlayers(gameId, senderId, selectionData)
+          Accesses:
+            - this.games
+            - selectionData.selectionLabel
+            - selectionData.cell
+            - game.gameType
+            - selectionData.diceValue
+            - selectionData.score
+            - game.players
+            - player.isActive
+            - player.id
+          Calls:
+            - this.games.get
+            - console.log
+            - console.error [conditional: true]
+            - backend/src/utils/yatzyMapping.ts:getSelectionLabel [conditional: true]
+            - game.findPlayerIndex
+            - this.io.to(<target_id>).emit [event: 'onClientMsg'] [loop: true]
+          Returns: boolean
+        METHOD createOrJoinGame(gameType, maxPlayers, player)
+          Accesses:
+            - player.id
+            - game.id
+            - game.players
+            - p.isActive
+            - p.id
+          Calls:
+            - console.error [conditional: true]
+            - console.warn [conditional: true]
+            - this.handlePlayerStartingNewGame
+            - this.findAvailableGame
+            - console.log
+            - this.createGame [conditional: true]
+            - game.addPlayer
+            - this.gameLogService.logGameStart [conditional: true]
+              Calls (then):
+                - console.log
+              Calls (catch):
+                - console.error
+            - game.players.filter
+            - game.isGameFull
+            - game.toJSON [conditional: true]
+            - this.io.to(<target_id>).emit [event: 'onServerMsg'] [loop: true, conditional: true]
+            - this.notifyGameUpdate [conditional: true]
+            - this.broadcastGameList
+          Returns: Game
+
+File: backend/src/services/TopScoreService.ts
+  Imports:
+    - Collection, Db from mongodb
+    - getDbConnection from ../db.ts
+    - Server from socket.io
+  Interfaces:
+    - TopScoreEntry
+  Classes:
+    CLASS TopScoreService
+      Fields:
+        - io [type: socket.io:Server]
+      Methods:
+        METHOD constructor(io)
+          Assigns:
+            - this.io
+        METHOD getDb() [private]
+          Calls:
+            - backend/src/db.ts:getDbConnection
+          Returns: Db
+        METHOD getCollection(gameType) [private]
+          Accesses:
+            - SUPPORTED_GAME_TYPES
+          Calls:
+            - Array.includes
+            - console.warn [conditional: true]
+            - this.getDb
+            - gameType.charAt
+            - gameType.slice
+            - db.collection
+          Returns: Collection<TopScoreEntry> | null
+        METHOD getTopScores(gameType, limit?)
+          Accesses:
+            - SUPPORTED_GAME_TYPES
+          Calls:
+            - Array.includes
+            - console.warn [conditional: true]
+            - this.getCollection
+            - collection.find().sort().limit().toArray() [conditional: true]
+            - console.log
+            - console.error [conditional: true]
+          Returns: Promise<TopScoreEntry[]>
+        METHOD getAllTopScores()
+          Accesses:
+            - SUPPORTED_GAME_TYPES
+          Calls:
+            - console.log
+            - this.getTopScores [loop: true]
+          Returns: Promise<{ [gameType: string]: TopScoreEntry[] }>
+        METHOD broadcastTopScores()
+          Calls:
+            - this.getAllTopScores
+              Calls (then):
+                - this.io.emit [event: 'onTopScoresUpdate']
+                - console.log
+              Calls (catch):
+                - console.error
+        METHOD updateTopScore(gameType, name, score)
+          Accesses:
+            - SUPPORTED_GAME_TYPES
+          Calls:
+            - console.warn [conditional: true]
+            - Array.includes
+            - this.getCollection
+            - collection.insertOne [conditional: true]
+            - console.log [conditional: true]
+            - console.error [conditional: true]
+          Returns: Promise<boolean>
+
+File: backend/src/utils/gameConfig.ts
+  Interfaces:
+    - GameTypeConfig
+  Objects:
+    OBJECT GameConfig
+  Functions:
+    FUNCTION getBaseGameType(gameType)
+      Accesses:
+        - gameType.startsWith
+      Returns: string (keyof GameConfig)
+
+File: backend/src/utils/index.ts
+  Functions:
+    FUNCTION randomInt(min, max)
+      Calls:
+        - Math.floor
+        - Math.random
+      Returns: number
+    FUNCTION delay(ms)
+      Instantiates:
+        - Promise
+      Calls:
+        - setTimeout
+      Returns: Promise<void>
+    FUNCTION isDefined(value)
+      Returns: boolean
+    FUNCTION deepCopy(obj)
+      Calls:
+        - JSON.parse
+        - JSON.stringify
+      Returns: T
+
+File: backend/src/utils/yatzyMapping.ts
+  Variables:
+    - gameTypeMappings [const]
+  Functions:
+    FUNCTION getBaseGameType(gameType)
+      Accesses:
+        - gameType.startsWith
+      Returns: string (keyof gameTypeMappings)
+    FUNCTION getSelectionLabel(gameType, index)
+      Accesses:
+        - gameTypeMappings[<type>]
+      Calls:
+        - getBaseGameType
+        - console.error [conditional: true]
+      Returns: string | null
+    FUNCTION getSelectionIndex(gameType, label)
+      Accesses:
+        - gameTypeMappings[<type>]
+      Calls:
+        - getBaseGameType
+        - Array.indexOf
+        - console.error [conditional: true]
+      Returns: number
+
+File: lib/application/animations_application.dart
+  Imports:
+    - flutter/animation.dart
+  Classes:
+    CLASS AnimationsApplication
+      Fields:
+        - animationControllers [type: List<AnimationController>]
+        - animationDurations [type: List<Duration>]
+        - cellAnimationControllers [type: List]
+        - cellAnimation [type: List]
+        - players [type: int]
+        - boardXAnimationPos [type: List]
+        - boardYAnimationPos [type: List]
+      Methods:
+        METHOD animateBoard()
+          Accesses:
+            - this.players
+            - this.cellAnimationControllers[][]
+          Calls:
+            - controller.forward() [loop: true]
+        METHOD setupAnimation(ticket, nrPlayers, maxNrPlayers, maxTotalFields)
+          Assigns:
+            - this.players
+            - this.animationControllers[]
+            - this.cellAnimationControllers[]
+            - this.cellAnimation[]
+            - this.boardXAnimationPos[][]
+          Accesses:
+            - this.animationDurations
+            - this.cellAnimationControllers[][]
+            - this.cellAnimation[][]
+          Instantiates:
+            - AnimationController [loop: true]
+            - CurveTween [loop: true]
+          Calls:
+            - AnimationController.addStatusListener [loop: true]
+              Calls (callback):
+                - controller.reverse() [conditional: true]
+            - AnimationController.addListener [loop: true]
+              Calls (callback):
+                - controller.isAnimating [conditional: true]
+                - controller.forward() [conditional: true]
+            - tween.animate() [loop: true]
+
+File: lib/application/application_functions_internal.dart
+  Imports:
+    - ./application.dart
+    - ../utils/yatzy_mapping_client.dart
+  Extensions:
+    EXTENSION ApplicationFunctionsInternal on Application
+      Methods:
+        METHOD clearFocus()
+          Assigns:
+            - focusStatus
+            - focusStatus[]
+          Accesses:
+            - nrPlayers
+            - totalFields
+          Calls:
+            - List.filled
+        METHOD cellClick(player, cell)
+          Accesses:
+            - playerToMove
+            - myPlayerId
+            - fixedCell[][]
+            - cellValue[][]
+            - gameType
+            - gameDices.diceValue
+            - gameId
+            - socketService
+            - socketService.isConnected
+          Calls:
+            - lib/utils/yatzy_mapping_client.dart:getSelectionLabel
+            - Map()
+            - print
+            - socketService.sendToClients [conditional: true]
+
+File: lib/application/application.dart
+  Imports:
+    - flutter/material.dart
+    - flutter_bloc
+    - ./application_functions_internal.dart
+    - ../dices/unity_communication.dart
+    - ../services/socket_service.dart
+    - ../dices/dices.dart
+    - ../input_items/input_items.dart
+    - ../startup.dart
+    - ../states/cubit/state/state_cubit.dart
+    - ./animations_application.dart
+    - ./languages_application.dart
+  Classes:
+    CLASS Application
+      with: lib/application/languages_application.dart:LanguagesApplication
+      Fields:
+        - context [type: BuildContext]
+        - inputItems [type: lib/input_items/input_items.dart:InputItems]
+        - isSpectating [type: bool]
+        - spectatedGameId [type: int]
+        - tabController [type: dynamic]
+        - textEditingController [type: TextEditingController]
+        - focusNode [type: FocusNode]
+        - animation [type: lib/application/animations_application.dart:AnimationsApplication]
+        - games [type: List]
+        - presentations [type: List]
+        - boardAnimation [type: bool]
+        - stackedWidgets [type: List<Widget>]
+        - gameType [type: String]
+        - nrPlayers [type: int]
+        - maxNrPlayers [type: int]
+        - maxTotalFields [type: int]
+        - gameData [type: Map<String, dynamic>]
+        - gameId [type: int]
+        - playerActive [type: List<bool>]
+        - totalFields [type: int]
+        - bonusSum [type: int]
+        - bonusAmount [type: int]
+        - myPlayerId [type: int]
+        - playerToMove [type: int]
+        - winnerId [type: int]
+        - gameStarted [type: boolean]
+        - gameFinished [type: boolean]
+        - boardXPos, boardYPos, boardWidth, boardHeight, cellValue, fixedCell, appText, appColors, focusStatus [type: List]
+        - listenerKey [type: GlobalKey]
+        - gameDices [type: lib/dices/dices.dart:Dices]
+        - serverId [type: String]
+        - cellKeys [type: List]
+        - socketService [type: lib/services/socket_service.dart:SocketService] (nullable)
+      Methods:
+        METHOD constructor({context, gameDices, inputItems})
+          Assigns:
+            - this.context
+            - this.gameDices
+            - this.inputItems
+          Calls:
+            - this.gameDices.setCallbacks
+            - this.languagesSetup
+            - this.getChosenLanguage
+            - this.getStandardLanguage
+        METHOD getChosenLanguage()
+          Accesses:
+            - chosenLanguage
+          Returns: Function
+        METHOD getStandardLanguage()
+          Accesses:
+            - standardLanguage
+          Returns: String
+        METHOD callbackCheckPlayerToMove()
+          Accesses:
+            - playerToMove
+            - myPlayerId
+          Returns: bool
+        METHOD callbackUnityCreated()
+          Accesses:
+            - myPlayerId
+            - playerToMove
+          Calls:
+            - gameDices.sendStartToUnity [conditional: true]
+        METHOD callbackUpdateDiceValues()
+          Accesses:
+            - gameId
+            - gameDices.diceValue
+            - socketService
+            - socketService.isConnected
+          Calls:
+            - Map()
+            - print
+            - socketService.sendToClients [conditional: true]
+        METHOD setAppText()
+          Accesses:
+            - gameType
+            - ones_ ... totalSum_ (from mixin)
+          Assigns:
+            - appText[]
+        METHOD setup()
+          Assigns:
+            - gameStarted
+            - playerToMove
+            - winnerId
+            - totalFields
+            - bonusSum
+            - bonusAmount
+            - appText
+            - boardXPos
+            - boardYPos
+            - boardWidth
+            - boardHeight
+            - animation.boardXAnimationPos
+            - animation.boardYAnimationPos
+            - fixedCell
+            - cellValue
+            - appColors
+            - cellKeys
+          Accesses:
+            - gameType
+            - nrPlayers
+            - isTesting
+            - gameDices.unityCreated
+            - myPlayerId
+            - playerToMove
+          Calls:
+            - topScore.loadTopScoreFromServer
+            - context.read<SetStateCubit>()
+            - gameDices.initDices
+            - List.filled
+            - this.setAppText
+            - this.clearFocus
+            - gameDices.sendResetToUnity [conditional: true]
+            - gameDices.sendStartToUnity [conditional: true]
+            - GlobalKey [loop: true]
+        METHOD setSocketService(service)
+          Assigns:
+            - this.socketService
+          Calls:
+            - print
+
+File: lib/application/communication_application.dart
+  Imports:
+    - flutter/material.dart
+    - flutter_bloc
+    - ./application_functions_internal.dart
+    - ../dices/unity_communication.dart
+    - ../chat/chat.dart
+    - ../injection.dart
+    - ../router/router.dart
+    - ../router/router.gr.dart
+    - ../services/service_provider.dart
+    - ../shared_preferences.dart
+    - ../startup.dart
+    - ../states/cubit/state/state_cubit.dart
+    - ./application.dart
+  Extensions:
+    EXTENSION CommunicationApplication on Application
+      Methods:
+        METHOD resetDices()
+          Accesses:
+            - totalFields
+            - playerToMove
+            - nrPlayers
+            - fixedCell[][]
+          Assigns:
+            - appText[][]
+            - cellValue[][]
+          Calls:
+            - gameDices.clearDices
+            - this.clearFocus
+        METHOD callbackOnServerMsg(data)
+          Accesses:
+            - data (dynamic access, potential nulls)
+            - socketService.socketId
+            - userName
+            - gameType
+            - nrPlayers
+            - boardAnimation
+            - chosenLanguage
+            - gameDices.unityDices
+            - gameDices.unityLightMotion
+            - gameId
+            - gameStarted
+            - applicationStarted
+            - isSpectating
+            - spectatedGameId
+            - gameData
+            - myPlayerId
+            - playerToMove
+            - totalFields
+          Assigns:
+            - socketService.socketId [conditional: true]
+            - userName
+            - gameType
+            - nrPlayers
+            - boardAnimation
+            - chosenLanguage
+            - gameDices.unityDices
+            - gameDices.unityLightMotion
+            - myPlayerId [conditional: true]
+            - gameData
+            - gameId [conditional: true]
+            - gameStarted [conditional: true]
+            - userNames [conditional: true]
+            - animation.players [conditional: true]
+            - applicationStarted [conditional: true]
+            - games [conditional: true]
+            - isSpectating
+            - spectatedGameId
+          Calls:
+            - getIt<AppRouter>()
+            - print
+            - ServiceProvider.of(context) [conditional: true]
+            - SharedPrefProvider.fetchPrefObject [conditional: true]
+            - this._processGameUpdate [conditional: true]
+            - this.setup [conditional: true]
+            - gameDices.sendResetToUnity [conditional: true]
+            - gameDices.sendStartToUnity [conditional: true]
+            - context.read<SetStateCubit>().setState
+            - router.pushAndPopUntil [conditional: true]
+            - topScore.updateScoresFromData [conditional: true]
+            - socketService.sendToServer [conditional: true]
+        METHOD _processGameUpdate(data)
+          Accesses:
+            - data (dynamic access)
+            - gameId
+            - isSpectating
+            - gameData
+            - socketService.socketId
+            - myPlayerId
+            - playerActive[][]
+            - playerToMove
+            - nrPlayers
+            - gameDices.unityDices
+          Assigns:
+            - gameData
+            - gameId [conditional: true]
+            - myPlayerId [conditional: true]
+            - gameType [conditional: true]
+            - nrPlayers [conditional: true]
+            - userNames [conditional: true]
+            - animation.players [conditional: true]
+            - playerActive
+            - fixedCell[][]
+            - cellValue[][]
+            - appText[][]
+            - appColors[][]
+            - playerToMove [conditional: true]
+          Calls:
+            - getIt<AppRouter>()
+            - print
+            - Map.from()
+            - context.read<SetStateCubit>().setState
+            - (List<dynamic>).map().toList() [conditional: true]
+            - this.setup [conditional: true]
+            - router.pop [conditional: true]
+            - router.pushAndPopUntil [conditional: true]
+            - this.resetDices [conditional: true]
+            - gameDices.sendResetToUnity [conditional: true]
+            - gameDices.sendStartToUnity [conditional: true]
+        METHOD chatCallbackOnSubmitted(text)
+          Accesses:
+            - text
+            - chat.scrollController
+            - gameId
+            - socketService
+            - socketService.isConnected
+            - userName
+          Calls:
+            - print
+            - chat.scrollController.animateTo
+            - Map()
+            - socketService.sendToClients [conditional: true]
+        METHOD updateChat(text)
+          Accesses:
+            - chat.messages
+            - chat.scrollController
+          Instantiates:
+            - lib/chat/chat.dart:ChatMessage
+          Calls:
+            - chat.messages.add
+            - Future.delayed
+            - chat.scrollController.animateTo
+        METHOD callbackOnClientMsg(data)
+          Accesses:
+            - data (dynamic access)
+            - playerActive[]
+            - myPlayerId
+            - gameDices.unityDices
+          Assigns:
+            - gameDices.diceValue [conditional: true]
+            - gameDices.nrRolls [conditional: true]
+          Calls:
+            - getIt<AppRouter>()
+            - print
+            - Map.from() [conditional: true]
+            - this.resetDices [conditional: true]
+            - gameDices.updateDiceImages [conditional: true]
+            - gameDices.sendDicesToUnity [conditional: true]
+            - this.updateChat [conditional: true]
+            - router.push [conditional: true]
+
+File: lib/application/languages_application.dart
+  Mixins:
+    MIXIN LanguagesApplication
+      Fields:
+        - _getChosenLanguage [type: Function] (private)
+        - _standardLanguage [type: String] (private)
+        - _ones ... _useTutorial [type: Map] (private, final)
+      Methods:
+        METHOD get ones_ ... useTutorial_ (getters)
+          Calls:
+            - this.getText
+        METHOD languagesSetup(getChosenLanguage, standardLanguage)
+          Assigns:
+            - _getChosenLanguage
+            - _standardLanguage
+            - _ones["Swedish"] ... _gameTypeMaxiRE3["Swedish"] (add translations)
+        METHOD getText(textVariable)
+          Calls:
+            - _getChosenLanguage()
+          Returns: String
+
+File: lib/application/widget_application_scaffold.dart
+  Imports:
+    - auto_route
+    - flutter/material.dart
+    - ../chat/widget_chat.dart
+    - ../dices/widget_dices.dart
+    - ../top_score/widget_top_scores.dart
+    - ../router/router.gr.dart
+    - ../scroll/widget_scroll.dart
+    - ../startup.dart
+    - ./application.dart
+    - ./widget_application.dart
+  Extensions:
+    EXTENSION WidgetApplicationScaffold on Application
+      Methods:
+        METHOD widgetScaffold(context, state)
+          Accesses:
+            - screenWidth
+            - screenHeight
+            - devicePixelRatio
+            - gameDices.unityDices
+            - mainPageLoaded
+            - isTutorial
+            - callbackCheckPlayerToMove
+            - gameDices.nrRolls
+            - tutorial.animationController1
+            - gameDices.rollDiceKey
+            - gameDices.pressToRoll_
+            - tutorial.animationController2
+            - gameDices.holdDiceKey[]
+            - gameDices.pressToHold_
+            - cellKeys[][]
+            - myPlayerId
+            - totalFields
+            - chooseMove_
+            - gameFinished
+            - tutorial.animationController3
+            - keySettings
+            - pressSettings_
+            - settings_
+          Assigns:
+            - screenWidth
+            - screenHeight
+            - devicePixelRatio
+            - stackedWidgets
+          Instantiates:
+            - Stack
+            - Positioned
+            - lib/dices/widget_dices.dart:WidgetDices
+            - lib/top_score/widget_top_scores.dart:WidgetTopScore
+            - lib/application/widget_application.dart:WidgetSetupGameBoard
+            - lib/application/widget_application.dart:WidgetDisplayGameStatus
+            - lib/chat/widget_chat.dart:WidgetChat
+            - lib/scroll/widget_scroll.dart:WidgetAnimationsScroll
+            - SizedBox
+            - FittedBox
+            - FloatingActionButton
+            - Icon
+            - Scaffold
+            - Image
+          Calls:
+            - MediaQuery.of(context).size
+            - MediaQuery.of(context).devicePixelRatio
+            - tutorial.widgetArrow [conditional: true]
+            - tutorial.animationController.isAnimating [conditional: true]
+            - tutorial.animationController.repeat [conditional: true]
+            - AutoRouter.of(context).push [conditional: true]
+            - Colors.blue.withValues [conditional: true]
+          Returns: Widget
+
+File: lib/application/widget_application_settings.dart
+  Imports:
+    - flutter/material.dart
+    - flutter_bloc
+    - ../services/service_provider.dart
+    - ../shared_preferences.dart
+    - ../startup.dart
+    - ../states/bloc/language/language_bloc.dart
+    - ../states/bloc/language/language_event.dart
+    - ../states/cubit/state/state_cubit.dart
+    - ../widgets/spectator_game_board.dart
+    - ./application.dart
+  Extensions:
+    EXTENSION WidgetApplicationSettings on Application
+      Methods:
+        METHOD widgetWaitingGame(context)
+          Accesses:
+            - games
+            - games[] (dynamic access)
+            - gameTypeOrdinary_
+            - serviceProvider.socketService.socketId
+            - ongoingGames_
+          Calls:
+            - ServiceProvider.of(context) [conditional: true]
+            - inputItems.widgetButton [loop: true]
+            - this.onAttemptJoinGame (within callback)
+            - Text [loop: true, conditional: true]
+            - this.onSpectateGame (within callback) [loop: true, conditional: true]
+          Returns: List<Widget>
+        METHOD onSpectateGame(context, gameId)
+          Accesses:
+            - userName
+            - serviceProvider.socketService.isConnected
+          Assigns:
+            - isSpectating
+            - spectatedGameId
+            - gameData
+          Calls:
+            - print
+            - ServiceProvider.of(context)
+            - Map()
+            - serviceProvider.socketService.sendToServer [conditional: true]
+            - context.read<SetStateCubit>().setState
+            - ScaffoldMessenger.of(context).showSnackBar
+        METHOD onAttemptJoinGame(context, i)
+          Accesses:
+            - games[]
+            - userName
+          Calls:
+            - print
+            - ServiceProvider.of(context)
+            - serviceProvider.socketService.sendToServer [conditional: true]
+        METHOD _buildGameTypeSelection(state) [private]
+          Accesses:
+            - gameTypeOrdinary_
+            - gameTypeMaxi_
+            - gameType
+          Assigns:
+            - gameType (within callback)
+          Instantiates:
+            - Padding
+            - Card
+            - Container
+            - Column
+            - Text
+            - SizedBox
+          Calls:
+            - inputItems.widgetStringRadioButton
+            - RoundedRectangleBorder
+            - BoxDecoration
+            - LinearGradient
+          Returns: Widget
+        METHOD onStartGameButton(context, state)
+          Accesses:
+            - serviceProvider.socketService.isConnected
+            - nrPlayers
+            - userName
+            - gameType
+            - chosenLanguage
+            - boardAnimation
+            - gameDices.unityDices
+            - gameDices.unityLightMotion
+          Calls:
+            - ServiceProvider.of(context)
+            - Map()
+            - List.filled
+            - print
+            - serviceProvider.socketService.sendToServer [conditional: true]
+            - state()
+            - SharedPrefProvider.setPrefObject
+        METHOD onChangeUserName(value)
+          Assigns:
+            - userName
+          Accesses:
+            - textEditingController.text
+        METHOD widgetScaffoldSettings(context, state)
+          Accesses:
+            - tabController.length
+            - settings_
+            - game_
+            - general_
+            - tabController
+            - nrPlayers
+            - currentUsername_
+            - userName
+            - enterUsername_
+            - textEditingController
+            - focusNode
+            - createGame_
+            - isSpectating
+            - spectatedGameId
+            - gameData
+            - misc_
+            - boardAnimation_
+            - boardAnimation
+            - choseLanguage_
+            - differentLanguages
+            - chosenLanguage
+          Assigns:
+            - boardAnimation (within callback)
+            - chosenLanguage (within callback)
+          Instantiates:
+            - DefaultTabController
+            - Scaffold
+            - AppBar
+            - TabBar
+            - Tab
+            - Text
+            - TabBarView
+            - Container
+            - Scrollbar
+            - ListView
+            - Padding
+            - Card
+            - Column
+            - SizedBox
+            - Row
+            - ElevatedButton
+            - ConstrainedBox
+            - SpectatorGameBoard [conditional: true]
+            - Icon
+            - Divider
+            - Theme
+            - CheckboxThemeData
+          Calls:
+            - Colors.blue.shade700
+            - Theme.of(context).colorScheme
+            - this._buildGameTypeSelection
+            - inputItems.widgetIntRadioButton
+            - inputItems.widgetInputText
+            - this.onChangeUserName (within callback)
+            - this.onStartGameButton (within callback)
+            - this.widgetWaitingGame
+            - BoxDecoration [conditional: true]
+            - Border.all [conditional: true]
+            - BorderRadius.circular [conditional: true]
+            - BoxShadow [conditional: true]
+            - Colors.blue.shade100 [conditional: true]
+            - BorderRadius.only [conditional: true]
+            - context.read<SetStateCubit>().setState [conditional: true]
+            - LinearGradient
+            - RoundedRectangleBorder
+            - inputItems.widgetCheckbox
+            - WidgetStateProperty.resolveWith [conditional: true]
+            - inputItems.widgetDropDownList
+            - context.read<LanguageBloc>().add [conditional: true]
+            - context.read<SetStateCubit>().setState [conditional: true]
+            - gameDices.widgetUnitySettings
+          Returns: Widget
+
+File: lib/application/widget_application.dart
+  Imports:
+    - dart:math
+    - auto_size_text
+    - flutter/material.dart
+    - flutter_bloc
+    - ./application_functions_internal.dart
+    - ../dices/unity_communication.dart
+    - ../startup.dart
+    - ../states/cubit/state/state_cubit.dart
+    - ./languages_application.dart
+  Classes:
+    CLASS WidgetSetupGameBoard (extends StatefulWidget)
+      Fields:
+        - width [type: double] (final)
+        - height [type: double] (final)
+      Methods:
+        METHOD createState() -> _WidgetSetupGameBoardState
+    CLASS _WidgetSetupGameBoardState (extends State<WidgetSetupGameBoard>)
+      with: lib/application/languages_application.dart:LanguagesApplication
+      Methods:
+        METHOD initState()
+        METHOD build(context)
+          Accesses:
+            - widget.width
+            - widget.height
+            - app.nrPlayers
+            - app.totalFields
+            - app.boardWidth
+            - app.focusStatus[][]
+            - app.playerToMove
+            - app.myPlayerId
+            - app.listenerKey
+            - app.nrPlayers
+            - app.cellKeys[][]
+            - app.boardXPos[][]
+            - app.animation.boardXAnimationPos[][]
+            - app.boardYPos[][]
+            - app.animation.boardYAnimationPos[][]
+            - app.boardWidth[][]
+            - app.boardHeight[][]
+            - app.appColors[][]
+            - app.appText[][]
+            - userNames[]
+          Assigns:
+            - app.boardWidth[][] [loop: true]
+            - app.boardHeight[][] [loop: true]
+            - app.boardXPos[][] [loop: true]
+            - app.boardYPos[][] [loop: true]
+          Instantiates:
+            - Positioned [loop: true]
+            - Container [loop: true]
+            - FittedBox [loop: true]
+            - Text [loop: true]
+            - TextStyle [loop: true]
+            - Shadow [loop: true]
+            - AnimatedBuilder [loop: true]
+            - BoxDecoration [loop: true]
+            - Border.all [loop: true]
+            - GestureDetector [loop: true]
+            - BorderRadius [loop: true]
+            - SizedBox
+            - Stack
+          Calls:
+            - min
+            - app.setup [conditional: true]
+            - app.setAppText
+            - onVerticalDragUpdate (within callback)
+            - context.read<SetStateCubit>().setState (within callback)
+            - app.clearFocus (within callback)
+            - app.cellClick (within callback)
+          Returns: Widget
+    CLASS WidgetDisplayGameStatus (extends StatefulWidget)
+      Fields:
+        - width [type: double] (final)
+        - height [type: double] (final)
+      Methods:
+        METHOD createState() -> _WidgetDisplayGameStatusState
+    CLASS _WidgetDisplayGameStatusState (extends State<WidgetDisplayGameStatus>)
+      with: lib/application/languages_application.dart:LanguagesApplication
+      Methods:
+        METHOD initState()
+          Calls:
+            - languagesSetup
+            - app.getChosenLanguage
+            - app.getStandardLanguage
+        METHOD build(context)
+          Accesses:
+            - widget.width
+            - widget.height
+            - app.gameFinished
+            - app.gameStarted
+            - app.playerToMove
+            - app.myPlayerId
+            - your_
+            - userNames[]
+            - turn_
+            - gameFinished_
+            - app.gameDices.rollsLeft_
+            - app.gameDices.nrTotalRolls
+            - app.gameDices.nrRolls
+          Assigns:
+            - app.gameStarted [conditional: true]
+          Instantiates:
+            - Container
+            - Column
+            - SizedBox
+            - AutoSizeText
+            - TextStyle
+            - FittedBox
+            - Text
+          Calls:
+            - app.gameDices.sendResetToUnity [conditional: true]
+            - Colors.white.withValues
+          Returns: Widget
+
+File: lib/chat/chat.dart
+  Imports:
+    - flutter/cupertino.dart
+    - ../input_items/input_items.dart
+  Classes:
+    CLASS ChatMessage
+      Fields:
+        - messageContent [type: String]
+        - messageType [type: String]
+      Methods:
+        METHOD constructor(messageContent, messageType)
+    CLASS Chat
+      Fields:
+        - _getChosenLanguage [type: Function] (private)
+        - _standardLanguage [type: String] (private)
+        - setState [type: Function] (final)
+        - inputItems [type: lib/input_items/input_items.dart:InputItems] (final)
+        - callbackOnSubmitted [type: Function]
+        - chatTextController [type: TextEditingController] (final)
+        - scrollController [type: ScrollController] (final)
+        - focusNode [type: FocusNode] (final)
+        - listenerKey [type: GlobalKey] (final)
+        - messages [type: List<ChatMessage>]
+      Methods:
+        METHOD constructor({getChosenLanguage, standardLanguage, callback, setState, inputItems})
+          Assigns:
+            - _getChosenLanguage
+            - _standardLanguage
+            - callbackOnSubmitted
+            - setState
+            - inputItems
+        METHOD getChosenLanguage() -> Function
+        METHOD standardLanguage() -> String
+        METHOD onSubmitted(value, context)
+          Accesses:
+            - chatTextController.text
+            - messages
+          Instantiates:
+            - lib/chat/chat.dart:ChatMessage
+          Calls:
+            - chatTextController.clear
+            - messages.add
+            - callbackOnSubmitted
+            - setState()
+            - Future.delayed
+            - scrollController.animateTo
+
+File: lib/chat/languages_chat.dart
+  Mixins:
+    MIXIN LanguagesChat
+      Fields:
+        - _getChosenLanguage [type: Function] (private)
+        - _standardLanguage [type: String] (private)
+        - _sendMessage [type: Map] (private, final)
+      Methods:
+        METHOD get sendMessage_ (getter)
+          Calls:
+            - this.getText
+        METHOD languagesSetup(getChosenLanguage, standardLanguage)
+          Assigns:
+            - _getChosenLanguage
+            - _standardLanguage
+            - _sendMessage["Swedish"]
+        METHOD getText(textVariable)
+          Calls:
+            - _getChosenLanguage()
+          Returns: String
+
+File: lib/chat/widget_chat.dart
+  Imports:
+    - flutter/material.dart
+    - ./languages_chat.dart
+    - ../startup.dart
+  Classes:
+    CLASS WidgetChat (extends StatefulWidget)
+      Fields:
+        - width [type: double] (final)
+        - height [type: double] (final)
+      Methods:
+        METHOD createState() -> _WidgetChatState
+    CLASS _WidgetChatState (extends State<WidgetChat>)
+      with: lib/chat/languages_chat.dart:LanguagesChat
+      Methods:
+        METHOD initState()
+          Calls:
+            - languagesSetup
+            - chat.getChosenLanguage
+            - chat.standardLanguage
+        METHOD build(context)
+          Accesses:
+            - widget.width
+            - widget.height
+            - sendMessage_
+            - chat.messages
+            - chat.scrollController
+            - chat.messages[].messageContent
+            - chat.messages[].messageType
+          Instantiates:
+            - Padding
+            - TextField
+            - InputDecoration
+            - OutlineInputBorder
+            - BorderSide
+            - IconButton
+            - Icon
+            - Container
+            - BoxDecoration
+            - BorderRadius
+            - LinearGradient
+            - Border.all
+            - ListView.builder
+            - Align
+            - BoxShadow
+            - Text
+            - TextStyle
+            - SizedBox
+            - ClipRRect
+            - Column
+            - Row
+          Calls:
+            - widgetInputText (defined locally)
+            - widgetChatOutput (defined locally)
+            - chat.onSubmitted (within callback)
+            - Colors.blue.shade*
+            - Colors.white.withValues
+            - BorderRadius.circular
+            - chat.scrollController (passed to ListView)
+            - Colors.grey.shade*
+            - BorderRadius.only
+          Returns: Widget
+
+File: lib/core/app_widget.dart
+  Imports:
+    - flutter/material.dart
+    - flutter_bloc
+    - ../application/communication_application.dart
+    - ../dices/dices.dart
+    - ../services/service_provider.dart
+    - ../application/application.dart
+    - ../chat/chat.dart
+    - ../injection.dart
+    - ../router/router.dart
+    - ../scroll/animations_scroll.dart
+    - ../startup.dart
+    - ../states/cubit/state/state_cubit.dart
+    - ../top_score/top_score.dart
+    - ../tutorial/tutorial.dart
+  Classes:
+    CLASS AppWidget (extends StatelessWidget)
+      Fields:
+        - _appRouter [type: lib/router/router.dart:AppRouter] (final)
+      Methods:
+        METHOD getChosenLanguage()
+          Accesses:
+            - chosenLanguage
+          Returns: String
+        METHOD build(context)
+          Assigns:
+            - topScore
+            - animationsScroll
+            - tutorial
+            - dices
+            - app
+            - chat
+          Instantiates:
+            - lib/top_score/top_score.dart:TopScore
+            - lib/scroll/animations_scroll.dart:AnimationsScroll
+            - lib/tutorial/tutorial.dart:Tutorial
+            - lib/dices/dices.dart:Dices
+            - lib/application/application.dart:Application
+            - lib/chat/chat.dart:Chat
+          Calls:
+            - this.getChosenLanguage
+            - context.read<SetStateCubit>().setState (within callback)
+            - lib/services/service_provider.dart:ServiceProvider.initialize
+            - getIt<AppRouter>()
+            - _appRouter.delegate()
+            - _appRouter.defaultRouteParser()
+            - ThemeData
+            - VisualDensity.adaptivePlatformDensity
+            - WidgetsBinding.instance.addPostFrameCallback
+              Calls (callback):
+                - ServiceProvider.of(context)
+                - print
+                - service.socketService.isConnected
+                - service.socketService.connect [conditional: true]
+                - app.setSocketService
+          Returns: Widget
+
+File: lib/core/injectable_modules.dart
+  Imports:
+    - injectable
+    - ../router/router.dart
+  Modules:
+    MODULE InjectableModule
+      Methods:
+        METHOD get router -> AppRouter [lazySingleton]
+          Instantiates:
+            - lib/router/router.dart:AppRouter
+
+File: lib/dices/dices.dart
+  Imports:
+    - dart:math
+    - flutter/cupertino.dart
+    - ../input_items/input_items.dart
+    - ../startup.dart
+    - ./unity_communication.dart
+    - flutter_unity_widget
+    - ./languages_dices.dart
+  Classes:
+    CLASS Dices
+      extends: lib/dices/languages_dices.dart:LanguagesDices
+      Fields:
+        - setState [type: Function] (final)
+        - inputItems [type: lib/input_items/input_items.dart:InputItems] (final)
+        - holdDices, holdDiceText, holdDiceOpacity [type: List]
+        - nrRolls [type: int]
+        - nrTotalRolls [type: int]
+        - nrDices [type: int]
+        - diceValue [type: List<int>]
+        - diceRef [type: List<String>]
+        - diceFile [type: List<String>]
+        - rollDiceKey [type: GlobalKey]
+        - holdDiceKey [type: List]
+        - callbackUpdateDiceValues [type: Function]
+        - callbackUnityCreated [type: Function]
+        - callbackCheckPlayerToMove [type: Function]
+        - animationController [type: AnimationController]
+        - sizeAnimation [type: Animation<double>]
+        - unityWidgetController [type: UnityWidgetController]
+        - unityCreated [type: bool]
+        - unityColors [type: List<double>]
+        - unityDices [type: bool]
+        - unityTransparent [type: bool]
+        - unityLightMotion [type: bool]
+        - unityFun [type: bool]
+        - unitySnowEffect [type: bool]
+        - unityId [type: String]
+      Methods:
+        METHOD constructor({getChosenLanguage, standardLanguage, setState, inputItems})
+          Calls:
+            - languagesSetup
+            - GlobalKey [loop: true]
+        METHOD setCallbacks(cbUpdateDiceValues, cbUnityCreated, cbCheckPlayerToMove)
+          Assigns:
+            - callbackUpdateDiceValues
+            - callbackUnityCreated
+            - callbackCheckPlayerToMove
+        METHOD clearDices()
+          Assigns:
+            - diceValue
+            - holdDices
+            - holdDiceText
+            - holdDiceOpacity
+            - diceRef
+            - nrRolls
+          Accesses:
+            - nrDices
+          Calls:
+            - List.filled
+        METHOD initDices(nrdices)
+          Assigns:
+            - nrDices
+            - diceValue
+            - holdDices
+            - holdDiceText
+            - holdDiceOpacity
+            - diceRef
+            - nrRolls
+          Accesses:
+            - unityCreated
+          Calls:
+            - sendResetToUnity [conditional: true]
+            - List.filled
+        METHOD holdDice(dice)
+          Assigns:
+            - holdDices[] [conditional: true]
+            - holdDiceText[] [conditional: true]
+            - holdDiceOpacity[] [conditional: true]
+          Accesses:
+            - diceValue[]
+            - nrRolls
+            - nrTotalRolls
+            - holdDices[]
+            - hold_
+        METHOD updateDiceImages()
+          Assigns:
+            - diceRef[] [loop: true]
+          Accesses:
+            - nrDices
+            - diceFile[]
+            - diceValue[]
+        METHOD rollDices(context)
+          Accesses:
+            - app.gameFinished
+            - callbackCheckPlayerToMove
+            - nrRolls
+            - nrTotalRolls
+            - nrDices
+            - holdDices[]
+          Assigns:
+            - nrRolls
+            - diceValue[] [conditional: true]
+            - diceRef[] [conditional: true]
+            - holdDices[] [conditional: true]
+            - holdDiceText[] [conditional: true]
+            - holdDiceOpacity[] [conditional: true]
+          Calls:
+            - print [conditional: true]
+            - Random()
+            - randomNumberGenerator.nextInt() [loop: true]
+            - callbackUpdateDiceValues
+          Returns: bool
+        METHOD widgetUnitySettings(state)
+          Accesses:
+            - choseUnity_
+            - unityDices
+            - lightMotion_
+            - unityLightMotion
+            - fun_
+            - unityFun
+            - snowEffect_
+            - unitySnowEffect
+          Assigns:
+            - unityDices (within callback)
+            - unityLightMotion (within callback)
+            - unityFun (within callback)
+            - unitySnowEffect (within callback)
+          Calls:
+            - inputItems.widgetCheckbox [loop: true]
+            - sendLightMotionChangedToUnity (within callback)
+            - sendFunChangedToUnity (within callback)
+            - sendSnowEffectChangedToUnity (within callback)
+          Returns: List<Widget>
+
+File: lib/dices/languages_dices.dart
+  Classes:
+    CLASS LanguagesDices
+      Fields:
+        - _getChosenLanguage [type: Function] (private)
+        - _standardLanguage [type: String] (private)
+        - _hold ... _pressToHold [type: Map] (private, final)
+      Methods:
+        METHOD get choseUnity_ ... pressToHold_ (getters)
+          Calls:
+            - this.getText
+        METHOD languagesSetup(getChosenLanguage, standardLanguage)
+          Assigns:
+            - _getChosenLanguage
+            - _standardLanguage
+            - _choseUnity["Swedish"] ... _pressToHold["Swedish"]
+        METHOD getText(textVariable)
+          Calls:
+            - _getChosenLanguage()
+          Returns: String
+
+File: lib/dices/unity_communication.dart
+  Imports:
+    - dart:convert
+    - ./unity_message.dart
+    - flutter_unity_widget
+    - ./dices.dart
+  Extensions:
+    EXTENSION UnityCommunication on Dices
+      Methods:
+        METHOD sendResetToUnity()
+          Accesses:
+            - nrDices
+            - nrTotalRolls
+          Calls:
+            - print
+            - UnityMessage.reset
+            - msg.toJson
+            - jsonEncode
+            - unityWidgetController.postMessage
+        METHOD sendStartToUnity()
+          Calls:
+            - UnityMessage.start
+            - msg.toJson
+            - jsonEncode
+            - unityWidgetController.postMessage
+        METHOD sendDicesToUnity()
+          Accesses:
+            - diceValue
+          Calls:
+            - UnityMessage.updateDices
+            - msg.toJson
+            - jsonEncode
+            - unityWidgetController.postMessage
+        METHOD sendColorsToUnity()
+          Accesses:
+            - unityColors
+          Calls:
+            - UnityMessage.updateColors
+            - msg.toJson
+            - jsonEncode
+            - unityWidgetController.postMessage
+        METHOD sendTransparencyChangedToUnity()
+          Accesses:
+            - unityTransparent
+          Calls:
+            - UnityMessage.changeBool
+            - msg.toJson
+            - jsonEncode
+            - unityWidgetController.postMessage
+        METHOD sendLightMotionChangedToUnity()
+          Accesses:
+            - unityLightMotion
+          Calls:
+            - UnityMessage.changeBool
+            - msg.toJson
+            - jsonEncode
+            - unityWidgetController.postMessage
+        METHOD sendFunChangedToUnity()
+          Accesses:
+            - unityFun
+          Calls:
+            - UnityMessage.changeBool
+            - msg.toJson
+            - jsonEncode
+            - unityWidgetController.postMessage
+        METHOD sendSnowEffectChangedToUnity()
+          Accesses:
+            - unitySnowEffect
+          Calls:
+            - UnityMessage.changeBool
+            - msg.toJson
+            - jsonEncode
+            - unityWidgetController.postMessage
+        METHOD onUnityMessage(message)
+          Assigns:
+            - diceValue
+            - unityId
+          Accesses:
+            - message
+            - json["actionUnity"]
+            - json["diceResult"]
+            - json["unityId"]
+            - callbackCheckPlayerToMove
+          Calls:
+            - message.toString()
+            - print
+            - jsonDecode
+            - callbackUpdateDiceValues [conditional: true]
+            - sendSnowEffectChangedToUnity [conditional: true]
+            - sendFunChangedToUnity [conditional: true]
+            - sendLightMotionChangedToUnity [conditional: true]
+            - sendResetToUnity [conditional: true]
+            - sendStartToUnity [conditional: true]
+        METHOD onUnityUnloaded()
+        METHOD onUnityCreated(controller)
+          Assigns:
+            - unityWidgetController
+            - unityCreated
+          Calls:
+            - sendResetToUnity
+            - callbackUnityCreated
+            - print
+        METHOD onUnitySceneLoaded(sceneInfo)
+
+File: lib/dices/unity_message.dart
+  Classes:
+    CLASS UnityMessage
+      Fields:
+        - actionUnity [type: String]
+        - property [type: String]
+        - dices [type: List]
+        - unityColors [type: List<double>]
+        - flag [type: bool]
+        - nrDices [type: int]
+        - nrThrows [type: int]
+      Methods:
+        METHOD constructor(actionUnity)
+        METHOD constructor.reset(nrDices, nrThrows)
+          Assigns:
+            - actionUnity
+        METHOD constructor.start()
+          Assigns:
+            - actionUnity
+        METHOD constructor.updateDices(dices)
+          Assigns:
+            - actionUnity
+            - property
+        METHOD constructor.updateColors(unityColors)
+          Assigns:
+            - actionUnity
+            - property
+        METHOD constructor.changeBool(property, flag)
+          Assigns:
+            - actionUnity
+        METHOD constructor.fromJson(json)
+          Accesses:
+            - json[]
+          Assigns:
+            - actionUnity
+            - nrDices
+            - nrThrows
+            - property
+            - unityColors
+            - flag
+            - dices
+        METHOD toJson()
+          Accesses:
+            - actionUnity
+            - nrDices
+            - nrThrows
+            - property
+            - unityColors
+            - flag
+            - dices
+          Returns: Map<String, dynamic>
+
+File: lib/dices/widget_dices.dart
+  Imports:
+    - dart:math
+    - flutter/material.dart
+    - flutter_unity_widget
+    - ../startup.dart
+    - ./unity_communication.dart
+  Classes:
+    CLASS WidgetDices (extends StatefulWidget)
+      Fields:
+        - width [type: double] (final)
+        - height [type: double] (final)
+      Methods:
+        METHOD createState() -> _WidgetDicesState
+    CLASS _WidgetDicesState (extends State<WidgetDices>)
+      with: TickerProviderStateMixin
+      Methods:
+        METHOD setupAnimation(ticket)
+          Instantiates:
+            - AnimationController
+            - CurveTween
+          Assigns:
+            - app.gameDices.animationController
+            - app.gameDices.sizeAnimation
+          Calls:
+            - app.gameDices.animationController.addStatusListener
+              Calls (callback):
+                - app.gameDices.animationController.reverse() [conditional: true]
+        METHOD initState()
+          Calls:
+            - super.initState()
+            - setupAnimation
+        METHOD dispose()
+          Calls:
+            - app.gameDices.animationController.dispose()
+            - super.dispose()
+        METHOD build(context)
+          Accesses:
+            - widget.width
+            - widget.height
+            - app.gameDices.unityDices
+            - app.gameDices.nrDices
+            - app.gameDices.holdDiceKey[]
+            - app.gameDices.holdDiceOpacity[]
+            - app.gameDices.holdDiceText[]
+            - app.gameDices.diceRef[]
+            - app.gameDices.animationController
+            - app.gameDices.sizeAnimation
+            - app.gameDices.rollDiceKey
+            - app.callbackCheckPlayerToMove
+            - app.gameDices.nrRolls
+            - app.gameDices.nrTotalRolls
+          Instantiates:
+            - Positioned [loop: true]
+            - SizedBox [loop: true]
+            - UnityWidget [conditional: true]
+            - Container [loop: true]
+            - BoxDecoration [loop: true]
+            - Image [loop: true]
+            - GestureDetector [loop: true]
+            - FittedBox [loop: true]
+            - Text [loop: true]
+            - TextStyle [loop: true]
+            - AnimatedBuilder [loop: true]
+            - Listener [loop: true]
+            - Stack
+          Calls:
+            - min
+            - app.gameDices.onUnityCreated [conditional: true]
+            - app.gameDices.onUnityMessage [conditional: true]
+            - app.gameDices.onUnityUnloaded [conditional: true]
+            - app.gameDices.onUnitySceneLoaded [conditional: true]
+            - BorderRadius.zero [conditional: true]
+            - Colors.red.withValues [loop: true]
+            - app.gameDices.holdDice [loop: true] (within callback)
+            - app.gameDices.setState [loop: true] (within callback)
+            - Colors.grey.withValues [loop: true]
+            - Colors.black87.withValues [loop: true]
+            - app.gameDices.rollDices [loop: true] (within callback)
+            - app.gameDices.animationController.forward [loop: true] (within callback)
+          Returns: Widget
+
+File: lib/injection.config.dart
+  Imports:
+    - get_it
+    - injectable
+    - ../core/injectable_modules.dart
+    - ../router/router.dart
+    - ../states/bloc/language/language_bloc.dart
+    - ../states/cubit/state/state_cubit.dart
+  Extensions:
+    EXTENSION GetItInjectableX on GetIt
+      Methods:
+        METHOD init({environment, environmentFilter})
+          Instantiates:
+            - lib/core/injectable_modules.dart:_$InjectableModule
+            - lib/router/router.dart:AppRouter [lazySingleton]
+            - lib/states/bloc/language/language_bloc.dart:LanguageBloc [factory]
+            - lib/states/cubit/state/state_cubit.dart:SetStateCubit [factory]
+          Calls:
+            - GetItHelper constructor
+          Returns: GetIt
+  Classes:
+    CLASS _$InjectableModule
+      extends: lib/core/injectable_modules.dart:InjectableModule
+
+File: lib/injection.dart
+  Imports:
+    - get_it
+    - injectable
+    - ./injection.config.dart
+  Variables:
+    - getIt [type: GetIt] (final)
+  Functions:
+    FUNCTION configureInjection(environment)
+      Calls:
+        - getIt.init()
+
+File: lib/input_items/input_items.dart
+  Imports:
+    - flutter/material.dart
+  Classes:
+    CLASS InputItems
+      Methods:
+        METHOD widgetImage(width, height, image) -> Widget
+        METHOD widgetInputDBEntry(hintText, controller) -> Widget
+        METHOD widgetInputText(hintText, onSubmitted, onChanged, controller, focusNode, maxLength?) -> Widget
+        METHOD widgetTextLink(onPressed, text) -> Widget
+        METHOD widgetButton(onPressed, text) -> Widget
+        METHOD widgetSizedBox(height) -> Widget
+        METHOD widgetIntRadioButton(state, values, onChanged, radioValue) -> Widget
+        METHOD widgetStringRadioButtonSplit(state, values, translations, onChanged, radioValue, splitPoint) -> Widget
+        METHOD widgetStringRadioButton(state, values, translations, onChanged, radioValue) -> Widget
+        METHOD getColor(states) -> Color
+        METHOD widgetCheckbox(onChanged, text, toggles) -> Widget
+        METHOD widgetSlider(context, state, text, onChanged, slider) -> Widget
+        METHOD widgetDropDownList(state, text, items, onChanged, choice) -> Widget
+        METHOD widgetParagraph(text) -> Widget
+
+File: lib/main.dart
+  Imports:
+    - flutter/material.dart
+    - flutter_bloc
+    - ./states/bloc/language/language_bloc.dart
+    - ./states/cubit/state/state_cubit.dart
+    - injectable
+    - ./core/app_widget.dart
+    - ./injection.dart
+    - ./shared_preferences.dart
+  Functions:
+    FUNCTION main()
+      Calls:
+        - WidgetsFlutterBinding.ensureInitialized()
+        - SharedPrefProvider.loadPrefs()
+        - configureInjection()
+        - runApp()
+        - MultiBlocProvider()
+        - BlocProvider()
+        - AppWidget()
+
+File: lib/models/board_cell.dart
+  Imports:
+    - flutter/material.dart
+  Classes:
+    CLASS BoardCell
+      Fields:
+        - index [type: int] (final)
+        - label [type: String] (final)
+        - value [type: int]
+        - fixed [type: bool]
+        - xPos [type: double]
+        - yPos [type: double]
+        - width [type: double]
+        - height [type: double]
+        - textColor [type: Color]
+        - backgroundColor [type: Color]
+        - hasFocus [type: bool]
+      Methods:
+        METHOD constructor({index, label, value?, fixed?})
+        METHOD setPosition(x, y, w, h)
+          Assigns:
+            - xPos
+            - yPos
+            - width
+            - height
+        METHOD get displayText -> String
+          Accesses:
+            - value
+        METHOD get isEmpty -> bool
+          Accesses:
+            - value
+        METHOD clear()
+          Assigns:
+            - value [conditional: true]
+            - hasFocus [conditional: true]
+          Accesses:
+            - fixed
+        METHOD setValue(newValue)
+          Assigns:
+            - value [conditional: true]
+          Accesses:
+            - fixed
+        METHOD fix()
+          Assigns:
+            - fixed
+            - hasFocus
+        METHOD setFocus(focused)
+          Assigns:
+            - hasFocus [conditional: true]
+          Accesses:
+            - fixed
+        METHOD copyWith({index?, label?, value?, fixed?})
+          Instantiates:
+            - lib/models/board_cell.dart:BoardCell
+          Accesses:
+            - this.index, this.label, this.value, this.fixed
+            - xPos, yPos, width, height, textColor, backgroundColor, hasFocus
+          Assigns:
+            - (new cell properties)
+          Returns: BoardCell
+
+File: lib/models/game.dart
+  Imports:
+    - flutter/foundation.dart
+    - ./board_cell.dart
+    - ./player.dart
+  Classes:
+    CLASS Game
+      Fields:
+        - gameId [type: int] (final)
+        - gameType [type: String] (final)
+        - maxPlayers [type: int] (final)
+        - players [type: List<Player>] (final)
+        - gameStarted [type: bool]
+        - gameFinished [type: bool]
+        - playerToMove [type: int]
+        - diceValues [type: List<int>]
+        - rollCount [type: int]
+        - maxRolls [type: int] (final)
+        - bonusThreshold [type: int] (final)
+        - bonusAmount [type: int] (final)
+        - upperSectionEndIndex [type: int] (final)
+        - cellLabels [type: List<String>] (final)
+        - myPlayerIndex [type: int]
+        - boardAnimation [type: bool]
+        - onPlayerTurnChanged [type: VoidCallback] (nullable)
+        - onDiceValuesChanged [type: VoidCallback] (nullable)
+      Methods:
+        METHOD constructor({gameId, gameType, maxPlayers, players, gameStarted?, gameFinished?, playerToMove?, diceValues?, rollCount?, maxRolls?, bonusThreshold?, bonusAmount?, upperSectionEndIndex?, cellLabels, myPlayerIndex?, boardAnimation?, onPlayerTurnChanged?, onDiceValuesChanged?})
+        METHOD get isMyTurn -> bool
+          Accesses:
+            - myPlayerIndex
+            - playerToMove
+            - players[]
+            - player.isActive
+        METHOD get canRoll -> bool
+          Accesses:
+            - isMyTurn
+            - rollCount
+            - maxRolls
+        METHOD get currentPlayer -> Player
+          Accesses:
+            - players[]
+            - playerToMove
+        METHOD get myPlayer -> Player
+          Accesses:
+            - players[]
+            - myPlayerIndex
+        METHOD calculateScores()
+          Accesses:
+            - players
+            - bonusThreshold
+            - bonusAmount
+            - upperSectionEndIndex
+          Calls:
+            - player.calculateScores [loop: true]
+        METHOD advanceToNextPlayer()
+          Assigns:
+            - playerToMove [conditional: true]
+            - rollCount [conditional: true]
+          Accesses:
+            - playerToMove
+            - maxPlayers
+            - players[]
+            - player.isActive
+            - onPlayerTurnChanged
+          Calls:
+            - onPlayerTurnChanged() [conditional: true]
+        METHOD setDiceValues(values)
+          Assigns:
+            - diceValues
+          Accesses:
+            - onDiceValuesChanged
+          Calls:
+            - List.from
+            - onDiceValuesChanged() [conditional: true]
+        METHOD resetDice()
+          Assigns:
+            - diceValues
+            - rollCount
+          Accesses:
+            - onDiceValuesChanged
+          Calls:
+            - List.filled
+            - onDiceValuesChanged() [conditional: true]
+        METHOD selectCell(cellIndex) -> bool
+          Accesses:
+            - isMyTurn
+            - players[]
+            - player.cells[]
+            - cell.fixed
+          Calls:
+            - player.cells[].fix() [conditional: true]
+            - this.calculateScores [conditional: true]
+            - this.checkGameFinished [conditional: true]
+            - this.advanceToNextPlayer [conditional: true]
+        METHOD checkGameFinished()
+          Assigns:
+            - gameFinished [conditional: true]
+            - playerToMove [conditional: true]
+          Accesses:
+            - players
+            - player.isActive
+            - player.hasCompletedGame
+            - player.totalScore
+          Calls:
+            - player.hasCompletedGame [loop: true]
+        METHOD factory Game.fromJson(json)
+          Accesses:
+            - json[] (dynamic access)
+          Instantiates:
+            - lib/models/game.dart:Game
+            - lib/models/player.dart:Player [loop: true, conditional: true]
+            - lib/models/board_cell.dart:BoardCell [loop: true]
+          Calls:
+            - _getCellLabelsForGameType
+            - List.generate [loop: true]
+            - List.from [conditional: true]
+            - List.filled [conditional: true]
+        METHOD toJson() -> Map<String, dynamic>
+          Accesses:
+            - gameId
+            - gameType
+            - maxPlayers
+            - players
+            - gameStarted
+            - gameFinished
+            - playerToMove
+            - diceValues
+          Calls:
+            - players.map().toList()
+            - p.id
+            - p.username
+            - players.where().length
+            - p.isActive
+        METHOD _getCellLabelsForGameType(gameType) [static] -> List<String>
+          Accesses:
+            - gameType
+
+File: lib/models/player.dart
+  Imports:
+    - ./board_cell.dart
+  Classes:
+    CLASS Player
+      Fields:
+        - id [type: String] (final)
+        - username [type: String] (final)
+        - isActive [type: bool]
+        - cells [type: List<BoardCell>] (final)
+        - _totalScore [type: int] (private)
+        - _upperSectionSum [type: int] (private)
+      Methods:
+        METHOD constructor({id, username, isActive?, cells})
+        METHOD get totalScore -> int
+          Accesses:
+            - _totalScore
+        METHOD get upperSectionSum -> int
+          Accesses:
+            - _upperSectionSum
+        METHOD calculateScores({bonusThreshold, bonusAmount, upperSectionEnd})
+          Assigns:
+            - _upperSectionSum
+            - _totalScore
+          Accesses:
+            - cells[]
+            - cell.fixed
+            - cell.value
+        METHOD clearUnfixedCells()
+          Accesses:
+            - cells[]
+            - cell.fixed
+          Calls:
+            - cell.clear() [loop: true, conditional: true]
+        METHOD get hasCompletedGame -> bool
+          Accesses:
+            - cells
+            - cell.fixed
+            - cell.index
+            - cells.length
+          Calls:
+            - cells.every()
+        METHOD factory Player.fromJson(json, cellLabels)
+          Accesses:
+            - json[] (dynamic access)
+          Instantiates:
+            - lib/models/player.dart:Player
+            - lib/models/board_cell.dart:BoardCell [loop: true]
+          Calls:
+            - List.generate
+        METHOD toJson() -> Map<String, dynamic>
+          Accesses:
+            - id
+            - username
+            - isActive
+            - cells
+          Calls:
+            - cells.map().toList()
+            - cell.value
+            - cell.fixed
+
+File: lib/router/router.dart
+  Imports:
+    - auto_route
+    - ./router.gr.dart
+  Classes:
+    CLASS AppRouter (extends $AppRouter)
+      Decorators:
+        - @AutoRouterConfig()
+      Methods:
+        METHOD get defaultRouteType -> RouteType
+        METHOD get routes -> List<AutoRoute>
+          Instantiates:
+            - AutoRoute [loop: true]
+
+File: lib/router/router.gr.dart
+  Imports:
+    - auto_route
+    - ../views/application_view.dart
+    - ../views/settings_view.dart
+  Classes:
+    CLASS $AppRouter (extends RootStackRouter) (abstract)
+      Fields:
+        - pagesMap [type: Map<String, PageFactory>] (final)
+    CLASS ApplicationView (extends PageRouteInfo<void>)
+      Fields:
+        - name [static, const]
+        - page [static, const]
+      Methods:
+        METHOD constructor({children})
+    CLASS SettingsView (extends PageRouteInfo<void>)
+      Fields:
+        - name [static, const]
+        - page [static, const]
+      Methods:
+        METHOD constructor({children})
+
+File: lib/scroll/animations_scroll.dart
+  Imports:
+    - flutter/animation.dart
+    - ./languages_animations_scroll.dart
+  Classes:
+    CLASS AnimationsScroll
+      with: lib/scroll/languages_animations_scroll.dart:LanguagesAnimationsScroll
+      Fields:
+        - _getChosenLanguage [type: Function] (private)
+        - _standardLanguage [type: String] (private)
+        - keyXPos [type: double]
+        - keyYPos [type: double]
+        - animationController [type: AnimationController]
+        - positionAnimation [type: Animation<double>]
+      Methods:
+        METHOD constructor({getChosenLanguage, standardLanguage})
+        METHOD getChosenLanguage() -> Function
+        METHOD standardLanguage() -> String
+
+File: lib/scroll/languages_animations_scroll.dart
+  Mixins:
+    MIXIN LanguagesAnimationsScroll
+      Fields:
+        - _getChosenLanguage [type: Function] (private)
+        - _standardLanguage [type: String] (private)
+        - _scrollText [type: Map] (private, final)
+      Methods:
+        METHOD get scrollText_ (getter)
+          Calls:
+            - this.getText
+        METHOD languagesSetup(getChosenLanguage, standardLanguage)
+          Assigns:
+            - _getChosenLanguage
+            - _standardLanguage
+            - _scrollText["Swedish"]
+        METHOD getText(textVariable)
+          Calls:
+            - _getChosenLanguage()
+          Returns: String
+
+File: lib/scroll/widget_scroll.dart
+  Imports:
+    - animated_text_kit
+    - flutter/material.dart
+    - ../startup.dart
+    - ./languages_animations_scroll.dart
+  Classes:
+    CLASS WidgetAnimationsScroll (extends StatefulWidget)
+      Fields:
+        - width [type: double] (final)
+        - height [type: double] (final)
+        - left [type: double] (final)
+        - top [type: double] (final)
+      Methods:
+        METHOD createState() -> _WidgetAnimationsScrollState
+    CLASS _WidgetAnimationsScrollState (extends State<WidgetAnimationsScroll>)
+      with: TickerProviderStateMixin, LanguagesAnimationsScroll
+      Methods:
+        METHOD setupAnimation(ticket)
+          Assigns:
+            - animationsScroll.animationController
+            - animationsScroll.positionAnimation
+          Instantiates:
+            - AnimationController
+            - CurveTween
+          Calls:
+            - tween.animate()
+            - animationsScroll.animationController.addListener
+              Calls (callback):
+                - animationsScroll.positionAnimation.value (access)
+                - animationsScroll.keyYPos (assign)
+        METHOD initState()
+          Calls:
+            - super.initState()
+            - languagesSetup
+            - animationsScroll.getChosenLanguage
+            - animationsScroll.standardLanguage
+            - setupAnimation
+            - animationsScroll.animationController.repeat
+        METHOD dispose()
+          Calls:
+            - animationsScroll.animationController.dispose()
+            - super.dispose()
+        METHOD build(context)
+          Accesses:
+            - widget.width
+            - widget.height
+            - widget.left
+            - widget.top
+            - animationsScroll.animationController
+            - scrollText_
+            - animationsScroll.keyYPos
+          Instantiates:
+            - AnimatedBuilder
+            - Positioned
+            - SizedBox
+            - FittedBox
+            - DefaultTextStyle
+            - TextStyle
+            - AnimatedTextKit
+            - FadeAnimatedText [loop: true]
+          Calls:
+            - scrollText_.split()
+          Returns: Widget
+
+File: lib/services/game_service.dart
+  Imports:
+    - ../models/game.dart
+    - ../models/board_cell.dart
+    - ./socket_service.dart
+  Classes:
+    CLASS GameService
+      Fields:
+        - socketService [type: lib/services/socket_service.dart:SocketService] (final)
+        - _game [type: lib/models/game.dart:Game] (private, nullable)
+        - onGameUpdated [type: Function(Game)?] (final)
+        - onError [type: Function(String)?] (final)
+      Methods:
+        METHOD constructor({socketService, onGameUpdated?, onError?})
+          Assigns:
+            - socketService.onGameUpdate
+        METHOD get game -> Game?
+          Accesses:
+            - _game
+        METHOD _handleGameUpdate(updatedGame) [private]
+          Assigns:
+            - _game
+          Accesses:
+            - onGameUpdated
+          Calls:
+            - onGameUpdated() [conditional: true]
+        METHOD createGame({gameType, maxPlayers, username})
+          Calls:
+            - socketService.createGame
+        METHOD joinGame({gameId, username})
+          Calls:
+            - socketService.joinGame
+        METHOD rollDice({keepDice?})
+          Accesses:
+            - _game
+            - _game.isMyTurn
+            - _game.canRoll
+            - _game.gameId
+          Calls:
+            - _reportError [conditional: true]
+            - List.filled [conditional: true]
+            - socketService.rollDice
+        METHOD calculateScoreForCell(cell, diceValues) -> int
+          Accesses:
+            - _game
+            - diceValues.length
+            - cell.index
+            - cell.label
+          Calls:
+            - List.from()..sort()
+            - sortedDice.where().fold() [conditional: true]
+            - _calculatePairScore [conditional: true]
+            - _calculateTwoPairsScore [conditional: true]
+            - _calculateThreeOfAKindScore [conditional: true]
+            - _calculateFourOfAKindScore [conditional: true]
+            - _calculateFullHouseScore [conditional: true]
+            - _calculateSmallStraightScore [conditional: true]
+            - _calculateLargeStraightScore [conditional: true]
+            - sortedDice.fold() [conditional: true]
+            - _calculateYatzyScore [conditional: true]
+        METHOD selectCell(cellIndex)
+          Accesses:
+            - _game
+            - _game.isMyTurn
+            - _game.myPlayer
+            - player.cells.length
+            - cell.fixed
+            - _game.diceValues
+            - _game.gameId
+          Assigns:
+            - cell.value [conditional: true]
+          Calls:
+            - _reportError [conditional: true]
+            - calculateScoreForCell
+            - socketService.selectCell
+        METHOD _reportError(message) [private]
+          Accesses:
+            - onError
+          Calls:
+            - onError() [conditional: true]
+        METHOD _calculatePairScore(sortedDice) [private] -> int
+        METHOD _calculateTwoPairsScore(sortedDice) [private] -> int
+        METHOD _calculateThreeOfAKindScore(sortedDice) [private] -> int
+        METHOD _calculateFourOfAKindScore(sortedDice) [private] -> int
+        METHOD _calculateFullHouseScore(sortedDice) [private] -> int
+        METHOD _calculateSmallStraightScore(sortedDice) [private] -> int
+        METHOD _calculateLargeStraightScore(sortedDice) [private] -> int
+        METHOD _calculateYatzyScore(sortedDice) [private] -> int
+
+File: lib/services/http_service.dart
+  Imports:
+    - dart:convert
+    - http
+  Classes:
+    CLASS HttpService
+      Fields:
+        - baseUrl [type: String] (final)
+      Methods:
+        METHOD constructor({baseUrl})
+          Calls:
+            - print
+        METHOD getDB(route) -> Future<http.Response>
+          Calls:
+            - print
+            - Uri.parse
+            - http.get
+        METHOD postDB(route, json) -> Future<http.Response>
+          Calls:
+            - print
+            - Uri.parse
+            - jsonEncode
+            - http.post
+        METHOD updateDB(route, json) -> Future<http.Response>
+          Calls:
+            - print
+            - Uri.parse
+            - jsonEncode
+            - http.post
+        METHOD deleteDB(route) -> Future<http.Response>
+          Calls:
+            - print
+            - Uri.parse
+            - http.delete
+        METHOD deleteUser(route, email) -> Future<http.Response>
+          Calls:
+            - print
+            - Uri.parse
+            - http.delete
+        METHOD login(userName, password) -> Future<http.Response>
+          Calls:
+            - print
+            - Uri.parse
+            - jsonEncode
+            - http.post
+        METHOD signup(userName, password) -> Future<http.Response>
+          Calls:
+            - print
+            - Uri.parse
+            - jsonEncode
+            - http.post
+
+File: lib/services/service_provider.dart
+  Imports:
+    - flutter/material.dart
+    - ./socket_service.dart
+    - ./game_service.dart
+  Classes:
+    CLASS ServiceProvider (extends InheritedWidget)
+      Fields:
+        - socketService [type: lib/services/socket_service.dart:SocketService] (final)
+        - gameService [type: lib/services/game_service.dart:GameService] (final)
+      Methods:
+        METHOD constructor({key, child, socketService, gameService})
+        METHOD of(context) [static] -> ServiceProvider
+          Calls:
+            - context.dependOnInheritedWidgetOfExactType<ServiceProvider>()
+        METHOD initialize({child, context}) [static] -> Widget
+          Instantiates:
+            - lib/services/socket_service.dart:SocketService
+            - lib/services/game_service.dart:GameService
+            - lib/services/service_provider.dart:ServiceProvider
+          Calls:
+            - print
+        METHOD updateShouldNotify(oldWidget) -> bool
+          Accesses:
+            - socketService
+            - oldWidget.socketService
+            - gameService
+            - oldWidget.gameService
+
+File: lib/services/socket_service.dart
+  Imports:
+    - flutter/material.dart
+    - socket_io_client
+    - flutter_bloc
+    - ../application/communication_application.dart
+    - dart:convert
+    - ../models/game.dart
+    - ../states/cubit/state/state_cubit.dart
+    - ../startup.dart
+  Classes:
+    CLASS SocketService
+      Fields:
+        - _instanceCounter [static, private]
+        - _instanceId [type: int] (final, private)
+        - context [type: BuildContext] (final)
+        - socket [type: io.Socket]
+        - socketId [type: String]
+        - isConnected [type: bool]
+        - _handlersSetUp [type: bool] (private)
+        - game [type: lib/models/game.dart:Game] (nullable)
+        - _connectingInProgress [type: bool] (private)
+        - _globalConnectionInProgress [static, private]
+        - _connectionInitiator [static, private, nullable]
+        - onGameUpdate [type: Function(Game)?]
+        - onChatMessage [type: Function(Map<String, dynamic>)?]
+      Methods:
+        METHOD constructor({context})
+          Calls:
+            - print
+            - StackTrace.current
+        METHOD connect()
+          Assigns:
+            - _connectingInProgress
+            - _globalConnectionInProgress
+            - _connectionInitiator
+            - _handlersSetUp
+            - socket
+          Accesses:
+            - _instanceId
+            - _globalConnectionInProgress
+            - _connectingInProgress
+            - _connectionInitiator
+            - isConnected
+            - _handlersSetUp
+            - localhost
+            - isOnline
+          Calls:
+            - StackTrace.current.toString()
+            - print
+            - _setupEventHandlers [conditional: true]
+            - io.io
+            - _clearEventHandlers
+            - _setupEventHandlers
+            - socket.connect
+            - socket.onConnect
+            - socket.onConnectError
+        METHOD _clearEventHandlers() [private]
+          Assigns:
+            - _handlersSetUp
+          Calls:
+            - print
+            - socket.off [multiple times]
+        METHOD _setupEventHandlers() [private]
+          Assigns:
+            - _handlersSetUp
+          Accesses:
+            - _handlersSetUp
+            - _instanceId
+            - socket
+          Calls:
+            - print
+            - socket.onConnect
+              Calls (callback):
+                - print
+                - isConnected (assign)
+                - socketId (assign)
+                - _connectingInProgress (assign)
+                - _globalConnectionInProgress (assign)
+                - _sendEcho
+                - _requestId
+                - _updateState
+            - socket.onDisconnect
+              Calls (callback):
+                - print
+                - isConnected (assign)
+                - _handlersSetUp (assign)
+                - _updateState
+            - socket.onConnectError
+              Calls (callback):
+                - print
+                - isConnected (assign)
+                - _handlersSetUp (assign)
+                - _updateState
+            - socket.on [event: 'welcome']
+              Calls (callback):
+                - print
+                - socketId (assign) [conditional: true]
+                - _updateState
+            - socket.on [event: 'echo_response']
+              Calls (callback):
+                - print
+            - socket.on [event: 'onClientMsg'] -> _handleClientMessage
+            - socket.on [event: 'onServerMsg'] -> _handleServerMessage
+            - socket.on [event: 'userId'] -> _handleUserId
+            - socket.on [event: 'gameUpdate'] -> _handleGameUpdate
+            - socket.on [event: 'chatMessage'] -> _handleChatMessage
+        METHOD _sendEcho() [private]
+          Instantiates:
+            - DateTime
+          Calls:
+            - Map()
+            - print
+            - jsonEncode
+            - socket.emit [event: 'echo']
+        METHOD _requestId() [private]
+          Instantiates:
+            - DateTime
+          Calls:
+            - Map()
+            - print
+            - socket.emit [event: 'sendToServer']
+        METHOD _handleUserId(data) [private]
+          Assigns:
+            - socketId [conditional: true]
+          Calls:
+            - print
+            - _updateState
+        METHOD _handleClientMessage(data) [private]
+          Calls:
+            - print
+            - app.callbackOnClientMsg
+            - print [conditional: true]
+            - _updateState
+        METHOD _handleServerMessage(data) [private]
+          Calls:
+            - print
+            - app.callbackOnServerMsg
+            - print [conditional: true]
+            - _updateState
+        METHOD _handleGameUpdate(data) [private]
+          Calls:
+            - print
+            - _processGameUpdate [conditional: true]
+            - _updateState
+        METHOD _processGameUpdate(gameData) [private]
+          Assigns:
+            - game
+            - game.myPlayerIndex [conditional: true]
+          Accesses:
+            - gameData
+            - game
+            - game.players.length
+            - game.players[]
+            - socketId
+            - onGameUpdate
+          Calls:
+            - Game.fromJson
+            - onGameUpdate() [conditional: true]
+        METHOD _handleChatMessage(data) [private]
+          Accesses:
+            - onChatMessage
+          Calls:
+            - print
+            - onChatMessage() [conditional: true]
+        METHOD createGame({gameType, maxPlayers, username})
+          Accesses:
+            - isConnected
+          Instantiates:
+            - DateTime
+          Calls:
+            - print [conditional: true]
+            - Map()
+            - socket.emit [event: 'sendToServer']
+        METHOD joinGame({gameId, username})
+          Accesses:
+            - isConnected
+          Instantiates:
+            - DateTime
+          Calls:
+            - print [conditional: true]
+            - Map()
+            - socket.emit [event: 'sendToServer']
+        METHOD rollDice({gameId, keepDice})
+          Accesses:
+            - isConnected
+            - game
+          Instantiates:
+            - DateTime
+          Calls:
+            - print [conditional: true]
+            - Map()
+            - socket.emit [event: 'sendToServer']
+        METHOD selectCell({gameId, cellIndex})
+          Accesses:
+            - isConnected
+            - game
+          Instantiates:
+            - DateTime
+          Calls:
+            - print [conditional: true]
+            - Map()
+            - socket.emit [event: 'sendToServer']
+        METHOD sendChatMessage({gameId, message})
+          Accesses:
+            - isConnected
+            - userName
+          Instantiates:
+            - DateTime
+          Calls:
+            - print [conditional: true]
+            - Map()
+            - socket.emit [event: 'sendToServer']
+        METHOD sendToClients(data)
+          Accesses:
+            - isConnected
+          Instantiates:
+            - DateTime [conditional: true]
+          Calls:
+            - print
+            - socket.emit [event: 'sendToClients']
+        METHOD sendToServer(data)
+          Accesses:
+            - isConnected
+          Instantiates:
+            - DateTime
+          Calls:
+            - print
+            - jsonEncode
+            - socket.emit [event: 'sendToServer']
+        METHOD disconnect()
+          Assigns:
+            - isConnected
+            - _handlersSetUp
+            - _connectingInProgress
+            - _globalConnectionInProgress
+          Calls:
+            - print
+            - _clearEventHandlers
+            - socket.disconnect
+            - _updateState
+        METHOD _updateState() [private]
+          Calls:
+            - context.read<SetStateCubit>().setState
+            - print [conditional: true]
+
+File: lib/shared_preferences.dart
+  Imports:
+    - dart:convert
+    - shared_preferences
+  Classes:
+    CLASS SharedPrefProvider (abstract)
+      Fields:
+        - prefs [static, late, final]
+      Methods:
+        METHOD loadPrefs() [static, async]
+          Assigns:
+            - prefs
+          Calls:
+            - SharedPreferences.getInstance()
+        METHOD fetchPrefBool(key) [static] -> bool
+          Calls:
+            - prefs.getBool()
+        METHOD fetchPrefInt(key) [static] -> int
+          Calls:
+            - prefs.getInt()
+        METHOD fetchPrefString(key) [static] -> String
+          Calls:
+            - prefs.getString()
+        METHOD fetchPrefObject(key) [static] -> dynamic
+          Calls:
+            - jsonDecode()
+            - prefs.getString()
+            - jsonEncode()
+        METHOD setPrefBool(key, value) [static] -> Future<bool>
+          Calls:
+            - prefs.setBool()
+        METHOD setPrefInt(key, value) [static] -> Future<bool>
+          Calls:
+            - prefs.setInt()
+        METHOD setPrefString(key, value) [static] -> Future<bool>
+          Calls:
+            - prefs.setString()
+        METHOD setPrefObject(key, value) [static] -> Future<bool>
+          Calls:
+            - jsonEncode()
+            - prefs.setString()
+
+File: lib/startup.dart
+  Imports:
+    - flutter/cupertino.dart
+    - ./scroll/animations_scroll.dart
+    - ./top_score/top_score.dart
+    - ./tutorial/tutorial.dart
+    - ./application/application.dart
+    - ./chat/chat.dart
+    - ./dices/dices.dart
+    - ./input_items/input_items.dart
+  Variables:
+    - isOnline
+    - localhost
+    - applicationStarted
+    - userName
+    - userNames
+    - isTesting
+    - isTutorial
+    - mainPageLoaded
+    - keySettings
+    - screenWidth
+    - screenHeight
+    - devicePixelRatio
+    - chosenLanguage
+    - standardLanguage
+    - differentLanguages
+    - inputItems
+    - tutorial
+    - topScore
+    - animationsScroll
+    - app
+    - chat
+    - dices
+
+File: lib/states/bloc/language/language_bloc.dart
+  Imports:
+    - injectable
+    - ../../../shared_preferences.dart
+    - flutter_bloc
+    - ./language_event.dart
+  Classes:
+    CLASS LanguageBloc (extends Bloc<LanguageEvent, String>)
+      Decorators:
+        - @injectable
+      Fields:
+        - key [static, const]
+      Methods:
+        METHOD constructor()
+          Calls:
+            - SharedPrefProvider.fetchPrefString
+            - on<LanguageChanged>(_languageChanged)
+        METHOD _languageChanged(event, emit) [private, async]
+          Accesses:
+            - key
+            - event.language
+          Calls:
+            - SharedPrefProvider.setPrefString
+            - emit
+
+File: lib/states/bloc/language/language_event.dart
+  Classes:
+    CLASS LanguageEvent (abstract)
+    CLASS LanguageChanged (extends LanguageEvent)
+      Fields:
+        - language [type: String] (final)
+      Methods:
+        METHOD constructor({language})
+
+File: lib/states/cubit/state/state_cubit.dart
+  Imports:
+    - flutter_bloc
+  Classes:
+    CLASS SetStateCubit (extends Cubit<int>)
+      Methods:
+        METHOD constructor()
+        METHOD setState() [async]
+          Calls:
+            - emit
+
+File: lib/top_score/languages_top_score.dart
+  Mixins:
+    MIXIN LanguagesTopScore
+      Fields:
+        - _getChosenLanguage [type: Function] (private)
+        - _standardLanguage [type: String] (private)
+        - _topScores [type: Map] (private, final)
+      Methods:
+        METHOD get topScores_ (getter)
+          Calls:
+            - this.getText
+        METHOD languagesSetup(getChosenLanguage, standardLanguage)
+          Assigns:
+            - _getChosenLanguage
+            - _standardLanguage
+            - _topScores["Swedish"]
+        METHOD getText(textVariable)
+          Calls:
+            - _getChosenLanguage()
+          Returns: String
+
+File: lib/top_score/top_score.dart
+  Imports:
+    - dart:convert
+    - flutter/animation.dart
+    - ../states/cubit/state/state_cubit.dart
+    - ../services/http_service.dart
+    - ./languages_top_score.dart
+    - ../startup.dart
+  Classes:
+    CLASS TopScore
+      with: lib/top_score/languages_top_score.dart:LanguagesTopScore
+      Fields:
+        - _getChosenLanguage [type: Function] (private)
+        - _standardLanguage [type: String] (private)
+        - animationController [type: AnimationController]
+        - loopAnimation [type: Animation<double>]
+        - _loadedGameTypes [type: Map<String, bool>] (private, final)
+        - topScores [type: List<dynamic>]
+      Methods:
+        METHOD constructor({getChosenLanguage, standardLanguage})
+        METHOD updateScoresFromData(newScores, cubit)
+          Assigns:
+            - topScores
+          Calls:
+            - print
+            - cubit.setState()
+        METHOD getChosenLanguage() -> Function
+        METHOD standardLanguage() -> String
+        METHOD loadTopScoreFromServer(gameType, cubit) [async]
+          Assigns:
+            - topScores [conditional: true]
+          Accesses:
+            - localhost
+          Instantiates:
+            - lib/services/http_service.dart:HttpService
+          Calls:
+            - print
+            - httpService.getDB
+            - jsonDecode [conditional: true]
+            - cubit.setState [conditional: true]
+        METHOD updateTopScore(name, score, gameType) [async]
+          Assigns:
+            - _loadedGameTypes[] [conditional: true]
+          Accesses:
+            - localhost
+          Instantiates:
+            - lib/services/http_service.dart:HttpService
+          Calls:
+            - print
+            - httpService.postDB
+            - jsonDecode [conditional: true]
+
+File: lib/top_score/widget_top_scores.dart
+  Imports:
+    - flutter/material.dart
+    - ../startup.dart
+    - ./languages_top_score.dart
+  Classes:
+    CLASS WidgetTopScore (extends StatefulWidget)
+      Fields:
+        - width [type: double] (final)
+        - height [type: double] (final)
+      Methods:
+        METHOD createState() -> _WidgetTopScoreState
+    CLASS _WidgetTopScoreState (extends State<WidgetTopScore>)
+      with: TickerProviderStateMixin, LanguagesTopScore
+      Methods:
+        METHOD setupAnimation(ticket)
+          Assigns:
+            - topScore.animationController
+            - topScore.loopAnimation
+          Instantiates:
+            - AnimationController
+            - CurveTween
+          Calls:
+            - tween.animate()
+            - topScore.animationController.addStatusListener
+              Calls (callback):
+                - topScore.animationController.reverse() [conditional: true]
+                - topScore.animationController.forward() [conditional: true]
+            - topScore.animationController.forward()
+        METHOD initState()
+          Calls:
+            - super.initState()
+            - languagesSetup
+            - topScore.getChosenLanguage
+            - topScore.standardLanguage
+            - setupAnimation
+        METHOD dispose()
+          Calls:
+            - topScore.animationController.dispose()
+            - super.dispose()
+        METHOD build(context)
+          Accesses:
+            - widget.width
+            - widget.height
+            - topScore.animationController
+            - topScore.topScores
+            - topScore.loopAnimation
+            - topScores_
+            - topScore.topScores[] (dynamic access)
+          Instantiates:
+            - Positioned [loop: true]
+            - Container [loop: true]
+            - FittedBox [loop: true]
+            - Text [loop: true]
+            - TextStyle [loop: true]
+            - Shadow [loop: true]
+            - AnimatedBuilder [loop: true]
+            - BoxDecoration [loop: true]
+            - Border.all [loop: true]
+            - BorderRadius [loop: true]
+            - LinearGradient [loop: true]
+            - Scrollbar [loop: true]
+            - ListView.builder [loop: true]
+            - Row [loop: true]
+            - SizedBox
+            - Stack
+          Calls:
+            - Colors.blue.withValues [loop: true]
+            - Colors.red.withValues [loop: true]
+            - Colors.greenAccent.withValues [loop: true]
+            - Colors.lightBlueAccent.withValues [loop: true]
+          Returns: Widget
+
+File: lib/tutorial/tutorial.dart
+  Imports:
+    - flutter/material.dart
+  Classes:
+    CLASS Tutorial
+      Fields:
+        - keyXPos [type: List<double>]
+        - keyYPos [type: List<double>]
+        - animationSide [type: List<String>]
+        - animationController1, animationController2, animationController3 [type: AnimationController]
+        - positionAnimation1, positionAnimation2, positionAnimation3 [type: Animation<double>]
+      Methods:
+        METHOD setup(ticket)
+          Assigns:
+            - animationController1
+            - positionAnimation1
+            - animationController2
+            - positionAnimation2
+            - animationController3
+            - positionAnimation3
+          Instantiates:
+            - AnimationController [loop: true]
+            - CurveTween [loop: true]
+          Calls:
+            - tween.animate() [loop: true]
+            - controller.addListener() [loop: true]
+              Calls (callback):
+                - positionAnimation.value (access)
+                - keyXPos[] (assign, conditional)
+                - keyYPos[] (assign, conditional)
+        METHOD widgetArrow(key, w, h, animationController, text, controller, side, scale) -> Widget
+          Accesses:
+            - animationController
+            - key.currentContext
+            - renderBox.size
+            - renderBox.localToGlobal
+            - side
+            - keyXPos[]
+            - keyYPos[]
+          Assigns:
+            - animationSide[]
+          Instantiates:
+            - AnimatedBuilder
+            - Positioned
+            - Column [conditional: true]
+            - SizedBox [loop: true]
+            - FittedBox [loop: true]
+            - Text [loop: true]
+            - TextStyle [loop: true]
+            - Shadow [loop: true]
+            - Image [loop: true]
+            - Row [conditional: true]
+          Calls:
+            - Colors.black.withValues [loop: true]
+            - Colors.blueAccent.withValues [loop: true]
+
+File: lib/utils/yatzy_mapping_client.dart
+  Variables:
+    - _gameTypeMappingsClient [const, private]
+  Functions:
+    FUNCTION _getBaseGameTypeClient(gameType) [private] -> String
+      Accesses:
+        - gameType.startsWith
+    FUNCTION _getBaseLabel(fullLabel) [private] -> String
+      Accesses:
+        - fullLabel.contains
+    FUNCTION getSelectionLabel(gameType, index) -> String?
+      Accesses:
+        - _gameTypeMappingsClient
+      Calls:
+        - _getBaseGameTypeClient
+        - print [conditional: true]
+    FUNCTION getSelectionIndex(gameType, label) -> int
+      Accesses:
+        - _gameTypeMappingsClient
+      Calls:
+        - _getBaseGameTypeClient
+        - _getBaseLabel
+        - Array.indexOf
+        - print [conditional: true]
+
+File: lib/views/application_view.dart
+  Imports:
+    - auto_route
+    - flutter/material.dart
+    - flutter_bloc
+    - ../application/widget_application_scaffold.dart
+    - ../startup.dart
+    - ../states/cubit/state/state_cubit.dart
+  Classes:
+    CLASS ApplicationView (extends StatefulWidget)
+      Decorators:
+        - @RoutePage()
+      Methods:
+        METHOD createState() -> _ApplicationViewState
+    CLASS _ApplicationViewState (extends State<ApplicationView>)
+      with: TickerProviderStateMixin
+      Methods:
+        METHOD myState()
+          Calls:
+            - setState() [conditional: true]
+        METHOD postFrameCallback(context) [async]
+          Assigns:
+            - mainPageLoaded
+          Calls:
+            - myState() [conditional: true]
+        METHOD initState()
+          Calls:
+            - super.initState()
+            - tutorial.setup
+            - WidgetsBinding.instance.addPostFrameCallback
+            - app.animation.setupAnimation
+        METHOD dispose()
+          Calls:
+            - tutorial.animationController1.dispose()
+            - tutorial.animationController2.dispose()
+            - tutorial.animationController3.dispose()
+            - super.dispose()
+        METHOD build(context) -> Widget
+          Calls:
+            - BlocBuilder<SetStateCubit, int>()
+            - app.widgetScaffold
+
+File: lib/views/settings_view.dart
+  Imports:
+    - auto_route
+    - flutter/material.dart
+    - flutter_bloc
+    - ../application/widget_application_settings.dart
+    - ../startup.dart
+    - ../states/cubit/state/state_cubit.dart
+  Classes:
+    CLASS SettingsView (extends StatefulWidget)
+      Decorators:
+        - @RoutePage()
+      Methods:
+        METHOD createState() -> _SettingsViewHomeState
+    CLASS _SettingsViewHomeState (extends State<SettingsView>)
+      with: TickerProviderStateMixin
+      Methods:
+        METHOD myState()
+          Calls:
+            - setState()
+        METHOD initState()
+          Assigns:
+            - app.tabController
+          Calls:
+            - super.initState()
+            - TabController()
+        METHOD build(context) -> Widget
+          Calls:
+            - BlocBuilder<SetStateCubit, int>()
+            - app.widgetScaffoldSettings
+
+File: lib/widgets/spectator_game_board.dart
+  Imports:
+    - flutter/material.dart
+  Classes:
+    CLASS SpectatorGameBoard (extends StatefulWidget)
+      Fields:
+        - gameData [type: Map<String, dynamic>] (final)
+      Methods:
+        METHOD createState() -> _SpectatorGameBoardState
+    CLASS _SpectatorGameBoardState (extends State<SpectatorGameBoard>)
+      Fields:
+        - _horizontalScrollController [type: ScrollController] (final, private)
+        - _verticalScrollController [type: ScrollController] (final, private)
+      Methods:
+        METHOD dispose()
+          Calls:
+            - _horizontalScrollController.dispose()
+            - _verticalScrollController.dispose()
+            - super.dispose()
+        METHOD build(context) -> Widget
+          Accesses:
+            - widget.gameData (dynamic access)
+            - widget.gameData['gameFinished']
+            - widget.gameData['userNames']
+            - widget.gameData['players']
+            - widget.gameData['rollCount']
+            - widget.gameData['diceValues']
+            - _verticalScrollController
+            - _horizontalScrollController
+          Instantiates:
+            - Stack
+            - Column
+            - Container
+            - Text
+            - TextStyle
+            - SizedBox
+            - Row
+            - Padding
+            - BoxDecoration
+            - Border
+            - BorderSide
+            - BoxShadow
+            - Center
+            - RawScrollbar [loop: true]
+            - SingleChildScrollView [loop: true]
+          Calls:
+            - print
+            - List.from [conditional: true]
+            - Map() [conditional: true]
+            - List.generate [conditional: true]
+            - getDiceFace [loop: true, conditional: true]
+            - buildScoreTable
+            - Colors.blue.shade*
+            - Colors.grey.shade*
+            - Colors.black.withValues
+            - Colors.white.withValues
+            - BorderRadius.circular
+            - Positioned.fill [conditional: true]
+            - Colors.red.withValues [conditional: true]
+            - Colors.black54.withValues [conditional: true]
+          Returns: Widget
+        METHOD getDiceFace(value) -> Widget
+          Instantiates:
+            - Container [loop: true]
+            - BoxDecoration [loop: true]
+            - BorderRadius [loop: true]
+            - Column [loop: true]
+            - Row [loop: true]
+            - SizedBox
+          Calls:
+            - Colors.black.withValues [loop: true]
+          Returns: Widget
+        METHOD buildScoreTable(playerNames) -> Widget
+          Accesses:
+            - widget.gameData['players']
+            - widget.gameData['players'][] (dynamic access)
+            - category.index
+            - category.displayName
+            - category.isHighlighted
+          Instantiates:
+            - ScoreCategory [loop: true]
+            - Padding
+            - Table
+            - TableRow [loop: true]
+            - BoxDecoration [loop: true]
+            - TableCell [loop: true]
+            - Text [loop: true]
+            - TextStyle [loop: true]
+            - Container [loop: true]
+          Calls:
+            - print
+            - TableBorder.all
+            - Colors.blue.shade*
+            - Colors.green.shade*
+            - Map()
+          Returns: Widget
+  Helper Classes:
+    CLASS ScoreCategory
+      Fields:
+        - displayName [type: String] (final)
+        - index [type: int] (final)
+        - isHighlighted [type: bool] (final)
+      Methods:
+        METHOD constructor(displayName, index, isHighlighted)
+
+File: unity/yatzy/Assets/FlutterUnityIntegration/Demo/GameManager.cs
+  Imports:
+    - System
+    - System.Collections
+    - System.Collections.Generic
+    - FlutterUnityIntegration
+    - UnityEngine
+  Classes:
+    CLASS GameManager (extends MonoBehaviour)
+      Methods:
+        METHOD Start()
+          Calls:
+            - gameObject.AddComponent<UnityMessageManager>()
+        METHOD Update()
+        METHOD HandleWebFnCall(action)
+          Accesses:
+            - Time.timeScale
+          Calls:
+            - Application.Unload [conditional: true]
+            - Application.Quit [conditional: true]
+
+File: unity/yatzy/Assets/FlutterUnityIntegration/Demo/Rotate.cs
+  Imports:
+    - System
+    - FlutterUnityIntegration
+    - UnityEngine
+    - UnityEngine.EventSystems
+  Classes:
+    CLASS Rotate (extends MonoBehaviour, implements IEventSystemHandler)
+      Fields:
+        - RotateAmount [type: Vector3] (SerializeField)
+      Methods:
+        METHOD Start()
+          Instantiates:
+            - Vector3
+          Assigns:
+            - RotateAmount
+        METHOD Update()
+          Accesses:
+            - gameObject.transform
+            - RotateAmount
+            - Time.deltaTime
+            - Input.touchCount
+            - Input.GetTouch[]
+            - Touch.phase
+            - Camera.main
+            - Touch.position
+          Instantiates:
+            - RaycastHit
+          Calls:
+            - transform.Rotate
+            - ScreenPointToRay
+            - Physics.Raycast
+            - UnityMessageManager.Instance.SendMessageToFlutter [conditional: true]
+        METHOD SetRotationSpeed(message)
+          Assigns:
+            - RotateAmount
+          Instantiates:
+            - Vector3
+          Calls:
+            - float.Parse
+
+File: unity/yatzy/Assets/FlutterUnityIntegration/Demo/SceneLoader.cs
+  Imports:
+    - System.Collections
+    - System.Collections.Generic
+    - FlutterUnityIntegration
+    - UnityEngine
+    - UnityEngine.SceneManagement
+  Classes:
+    CLASS SceneLoader (extends MonoBehaviour)
+      Methods:
+        METHOD Start()
+        METHOD Update()
+        METHOD LoadScene(idx)
+          Calls:
+            - Debug.Log
+            - SceneManager.LoadScene
+        METHOD MessengerFlutter()
+          Calls:
+            - UnityMessageManager.Instance.SendMessageToFlutter
+        METHOD SwitchNative()
+          Calls:
+            - UnityMessageManager.Instance.ShowHostMainWindow
+        METHOD UnloadNative()
+          Calls:
+            - UnityMessageManager.Instance.UnloadMainWindow
+        METHOD QuitNative()
+          Calls:
+            - UnityMessageManager.Instance.QuitUnityWindow
+
+File: unity/yatzy/Assets/FlutterUnityIntegration/Editor/Build.cs
+  Imports:
+    - System
+    - System.IO
+    - System.Linq
+    - System.Text.RegularExpressions
+    - UnityEditor
+    - UnityEngine
+    - UnityEditor.Build.Reporting
+  Classes:
+    CLASS Build (extends EditorWindow)
+      Fields:
+        - ProjectPath [static, readonly]
+        - APKPath [static, readonly]
+        - AndroidExportPath [static, readonly]
+        - WindowsExportPath [static, readonly]
+        - IOSExportPath [static, readonly]
+        - WebExportPath [static, readonly]
+        - IOSExportPluginPath [static, readonly]
+        - _pluginMode [private]
+        - _persistentKey [static, private]
+      Methods:
+        METHOD DoBuildAndroidLibrary() [static, MenuItem]
+          Calls:
+            - DoBuildAndroid
+            - Path.Combine
+            - Copy
+        METHOD DoBuildAndroidPlugin() [static, MenuItem]
+          Calls:
+            - DoBuildAndroid
+            - Path.Combine
+            - Copy
+        METHOD DoBuildIOS() [static, MenuItem]
+          Calls:
+            - BuildIOS
+            - IOSExportPath (access)
+        METHOD DoBuildIOSPlugin() [static, MenuItem]
+          Calls:
+            - BuildIOS
+            - IOSExportPluginPath (access)
+            - SetupIOSProjectForPlugin
+        METHOD DoBuildWebGL() [static, MenuItem]
+          Calls:
+            - BuildWebGL
+            - WebExportPath (access)
+        METHOD DoBuildWindowsOS() [static, MenuItem]
+          Calls:
+            - BuildWindowsOS
+            - WindowsExportPath (access)
+        METHOD PluginSettings() [static, MenuItem]
+          Calls:
+            - EditorWindow.GetWindow
+        METHOD OnGUI() [private]
+          Calls:
+            - GUILayout.Label
+            - EditorGUI.BeginChangeCheck
+            - EditorGUILayout.Toggle
+            - EditorGUI.EndChangeCheck
+            - EditorPrefs.SetBool [conditional: true]
+        METHOD OnEnable() [private]
+          Calls:
+            - EditorPrefs.GetBool
+        METHOD BuildWindowsOS(path) [static, private]
+          Calls:
+            - EditorUserBuildSettings.SwitchActiveBuildTarget
+            - Directory.Exists
+            - Directory.Delete [conditional: true]
+            - GetEnabledScenes
+            - ExportAddressables
+            - BuildPipeline.BuildPlayer
+        METHOD BuildWebGL(path) [static, private]
+          Calls:
+            - EditorUserBuildSettings.SwitchActiveBuildTarget
+            - Directory.Exists
+            - Directory.Delete [conditional: true]
+            - GetEnabledScenes
+            - ExportAddressables
+            - BuildPipeline.BuildPlayer
+            - ModifyWebGLExport
+        METHOD DoBuildAndroid(buildPath, isPlugin) [static, private]
+          Calls:
+            - EditorUserBuildSettings.SwitchActiveBuildTarget
+            - Directory.Exists
+            - Directory.Delete [conditional: true]
+            - GetEnabledScenes
+            - ExportAddressables
+            - BuildPipeline.BuildPlayer
+            - Copy
+            - ModifyAndroidGradle
+            - SetupAndroidProjectForPlugin [conditional: true]
+            - SetupAndroidProject [conditional: true]
+        METHOD ModifyWebGLExport() [static, private]
+          Calls:
+            - Path.Combine
+            - File.ReadAllText
+            - String.Replace
+            - File.WriteAllText
+        METHOD ModifyAndroidGradle(isPlugin) [static, private]
+          Calls:
+            - Path.Combine
+            - File.ReadAllText
+            - String.Replace
+            - Regex.Replace
+            - File.WriteAllText
+        METHOD BuildIOS(path) [static, private]
+          Calls:
+            - EditorUserBuildSettings.SwitchActiveBuildTarget
+            - Directory.Exists
+            - Directory.Delete [conditional: true]
+            - GetEnabledScenes
+            - ExportAddressables
+            - BuildPipeline.BuildPlayer
+        METHOD Copy(source, destinationPath) [static, private]
+          Calls:
+            - Directory.Exists
+            - Directory.Delete [conditional: true]
+            - Directory.CreateDirectory
+            - Directory.GetDirectories
+            - Directory.GetFiles
+            - File.Copy [loop: true]
+        METHOD GetEnabledScenes() [static, private] -> string[]
+          Calls:
+            - EditorBuildSettings.scenes.Where().Select().ToArray()
+        METHOD ExportAddressables() [static, private]
+        METHOD SetupAndroidProject() [static, private]
+          Calls:
+            - Path.GetFullPath
+            - Path.Combine
+            - File.ReadAllText
+            - Regex.IsMatch
+            - Regex.Replace [conditional: true]
+            - File.WriteAllText [conditional: true]
+            - String.Contains [conditional: true]
+        METHOD SetupAndroidProjectForPlugin() [static, private]
+          Calls:
+            - Path.GetFullPath
+            - Path.Combine
+            - File.ReadAllText
+            - Regex.IsMatch
+            - Regex.Replace [conditional: true]
+            - File.WriteAllText [conditional: true]
+        METHOD SetupIOSProjectForPlugin() [static, private]
+          Calls:
+            - Path.GetFullPath
+            - Path.Combine
+            - File.ReadAllText
+            - Regex.IsMatch
+            - Regex.Replace [conditional: true]
+            - File.WriteAllText [conditional: true]
+        METHOD BuildUnityFrameworkArchive() [static, private, async]
+          Calls:
+            - Directory.Exists
+            - Path.GetFullPath
+            - Debug.Log
+            - SweetShellHelper.Bash (extension method)
+            - Debug.Log [conditional: true]
+
+File: unity/yatzy/Assets/FlutterUnityIntegration/Editor/SweetShellHelper.cs
+  Imports:
+    - System.Diagnostics
+    - System.Threading.Tasks
+    - System
+  Classes:
+    CLASS SweetShellHelper [static]
+      Methods:
+        METHOD Bash(cmd, fileName) [static, extension] -> Task<int>
+          Instantiates:
+            - TaskCompletionSource<int>
+            - Process
+            - ProcessStartInfo
+            - Exception
+          Calls:
+            - cmd.Replace
+            - process.Start
+            - process.StandardError.ReadToEnd (within callback)
+            - process.StandardOutput.ReadToEnd (within callback)
+            - source.SetResult (within callback, conditional)
+            - source.SetException (within callback, conditional)
+            - process.Dispose (within callback)
+            - UnityEngine.Debug.LogWarning (within callback)
+            - UnityEngine.Debug.Log (within callback)
+            - UnityEngine.Debug.LogError [conditional: true]
+            - source.SetException [conditional: true]
+
+File: unity/yatzy/Assets/FlutterUnityIntegration/Editor/XCodePostBuild.cs
+  Imports:
+    - System
+    - System.Collections.Generic
+    - System.IO
+    - UnityEditor
+    - UnityEditor.Callbacks
+    - UnityEditor.iOS.Xcode
+    - UnityEngine
+  Classes:
+    CLASS XcodePostBuild [static]
+      Fields:
+        - TouchedMarker [const, private]
+      Methods:
+        METHOD OnPostBuild(target, pathToBuiltProject) [static, PostProcessBuild]
+          Calls:
+            - PatchUnityNativeCode
+            - UpdateUnityProjectFiles
+            - UpdateBuildSettings
+        METHOD UpdateBuildSettings(pathToBuildProject) [static, private]
+          Instantiates:
+            - PBXProject
+          Calls:
+            - Path.Combine
+            - pbx.ReadFromFile
+            - pbx.GetUnityFrameworkTargetGuid
+            - pbx.ProjectGuid
+            - pbx.SetBuildProperty [multiple times]
+            - pbx.WriteToFile
+        METHOD UpdateUnityProjectFiles(pathToBuiltProject) [static, private]
+          Instantiates:
+            - PBXProject
+          Calls:
+            - Path.Combine
+            - pbx.ReadFromFile
+            - pbx.TargetGuidByName
+            - pbx.AddFolderReference
+            - pbx.AddFileToBuild
+            - pbx.WriteToFile
+        METHOD PatchUnityNativeCode(pathToBuiltProject) [static, private]
+          Calls:
+            - Path.Combine
+            - CheckUnityAppController
+            - EditUnityAppControllerH [conditional: true]
+            - MarkUnityAppControllerH [conditional: true]
+            - EditUnityAppControllerMM [conditional: true]
+            - MarkUnityAppControllerMM [conditional: true]
+        METHOD MarkUnityAppControllerH(path) [static, private] -> bool
+          Calls:
+            - EditCodeFile
+              Calls (callback):
+                - line.Contains
+                - line.Trim
+        METHOD MarkUnityAppControllerMM(path) [static, private] -> bool
+          Calls:
+            - EditCodeFile
+              Calls (callback):
+                - line.Contains
+                - line.Trim
+        METHOD CheckUnityAppController(path) [static, private] -> bool
+          Calls:
+            - EditCodeFile
+              Calls (callback):
+                - line.Contains
+        METHOD EditUnityAppControllerH(path) [static, private]
+          Calls:
+            - EditCodeFile
+              Calls (callback):
+                - line.Contains
+                - line.Trim
+        METHOD EditUnityAppControllerMM(path) [static, private]
+          Calls:
+            - EditCodeFile
+              Calls (callback):
+                - line.Trim
+                - line.Contains
+        METHOD EditCodeFile(path, lineHandler) [static, private]
+          Calls:
+            - File.Exists
+            - File.Delete [conditional: true]
+            - File.Move
+            - File.OpenText
+            - File.Create
+            - StreamWriter constructor
+            - reader.ReadLine
+            - lineHandler [loop: true]
+            - writer.WriteLine [loop: true]
+
+File: unity/yatzy/Assets/FlutterUnityIntegration/NativeAPI.cs
+  Imports:
+    - System.Runtime.InteropServices
+    - UnityEngine.SceneManagement
+    - UnityEngine
+    - System
+  Classes:
+    CLASS NativeAPI
+      Methods:
+        METHOD OnUnityMessage(message) [static, extern, DllImport("__Internal")] // iOS
+        METHOD OnUnitySceneLoaded(name, buildIndex, isLoaded, IsValid) [static, extern, DllImport("__Internal")] // iOS
+        METHOD OnUnityMessageWeb(message) [static, extern, DllImport("__Internal")] // WebGL
+        METHOD OnUnitySceneLoadedWeb(name, buildIndex, isLoaded, isValid) [static, extern, DllImport("__Internal")] // WebGL
+        METHOD OnSceneLoaded(scene, mode) [static]
+          Accesses:
+            - scene.name
+            - scene.buildIndex
+            - scene.isLoaded
+            - scene.IsValid
+          Calls:
+            - AndroidJavaClass [conditional: true] (Android)
+            - jc.CallStatic [conditional: true] (Android)
+            - Debug.Log [conditional: true] (Android)
+            - OnUnitySceneLoadedWeb [conditional: true] (WebGL)
+            - OnUnitySceneLoaded [conditional: true] (iOS)
+        METHOD SendMessageToFlutter(message) [static]
+          Calls:
+            - AndroidJavaClass [conditional: true] (Android)
+            - jc.CallStatic [conditional: true] (Android)
+            - Debug.Log [conditional: true] (Android)
+            - OnUnityMessageWeb [conditional: true] (WebGL)
+            - OnUnityMessage [conditional: true] (iOS)
+        METHOD ShowHostMainWindow() [static]
+          Calls:
+            - AndroidJavaClass [conditional: true] (Android)
+            - jc.GetStatic<AndroidJavaObject> [conditional: true] (Android)
+            - overrideActivity.Call [conditional: true] (Android)
+            - Debug.Log [conditional: true] (Android)
+        METHOD UnloadMainWindow() [static]
+          Calls:
+            - AndroidJavaClass [conditional: true] (Android)
+            - jc.GetStatic<AndroidJavaObject> [conditional: true] (Android)
+            - overrideActivity.Call [conditional: true] (Android)
+            - Debug.Log [conditional: true] (Android)
+        METHOD QuitUnityWindow() [static]
+          Calls:
+            - AndroidJavaClass [conditional: true] (Android)
+            - jc.GetStatic<AndroidJavaObject> [conditional: true] (Android)
+            - overrideActivity.Call [conditional: true] (Android)
+            - Debug.Log [conditional: true] (Android)
+
+File: unity/yatzy/Assets/FlutterUnityIntegration/SingletonMonoBehaviour.cs
+  Imports:
+    - System
+    - UnityEngine
+  Classes:
+    CLASS SingletonMonoBehaviour<T> (extends MonoBehaviour)
+      Fields:
+        - LazyInstance [static, readonly, private]
+      Methods:
+        METHOD get Instance [static] -> T
+          Accesses:
+            - LazyInstance.Value
+        METHOD CreateSingleton() [static, private] -> T
+          Instantiates:
+            - GameObject
+          Calls:
+            - ownerObject.AddComponent<T>()
+            - DontDestroyOnLoad
+
+File: unity/yatzy/Assets/FlutterUnityIntegration/UnityMessageManager.cs
+  Imports:
+    - System
+    - System.Collections.Generic
+    - Newtonsoft.Json.Linq
+    - UnityEngine
+    - UnityEngine.SceneManagement
+  Classes:
+    CLASS MessageHandler
+      Fields:
+        - id [type: int]
+        - seq [type: string]
+        - name [type: String]
+        - data [type: JToken] (private, readonly)
+      Methods:
+        METHOD Deserialize(message) [static] -> MessageHandler
+          Instantiates:
+            - MessageHandler
+          Calls:
+            - JObject.Parse
+            - m.GetValue().Value<T>()
+        METHOD getData<T>() -> T
+          Accesses:
+            - data
+          Calls:
+            - data.Value<T>()
+        METHOD constructor(id, seq, name, data)
+        METHOD send(data)
+          Calls:
+            - JObject.FromObject
+            - UnityMessageManager.Instance.SendMessageToFlutter
+            - o.ToString()
+    CLASS UnityMessage
+      Fields:
+        - name [type: String]
+        - data [type: JObject]
+        - callBack [type: Action<object>]
+    CLASS UnityMessageManager (extends SingletonMonoBehaviour<UnityMessageManager>)
+      Fields:
+        - MessagePrefix [const]
+        - ID [static, private]
+        - waitCallbackMessageMap [type: Dictionary<int, UnityMessage>] (private, readonly)
+      Events:
+        - OnMessage [type: MessageDelegate]
+        - OnFlutterMessage [type: MessageHandlerDelegate]
+      Methods:
+        METHOD generateId() [static, private] -> int
+        METHOD Start()
+          Calls:
+            - SceneManager.sceneLoaded += OnSceneLoaded
+        METHOD OnSceneLoaded(scene, mode)
+          Calls:
+            - NativeAPI.OnSceneLoaded
+        METHOD ShowHostMainWindow()
+          Calls:
+            - NativeAPI.ShowHostMainWindow
+        METHOD UnloadMainWindow()
+          Calls:
+            - NativeAPI.UnloadMainWindow
+        METHOD QuitUnityWindow()
+          Calls:
+            - NativeAPI.QuitUnityWindow
+        METHOD SendMessageToFlutter(message)
+          Calls:
+            - NativeAPI.SendMessageToFlutter
+        METHOD SendMessageToFlutter(message_obj)
+          Accesses:
+            - message_obj.callBack
+            - message_obj.name
+            - message_obj.data
+            - waitCallbackMessageMap
+          Calls:
+            - generateId
+            - waitCallbackMessageMap.Add [conditional: true]
+            - JObject.FromObject
+            - UnityMessageManager.Instance.SendMessageToFlutter
+            - o.ToString()
+        METHOD onMessage(message)
+          Calls:
+            - OnMessage?.Invoke
+        METHOD onFlutterMessage(message)
+          Accesses:
+            - MessagePrefix
+            - waitCallbackMessageMap
+            - handler.seq
+            - handler.id
+            - m.callBack
+          Calls:
+            - message.StartsWith
+            - message.Replace [conditional: true]
+            - MessageHandler.Deserialize
+            - waitCallbackMessageMap.TryGetValue [conditional: true]
+            - waitCallbackMessageMap.Remove [conditional: true]
+            - m.callBack?.Invoke [conditional: true]
+            - handler.getData<object> [conditional: true]
+            - OnFlutterMessage?.Invoke
+
+File: unity/yatzy/Assets/Scripts/CircularMotionScript.cs
+  Imports:
+    - System.Collections
+    - System.Collections.Generic
+    - UnityEngine
+  Classes:
+    CLASS CircularMotionScript (extends MonoBehaviour)
+      Fields:
+        - timeCounter [type: float]
+        - myColor [type: Color]
+        - lightMotion [type: bool]
+        - originalPosition [type: Vector3]
+        - speed [type: float] (private)
+      Methods:
+        METHOD Start()
+          Assigns:
+            - speed
+            - originalPosition
+            - lightMotion
+            - myColor
+        METHOD Update()
+          Accesses:
+            - lightMotion
+            - timeCounter
+            - Time.deltaTime
+            - speed
+            - originalPosition
+            - transform.position
+            - myColor
+          Assigns:
+            - timeCounter [conditional: true]
+            - transform.position [conditional: true]
+          Calls:
+            - Mathf.Cos [conditional: true]
+            - Mathf.Sin [conditional: true]
+            - GameObject.Find
+            - go.GetComponent<Renderer>().material.color (assign) [loop: true]
+
+File: unity/yatzy/Assets/Scripts/Connection.cs
+  Imports:
+    - System
+    - System.Collections
+    - System.Collections.Concurrent
+    - System.Collections.Generic
+    - UnityEngine
+    - NativeWebSocket
+  Classes:
+    CLASS Connection (extends MonoBehaviour)
+      Fields:
+        - websocket [type: NativeWebSocket.WebSocket]
+        - _actions [type: ConcurrentQueue<Action>] (private, readonly)
+        - isOnline [type: bool]
+      Methods:
+        METHOD Start() [async]
+          Assigns:
+            - websocket
+            - websocket.OnOpen
+            - websocket.OnError
+            - websocket.OnClose
+            - websocket.OnMessage
+          Instantiates:
+            - NativeWebSocket.WebSocket
+          Calls:
+            - Debug.Log (within callback)
+            - _actions.Enqueue (within callback)
+            - GameObject.Find (within callback)
+            - go.GetComponent<GameManagerScript>().flutterMessage (within callback)
+            - websocket.Connect
+        METHOD Update()
+          Accesses:
+            - _actions.Count
+            - websocket
+          Calls:
+            - _actions.TryDequeue [conditional: true]
+            - action?.Invoke() [conditional: true]
+            - websocket.DispatchMessageQueue()
+        METHOD OnApplicationQuit() [async]
+          Accesses:
+            - websocket
+          Calls:
+            - websocket.Close
+
+File: unity/yatzy/Assets/Scripts/DiceCheckZoneScript.cs
+  Imports:
+    - System.Collections
+    - System.Collections.Generic
+    - UnityEngine
+  Classes:
+    CLASS DiceCheckZoneScript (extends MonoBehaviour)
+      Fields:
+        - vel [type: Vector3] (private)
+        - angVel [type: Vector3] (private)
+      Methods:
+        METHOD OnTriggerStay(col)
+          Accesses:
+            - col.gameObject
+            - Rigidbody.linearVelocity
+            - Rigidbody.angularVelocity
+            - Rigidbody.rotation
+          Calls:
+            - col.gameObject.GetComponentInParent<DiceScript>().GetDiceNumber()
+            - Mathf.Abs [conditional: true]
+            - col.gameObject.GetComponentInParent<DiceScript>().SetDiceNumber() [conditional: true]
+
+File: unity/yatzy/Assets/Scripts/DiceScript.cs
+  Imports:
+    - System.Collections
+    - System.Collections.Generic
+    - UnityEngine
+  Classes:
+    CLASS DiceScript (extends MonoBehaviour)
+      Fields:
+        - diceNumber [type: int]
+        - originalPosition [type: Vector3]
+        - cupPosition [type: Vector3]
+        - startPosition [type: Vector3]
+        - respondsToClicks [type: bool]
+        - isGreen [type: bool]
+        - isBlue [type: bool]
+        - isActive [type: bool]
+      Methods:
+        METHOD Awake()
+          Assigns:
+            - originalPosition
+            - diceNumber
+            - respondsToClicks
+            - isActive
+          Accesses:
+            - transform.position
+        METHOD Update()
+        METHOD OnMouseDown()
+          Assigns:
+            - transform.position [conditional: true]
+            - go.transform.position [conditional: true]
+            - go.transform.rotation [conditional: true]
+            - go.GetComponent<DiceScript>().isActive [conditional: true]
+            - isActive [conditional: true]
+          Accesses:
+            - respondsToClicks
+            - isGreen
+            - transform.name
+            - transform.rotation
+          Calls:
+            - GameObject.Find [conditional: true]
+            - transform.name.Replace [conditional: true]
+            - Quaternion.Euler [conditional: true]
+        METHOD GetDiceNumber() -> int
+          Accesses:
+            - diceNumber
+        METHOD SetDiceNumber(number)
+          Assigns:
+            - diceNumber
+
+File: unity/yatzy/Assets/Scripts/GameManagerScript.cs
+  Imports:
+    - System
+    - System.Collections
+    - System.Collections.Generic
+    - UnityEngine
+    - Newtonsoft.Json
+    - Newtonsoft.Json.Linq
+    - FlutterUnityIntegration
+    - UnityEngine.Random (aliased)
+  Classes:
+    CLASS jsonCommunicator
+      Fields:
+        - actionUnity [type: string]
+        - diceResult [type: List<int>]
+      Methods:
+        METHOD constructor(_actionUnity, _diceResult)
+          Assigns:
+            - actionUnity
+            - diceResult
+          Instantiates:
+            - List<int>
+    CLASS GameManagerScript (extends MonoBehaviour)
+      Fields:
+        - throwDices [type: bool]
+        - throwActive [type: bool]
+        - maxNrDices [static, private]
+        - go [type: GameObject[]]
+        - goG [type: GameObject[]]
+        - goB [type: GameObject[]]
+        - goSnow [type: GameObject]
+        - goSnowActive [type: bool]
+        - diceResult [static, private, type: List<int>]
+        - rb [static, type: Rigidbody]
+        - c [type: float] (private)
+        - nrDices [type: int] (private)
+        - nrThrows [type: int] (private)
+        - nrThrowsRemaining [type: int] (private)
+        - animatorCup [type: Animator] (private)
+        - animatorCat [type: Animator] (private)
+        - animatorDog [type: Animator] (private)
+        - timeFromThrownDices [type: float] (private)
+        - rethrow [type: bool] (private)
+        - dicesActive [type: bool] (private)
+      Methods:
+        METHOD Start()
+          Assigns:
+            - throwActive
+            - goSnow
+            - go[]
+            - goG[]
+            - goB[]
+            - diceResult
+            - animatorCup
+            - animatorCat
+            - animatorDog
+          Instantiates:
+            - GameObject
+            - GameObject[]
+            - List<int>
+          Calls:
+            - Debug.Log
+            - gameObject.AddComponent<UnityMessageManager>()
+            - GameObject.Find
+            - goSnow.transform.GetChild() [loop: true]
+            - Go.GetComponent<ParticleSystem>().main.startSize.constant (access) [loop: true]
+            - goSnow.SetActive
+            - InitDices
+            - go[].GetComponent<DiceScript>().cupPosition (assign) [loop: true]
+            - GameObject.Find("Empire_Cup").GetComponent<Animator>()
+            - animatorCup.Play
+            - animatorCat.Play
+            - animatorDog.Play
+        METHOD InitDices(initRotation?)
+          Accesses:
+            - maxNrDices
+            - go[]
+            - goG[]
+            - goB[]
+            - GameObject.Find("StartPlane").transform.position
+            - nrDices
+          Assigns:
+            - go[].transform.position [loop: true]
+            - goG[].transform.position [loop: true]
+            - goB[].transform.position [loop: true]
+            - go[].transform.rotation [loop: true, conditional: true]
+            - go[].GetComponent<DiceScript>().startPosition [loop: true]
+            - goG[].GetComponent<DiceScript>().startPosition [loop: true]
+            - goB[].GetComponent<DiceScript>().startPosition [loop: true]
+            - goB[].GetComponent<DiceScript>().isActive [loop: true]
+            - diceResult[] [loop: true]
+          Calls:
+            - Quaternion.Euler [loop: true, conditional: true]
+        METHOD SetDices(dices)
+          Accesses:
+            - dices.Count
+            - go[]
+            - dices[]
+          Assigns:
+            - go[].transform.rotation [loop: true]
+          Calls:
+            - Quaternion.Euler [loop: true]
+        METHOD Update()
+          Accesses:
+            - nrDices
+            - go[]
+            - dicesActive
+            - rethrow
+            - goB[]
+            - goG[]
+            - nrThrowsRemaining
+            - Time.time
+            - timeFromThrownDices
+            - throwDices
+          Assigns:
+            - diceResult[] [loop: true]
+            - dicesActive [conditional: true]
+            - throwActive [conditional: true]
+            - throwDices [conditional: true]
+            - timeFromThrownDices [conditional: true]
+            - rethrow [conditional: true]
+          Instantiates:
+            - jsonCommunicator [conditional: true]
+          Calls:
+            - go[].GetComponent<DiceScript>().GetDiceNumber() [loop: true]
+            - goB[].GetComponent<DiceScript>().isActive [loop: true, conditional: true]
+            - goG[].GetComponent<DiceScript>().startPosition (access) [loop: true, conditional: true]
+            - go[].GetComponentInParent<Rigidbody>().rotation.eulerAngles (access) [loop: true, conditional: true]
+            - Quaternion.Euler [loop: true, conditional: true]
+            - goG[].GetComponent<DiceScript>().respondsToClicks (assign) [loop: true, conditional: true]
+            - goB[].GetComponent<DiceScript>().respondsToClicks (assign) [loop: true, conditional: true]
+            - JsonConvert.SerializeObject [conditional: true]
+            - UnityMessageManager.Instance.SendMessageToFlutter [conditional: true]
+            - InitDices [conditional: true]
+            - Debug.Log [conditional: true]
+            - go[].GetComponent<DiceScript>().cupPosition (access) [loop: true, conditional: true]
+            - GameObject.Find("Empire_Cup").transform.position (access) [loop: true, conditional: true]
+            - Quaternion.identity [loop: true, conditional: true]
+            - go[].GetComponent<Rigidbody>() [loop: true, conditional: true]
+            - Random.Range [loop: true, conditional: true]
+            - rb.angularVelocity (assign) [loop: true, conditional: true]
+            - go[].GetComponent<DiceScript>().SetDiceNumber(0) [loop: true, conditional: true]
+            - animatorCup.Play [conditional: true]
+        METHOD SetNrDices(strNrDices)
+          Assigns:
+            - nrDices
+          Calls:
+            - int.Parse
+            - InitDices
+        METHOD flutterMessage(json)
+          Accesses:
+            - o[] (dynamic access)
+          Assigns:
+            - nrDices [conditional: true]
+            - nrThrows [conditional: true]
+            - nrThrowsRemaining [conditional: true]
+            - throwActive [conditional: true]
+            - throwDices [conditional: true]
+            - goSnowActive [conditional: true]
+          Instantiates:
+            - GameObject [conditional: true]
+            - List<int> [conditional: true]
+          Calls:
+            - Debug.Log
+            - JObject.Parse
+            - UnityMessageManager.Instance.SendMessageToFlutter [conditional: true]
+            - InitDices [conditional: true]
+            - GameObject.Find [conditional: true]
+            - localGameObject.GetComponent<CircularMotionScript>().myColor (assign) [conditional: true]
+            - localGameObject.GetComponent<CircularMotionScript>().lightMotion (assign) [conditional: true]
+            - SetDices [conditional: true]
+            - goSnow.SetActive [conditional: true]
+
+File: unity/yatzy/Assets/Scripts/ThrowDices.cs
+  Imports:
+    - System.Collections
+    - System.Collections.Generic
+    - UnityEngine
+  Classes:
+    CLASS ThrowDices (extends MonoBehaviour)
+      Fields:
+        - gameManager [type: GameObject]
+      Methods:
+        METHOD Awake()
+          Assigns:
+            - gameManager
+          Calls:
+            - GameObject.Find
+        METHOD OnMouseDown()
+          Accesses:
+            - gameManager
+          Assigns:
+            - gameManager.GetComponent<GameManagerScript>().throwDices [conditional: true]
+          Calls:
+            - Debug.Log
+            - gameManager.GetComponent<GameManagerScript>().throwActive
+        METHOD Update()
+
+File: unity/yatzy/Assets/WebSocket/WebSocket.cs
+  Imports:
+    - System
+    - System.Collections.Generic
+    - System.IO
+    - System.Net.WebSockets
+    - System.Runtime.CompilerServices
+    - System.Text
+    - System.Threading
+    - System.Threading.Tasks
+    - AOT
+    - System.Runtime.InteropServices
+    - UnityEngine
+    - System.Collections
+  Classes:
+    CLASS MainThreadUtil (extends MonoBehaviour)
+      Fields:
+        - Instance [static, public, get, private set]
+        - synchronizationContext [static, public, get, private set]
+      Methods:
+        METHOD Setup() [static]
+          Assigns:
+            - Instance
+            - synchronizationContext
+          Instantiates:
+            - GameObject
+          Calls:
+            - new GameObject().AddComponent<MainThreadUtil>()
+            - SynchronizationContext.Current (access)
+        METHOD Run(waitForUpdate) [static]
+          Calls:
+            - synchronizationContext.Post
+            - Instance.StartCoroutine
+            - CoroutineWrapper
+        METHOD Awake()
+          Accesses:
+            - gameObject.hideFlags
+          Calls:
+            - DontDestroyOnLoad
+    CLASS WaitForUpdate (extends CustomYieldInstruction)
+      Methods:
+        METHOD get keepWaiting -> bool
+        METHOD GetAwaiter() -> MainThreadAwaiter
+          Instantiates:
+            - MainThreadAwaiter
+          Calls:
+            - MainThreadUtil.Run
+            - CoroutineWrapper
+    CLASS MainThreadAwaiter (implements INotifyCompletion)
+      Fields:
+        - continuation [type: Action] (private)
+        - IsCompleted [type: bool] (public, get, set)
+      Methods:
+        METHOD GetResult()
+        METHOD Complete()
+          Assigns:
+            - IsCompleted
+          Calls:
+            - continuation?.Invoke()
+        METHOD OnCompleted(continuation)
+          Assigns:
+            - this.continuation
+    CLASS WebSocketFactory [static]
+      Fields:
+        - instances [static, public, type: Dictionary<Int32, WebSocket>]
+        - isInitialized [static, public, type: bool]
+      Methods:
+        METHOD WebSocketAllocate(url) [static, extern, DllImport("__Internal")] // WebGL
+        METHOD WebSocketAddSubProtocol(instanceId, subprotocol) [static, extern, DllImport("__Internal")] // WebGL
+        METHOD WebSocketFree(instanceId) [static, extern, DllImport("__Internal")] // WebGL
+        METHOD WebSocketSetOnOpen(callback) [static, extern, DllImport("__Internal")] // WebGL
+        METHOD WebSocketSetOnMessage(callback) [static, extern, DllImport("__Internal")] // WebGL
+        METHOD WebSocketSetOnError(callback) [static, extern, DllImport("__Internal")] // WebGL
+        METHOD WebSocketSetOnClose(callback) [static, extern, DllImport("__Internal")] // WebGL
+        METHOD Initialize() [static]
+          Assigns:
+            - isInitialized
+          Calls:
+            - WebSocketSetOnOpen
+            - DelegateOnOpenEvent
+            - WebSocketSetOnMessage
+            - DelegateOnMessageEvent
+            - WebSocketSetOnError
+            - DelegateOnErrorEvent
+            - WebSocketSetOnClose
+            - DelegateOnCloseEvent
+        METHOD HandleInstanceDestroy(instanceId) [static]
+          Accesses:
+            - instances
+          Calls:
+            - instances.Remove
+            - WebSocketFree
+        METHOD DelegateOnOpenEvent(instanceId) [static, MonoPInvokeCallback]
+          Accesses:
+            - instances
+          Calls:
+            - instances.TryGetValue
+            - instanceRef.DelegateOnOpenEvent [conditional: true]
+        METHOD DelegateOnMessageEvent(instanceId, msgPtr, msgSize) [static, MonoPInvokeCallback]
+          Accesses:
+            - instances
+          Instantiates:
+            - byte[]
+          Calls:
+            - instances.TryGetValue
+            - Marshal.Copy
+            - instanceRef.DelegateOnMessageEvent [conditional: true]
+        METHOD DelegateOnErrorEvent(instanceId, errorPtr) [static, MonoPInvokeCallback]
+          Accesses:
+            - instances
+          Calls:
+            - instances.TryGetValue
+            - Marshal.PtrToStringAuto
+            - instanceRef.DelegateOnErrorEvent [conditional: true]
+        METHOD DelegateOnCloseEvent(instanceId, closeCode) [static, MonoPInvokeCallback]
+          Accesses:
+            - instances
+          Calls:
+            - instances.TryGetValue
+            - instanceRef.DelegateOnCloseEvent [conditional: true]
+        METHOD CreateInstance(url) [static] -> WebSocket
+          Instantiates:
+            - NativeWebSocket.WebSocket
+  Interfaces:
+    INTERFACE IWebSocket
+      Events:
+        - OnOpen
+        - OnMessage
+        - OnError
+        - OnClose
+      Properties:
+        - State [get]
+  Enums:
+    ENUM WebSocketCloseCode
+    ENUM WebSocketState
+  Exceptions:
+    CLASS WebSocketException (extends Exception)
+    CLASS WebSocketUnexpectedException (extends WebSocketException)
+    CLASS WebSocketInvalidArgumentException (extends WebSocketException)
+    CLASS WebSocketInvalidStateException (extends WebSocketException)
+  Helper Classes:
+    CLASS WebSocketHelpers [static]
+      Methods:
+        METHOD ParseCloseCodeEnum(closeCode) [static] -> WebSocketCloseCode
+          Calls:
+            - WebSocketCloseCode.IsDefined
+        METHOD GetErrorMessageFromCode(errorCode, inner) [static] -> WebSocketException
+          Instantiates:
+            - WebSocketUnexpectedException
+            - WebSocketInvalidStateException
+            - WebSocketInvalidArgumentException
+    CLASS WaitForBackgroundThread
+      Methods:
+        METHOD GetAwaiter() -> ConfiguredTaskAwaitable.ConfiguredTaskAwaiter
+          Calls:
+            - Task.Run().ConfigureAwait().GetAwaiter()
+  Class (Conditional: WebGL):
+    CLASS WebSocket (implements IWebSocket)
+      Fields:
+        - instanceId [type: int] (protected)
+      Events:
+        - OnOpen, OnMessage, OnError, OnClose
+      Methods:
+        METHOD constructor(url, headers?)
+        METHOD constructor(url, subprotocol, headers?)
+        METHOD constructor(url, subprotocols, headers?)
+        METHOD destructor()
+        METHOD GetInstanceId() -> int
+        METHOD Connect() -> Task
+        METHOD CancelConnection()
+        METHOD Close(code?, reason?) -> Task
+        METHOD Send(data) -> Task
+        METHOD SendText(message) -> Task
+        METHOD get State -> WebSocketState
+        METHOD DelegateOnOpenEvent()
+        METHOD DelegateOnMessageEvent(data)
+        METHOD DelegateOnErrorEvent(errorMsg)
+        METHOD DelegateOnCloseEvent(closeCode)
+  Class (Conditional: Not WebGL):
+    CLASS WebSocket (implements IWebSocket)
+      Fields:
+        - uri [type: Uri] (private)
+        - headers [type: Dictionary<string, string>] (private)
+        - subprotocols [type: List<string>] (private)
+        - m_Socket [type: ClientWebSocket] (private)
+        - m_TokenSource [type: CancellationTokenSource] (private)
+        - m_CancellationToken [type: CancellationToken] (private)
+        - OutgoingMessageLock [type: object] (private, readonly)
+        - IncomingMessageLock [type: object] (private, readonly)
+        - isSending [type: bool] (private)
+        - sendBytesQueue [type: List<ArraySegment<byte>>] (private)
+        - sendTextQueue [type: List<ArraySegment<byte>>] (private)
+        - m_MessageList [type: List<byte[]>] (private)
+      Events:
+        - OnOpen, OnMessage, OnError, OnClose
+      Methods:
+        METHOD constructor(url, headers?)
+        METHOD constructor(url, subprotocol, headers?)
+        METHOD constructor(url, subprotocols, headers?)
+        METHOD CancelConnection()
+        METHOD Connect() [async]
+        METHOD get State -> WebSocketState
+        METHOD Send(bytes) -> Task
+        METHOD SendText(message) -> Task
+        METHOD SendMessage(queue, messageType, buffer) [async, private]
+        METHOD HandleQueue(queue, messageType) [async, private]
+        METHOD DispatchMessageQueue()
+        METHOD Receive() [async]
+        METHOD Close() [async]
+
 ```
 
 This file is a merged representation of a subset of the codebase, containing specifically included files and files not matching ignore patterns, combined into a single document by Repomix.
@@ -1866,7 +5759,6 @@ backend/src/utils/gameConfig.ts
 backend/src/utils/index.ts
 backend/src/utils/yatzyMapping.ts
 lib/application/animations_application.dart
-lib/application/application_functions_internal_calc_dice_values.dart
 lib/application/application_functions_internal.dart
 lib/application/application.dart
 lib/application/communication_application.dart
@@ -2670,9 +6562,10 @@ export class BoardCell {
   constructor(index: number, label: string, isNonScoreCell: boolean = false) {
     this.index = index;
     this.label = label;
-    this.value = -1; // Default to -1 (empty)
-    this.fixed = false;
+    this.value = label.toLowerCase() === 'sum' ||  label.toLowerCase() === 'total' ? 0 : -1; // Default to -1 (empty)
+    this.fixed = label.toLowerCase() === 'sum' || label.toLowerCase().includes('bonus') || label.toLowerCase() === 'total';
     this.isNonScoreCell = isNonScoreCell || label.toLowerCase() === 'sum' || label.toLowerCase().includes('bonus') || label.toLowerCase() === 'total';
+
   }
 
   // Method to serialize cell data
@@ -2889,7 +6782,7 @@ export class Game {
                     this.advanceToNextActivePlayer();
                 }
                 const activePlayersCount = this.players.filter(p => p?.isActive).length; // Add null check
-                 if (this.maxPlayers > 1 && activePlayersCount <= 1) {
+                 if (this.maxPlayers > 1 && activePlayersCount < 1) {
                      this.gameFinished = true;
                  } else if (this.maxPlayers === 1 && activePlayersCount === 0) {
                     this.gameFinished = true;
@@ -3144,7 +7037,268 @@ export class Player {
   // Game type needed for score calculation context
   private gameType: string;
 
-  constructor(
+  
+  // --- Instance Methods ---
+
+  private _countDice(diceValues: number[]): number[] {
+    const counts = [0, 0, 0, 0, 0, 0]; // Counts for 1s to 6s
+    for (const value of diceValues) {
+        if (value >= 1 && value <= 6) {
+            counts[value - 1]++;
+        }
+    }
+    return counts;
+}
+
+private _calculateUpperSection(diceValues: number[], faceValue: number): number {
+    let score = 0;
+    for (const value of diceValues) {
+        if (value === faceValue) {
+            score += faceValue;
+        }
+    }
+    return score;
+}
+
+private _calculatePairScore(diceValues: number[]): number {
+    const counts = this._countDice(diceValues);
+    for (let i = 5; i >= 0; i--) { // Check from 6s down
+        if (counts[i] >= 2) {
+            return (i + 1) * 2;
+        }
+    }
+    return 0;
+}
+
+ private _calculateTwoPairsScore(diceValues: number[]): number {
+    const counts = this._countDice(diceValues);
+    let firstPairValue = 0;
+    let score = 0;
+    let pairsFound = 0;
+    for (let i = 5; i >= 0; i--) {
+        if (counts[i] >= 2) {
+            score += (i + 1) * 2;
+            pairsFound++;
+             if (pairsFound === 2) return score; // Found two pairs
+             // Ensure we don't count four-of-a-kind as two pairs unless it's Maxi 3+3 house
+             if (counts[i] < 4 || this.gameType.startsWith("Maxi")) { // Allow 4+ for Maxi potentially
+                // Continue searching for second distinct pair
+             } else {
+                 // Ordinary Yatzy: 4-of-a-kind only counts as one pair here
+                 return 0; // Or handle based on specific rules interpretation
+             }
+        }
+    }
+    return pairsFound === 2 ? score : 0;
+}
+
+ private _calculateThreeOfKindScore(diceValues: number[]): number {
+    const counts = this._countDice(diceValues);
+    for (let i = 5; i >= 0; i--) {
+        if (counts[i] >= 3) {
+            return (i + 1) * 3;
+        }
+    }
+    return 0;
+}
+
+private _calculateFourOfKindScore(diceValues: number[]): number {
+    const counts = this._countDice(diceValues);
+    for (let i = 5; i >= 0; i--) {
+        if (counts[i] >= 4) {
+            return (i + 1) * 4;
+        }
+    }
+    return 0;
+}
+
+private _calculateFullHouseScore(diceValues: number[]): number {
+    const counts = this._countDice(diceValues);
+    let foundThree = false;
+    let foundTwo = false;
+    let score = 0;
+    let threeValue = -1;
+
+    for (let i = 0; i < 6; i++) {
+        if (counts[i] === 3) {
+            foundThree = true;
+            score += (i + 1) * 3;
+            threeValue = i;
+            break; // Found the three-of-a-kind part
+        }
+    }
+    if (!foundThree) return 0; // No three-of-a-kind found
+
+    for (let i = 0; i < 6; i++) {
+         // Make sure the pair is different from the three-of-a-kind
+        if (counts[i] === 2 && i !== threeValue) {
+            foundTwo = true;
+            score += (i + 1) * 2;
+            break; // Found the pair part
+        }
+    }
+
+    return foundThree && foundTwo ? score : 0;
+}
+
+private _calculateSmallStraightScore(diceValues: number[]): number {
+    const uniqueSorted = [...new Set(diceValues)].sort((a, b) => a - b);
+    // Check for 1, 2, 3, 4, 5
+    if (uniqueSorted.includes(1) && uniqueSorted.includes(2) && uniqueSorted.includes(3) && uniqueSorted.includes(4) && uniqueSorted.includes(5)) {
+         // Maxi Yatzy score for small straight is 15
+        // Ordinary Yatzy score for small straight is 15
+        return 15;
+    }
+    return 0;
+}
+
+private _calculateLargeStraightScore(diceValues: number[]): number {
+    const uniqueSorted = [...new Set(diceValues)].sort((a, b) => a - b);
+     // Check for 2, 3, 4, 5, 6
+    if (uniqueSorted.includes(2) && uniqueSorted.includes(3) && uniqueSorted.includes(4) && uniqueSorted.includes(5) && uniqueSorted.includes(6)) {
+         // Maxi Yatzy score for large straight is 20
+        // Ordinary Yatzy score for large straight is 20
+        return 20;
+    }
+    return 0;
+}
+
+private _calculateChanceScore(diceValues: number[]): number {
+    return diceValues.reduce((sum, val) => sum + val, 0);
+}
+
+ private _calculateYatzyScore(diceValues: number[]): number {
+    const counts = this._countDice(diceValues);
+    const config = GameConfig[getBaseGameType(this.gameType)];
+    const requiredCount = config.diceCount; // 5 for Ordinary, 6 for Maxi
+
+    for (let i = 0; i < 6; i++) {
+        if (counts[i] >= requiredCount) {
+            return config.cellLabels.includes('Maxi Yatzy') ? 100 : 50; // Maxi Yatzy or Ordinary Yatzy score
+        }
+    }
+    return 0;
+}
+
+// *** Add Maxi-specific calculations here ***
+private _calculateThreePairsScore(diceValues: number[]): number {
+     if (!this.gameType.startsWith('Maxi')) return 0; // Only for Maxi
+     const counts = this._countDice(diceValues);
+     let pairsFound = 0;
+     let score = 0;
+     for (let i = 5; i >= 0; i--) {
+         if (counts[i] >= 2) {
+             score += (i + 1) * 2;
+             pairsFound++;
+             if (counts[i] >= 4) pairsFound++; // A 4-of-a-kind counts as two pairs
+             if (counts[i] >= 6) pairsFound++; // A 6-of-a-kind counts as three pairs
+         }
+     }
+     return pairsFound >= 3 ? score : 0;
+ }
+
+ private _calculateFiveOfKindScore(diceValues: number[]): number {
+     if (!this.gameType.startsWith('Maxi')) return 0; // Only for Maxi
+     const counts = this._countDice(diceValues);
+     for (let i = 5; i >= 0; i--) {
+         if (counts[i] >= 5) {
+             return (i + 1) * 5;
+         }
+     }
+     return 0;
+ }
+
+ private _calculateFullStraightScore(diceValues: number[]): number {
+     if (!this.gameType.startsWith('Maxi')) return 0; // Only for Maxi
+     const uniqueSorted = [...new Set(diceValues)].sort((a, b) => a - b);
+     // Check for 1, 2, 3, 4, 5, 6
+     if (uniqueSorted.length === 6 && uniqueSorted[0] === 1 && uniqueSorted[5] === 6) {
+         return 21; // Or 30 based on rules (1+2+3+4+5+6 or fixed value) - Let's use 30 based on Maxi Yatzy online
+         //return 30;
+         // Client calc uses 1+2+3+4+5+6 = 21
+         return 21;
+     }
+     return 0;
+ }
+
+ private _calculateHouse32Score(diceValues: number[]): number {
+      // Same logic as standard Full House
+     return this._calculateFullHouseScore(diceValues);
+ }
+
+ private _calculateHouse33Score(diceValues: number[]): number {
+     if (!this.gameType.startsWith('Maxi')) return 0; // Only for Maxi
+     const counts = this._countDice(diceValues);
+     let threesFound = 0;
+     let score = 0;
+     for (let i = 5; i >= 0; i--) {
+         if (counts[i] === 3) {
+             score += (i + 1) * 3;
+             threesFound++;
+         }
+     }
+     return threesFound === 2 ? score : 0;
+ }
+
+  private _calculateHouse24Score(diceValues: number[]): number {
+     if (!this.gameType.startsWith('Maxi')) return 0; // Only for Maxi
+     const counts = this._countDice(diceValues);
+     let foundFour = false;
+     let foundTwo = false;
+     let score = 0;
+     let fourValue = -1;
+
+     for (let i = 0; i < 6; i++) {
+         if (counts[i] >= 4) { // Allow 4 or more
+             foundFour = true;
+             score += (i + 1) * 4;
+             fourValue = i;
+             break;
+         }
+     }
+     if (!foundFour) return 0;
+
+     for (let i = 0; i < 6; i++) {
+         if (counts[i] >= 2 && i !== fourValue) { // Allow 2 or more, but different value
+             foundTwo = true;
+             score += (i + 1) * 2;
+             break;
+         }
+     }
+     return foundFour && foundTwo ? score : 0;
+ }
+
+  // Map labels to calculation functions
+  private _getScoreFunction(label: string): (dice: number[]) => number {
+    switch (label) {
+        case 'Ones': return (d) => this._calculateUpperSection(d, 1);
+        case 'Twos': return (d) => this._calculateUpperSection(d, 2);
+        case 'Threes': return (d) => this._calculateUpperSection(d, 3);
+        case 'Fours': return (d) => this._calculateUpperSection(d, 4);
+        case 'Fives': return (d) => this._calculateUpperSection(d, 5);
+        case 'Sixes': return (d) => this._calculateUpperSection(d, 6);
+        case 'Pair': return this._calculatePairScore.bind(this);
+        case 'Two Pairs': return this._calculateTwoPairsScore.bind(this);
+        case 'Three of Kind': return this._calculateThreeOfKindScore.bind(this);
+        case 'Four of Kind': return this._calculateFourOfKindScore.bind(this);
+        case 'House': return this._calculateFullHouseScore.bind(this); // Ordinary House maps to standard Full House
+        case 'Small Straight': return this._calculateSmallStraightScore.bind(this);
+        case 'Large Straight': return this._calculateLargeStraightScore.bind(this);
+        case 'Chance': return this._calculateChanceScore.bind(this);
+        case 'Yatzy': return this._calculateYatzyScore.bind(this);
+        // Maxi Specific
+        case 'Three Pairs': return this._calculateThreePairsScore.bind(this);
+        case 'Five of Kind': return this._calculateFiveOfKindScore.bind(this);
+        case 'Full Straight': return this._calculateFullStraightScore.bind(this);
+        case 'House 3-2': return this._calculateHouse32Score.bind(this); // Maps to standard Full House
+        case 'House 3-3': return this._calculateHouse33Score.bind(this);
+        case 'House 2-4': return this._calculateHouse24Score.bind(this);
+        case 'Maxi Yatzy': return this._calculateYatzyScore.bind(this); // Uses gameType context
+        default: return () => 0; // Default for Sum, Bonus, Total or unknown
+    }
+}
+
+constructor(
     id: string,
     username: string,
     gameType: string = 'Ordinary',
@@ -3159,14 +7313,35 @@ export class Player {
     this.gameType = gameType; // Store gameType
     this.isActive = isActive;
 
+    const config = GameConfig[getBaseGameType(this.gameType)];
     // Initialize cells if not provided
     if (cells) {
       this.cells = cells;
+      // --- ADDED: Ensure non-score cells are marked fixed even when loading existing cells ---
+      
+      this.cells.forEach(cell => {
+        if (config.nonNumericCells.includes(cell.label)) {
+          cell.fixed = true; // Mark Sum, Bonus, Total as fixed
+        }
+      });
+      // --- END ADDED ---
     } else {
-      const config = GameConfig[getBaseGameType(gameType)];
-      this.cells = config.cellLabels.map((label, index) =>
-        new BoardCell(index, label, config.nonNumericCells.includes(label))
-      );
+        // Initialize cells
+        this.cells = config.cellLabels.map((label, index) => {
+            const isNonScore = config.nonNumericCells.includes(label);
+            const cell = new BoardCell(index, label, isNonScore);
+            if (isNonScore) {
+              cell.fixed = true; // Mark Sum, Bonus, Total fixed from start
+               // *** Set initial Bonus deficit ***
+               if (label === 'Bonus') {
+                   cell.value = 0 - config.bonusThreshold; // e.g., -63 or -84
+               }
+            }
+            return cell;
+          });
+    
+     // Initial calculation for Sum, Total (Bonus already has deficit)
+     this.calculateScores();
     }
 
     this.score = score;
@@ -3174,70 +7349,118 @@ export class Player {
     this.bonusAchieved = bonusAchieved;
   }
 
-  // --- Instance Methods ---
-
-  calculateScores(): void {
-      const config = GameConfig[getBaseGameType(this.gameType)];
-      let upperSum = 0;
-      let totalScore = 0;
-      let bonusAchieved = false;
-
-      // Calculate upper sum
-      for (let i = 0; i <= config.upperSectionEndIndex; i++) {
-          if (this.cells[i]?.fixed) {
-              upperSum += this.cells[i].value;
-          }
-      }
-
-      // Apply bonus
-      const bonusCellIndex = this.cells.findIndex(c => c.label.toLowerCase().includes('bonus'));
-      if (upperSum >= config.bonusThreshold) {
-          totalScore += config.bonusAmount;
-          bonusAchieved = true;
-          if (bonusCellIndex !== -1) {
-              this.cells[bonusCellIndex].value = config.bonusAmount;
-          }
-      } else {
-             if (bonusCellIndex !== -1) {
-                 const allUpperFixed = this.cells.slice(0, config.upperSectionEndIndex + 1).every(c => c?.fixed);
-                 this.cells[bonusCellIndex].value = allUpperFixed ? 0 : upperSum - config.bonusThreshold;
-             }
-      }
-
-      // Update sum cell
-      const sumCellIndex = this.cells.findIndex(c => c.label.toLowerCase() === 'sum');
-       if (sumCellIndex !== -1) {
-           this.cells[sumCellIndex].value = upperSum;
-       }
-
-      // Calculate total score
-      totalScore += upperSum;
-      for (let i = config.upperSectionEndIndex + 1; i < this.cells.length; i++) {
-            const cell = this.cells[i];
-            if (cell) {
-                const labelLower = cell.label.toLowerCase();
-                if (labelLower !== 'sum' && !labelLower.includes('bonus') && labelLower !== 'total') {
-                    if (cell.fixed) {
-                        totalScore += cell.value;
-                    }
-                }
+/**
+     * Calculates potential scores for the current dice roll for unfixed cells.
+     * Stores the result in cell.value for unfixed, non-special cells.
+     */
+    calculatePotentialScores(diceValues: number[]): void {
+        if (!diceValues || diceValues.length === 0 || diceValues.every(d => d === 0)) {
+            // If dice are cleared (e.g., [0,0,0,0,0]), clear potential scores instead
+            this.clearPotentialScores();
+            return;
+        }
+        // console.log(`[Player ${this.username}] Calculating potential scores for dice: [${diceValues.join(', ')}]`);
+        this.cells.forEach(cell => {
+            if (cell && !cell.fixed && !cell.isNonScoreCell) {
+                const calculateFunc = this._getScoreFunction(cell.label);
+                cell.value = calculateFunc(diceValues);
             }
-      }
+        });
+        // DO NOT calculate derived scores here, potential scores shouldn't affect Sum/Total yet
+    }
+/**
+ * Resets the value of non-fixed, non-special cells to -1.
+ * Typically called when the turn changes.
+ */
+clearPotentialScores(): void {
+    console.log(`[Player ${this.username}] Clearing potential scores.`);
+    this.cells.forEach(cell => {
+        if (cell && !cell.fixed && !cell.isNonScoreCell) {
+            cell.value = -1;
+        }
+    });
+    // Also recalculate derived scores to ensure Bonus deficit etc. is shown correctly
+    this.calculateScores();
+}
 
-      // Update player state
-      this.upperSum = upperSum;
-      this.score = totalScore;
-      this.bonusAchieved = bonusAchieved;
+calculateScores(): void {
+    const config = GameConfig[getBaseGameType(this.gameType)];
+    let currentUpperSum = 0; // Use a local variable for calculation
+    let currentTotalScore = 0; // Use a local variable for calculation
+    let isBonusAchieved = false; // Use a local variable
 
-      // Update the total score cell
-      const totalCellIndex = this.cells.findIndex(c => c.label.toLowerCase() === 'total');
-      if (totalCellIndex !== -1) {
-          this.cells[totalCellIndex].value = totalScore;
-      }
+    // Find indices reliably, check for existence
+    const sumCellIndex = this.cells.findIndex(c => c?.label === 'Sum');
+    const bonusCellIndex = this.cells.findIndex(c => c?.label === 'Bonus');
+    const totalCellIndex = this.cells.findIndex(c => c?.label === 'Total');
 
-      console.log(`-> Recalculated scores for ${this.username}: UpperSum=${upperSum}, Bonus=${bonusAchieved}, Total=${totalScore}`);
-  }
+    // --- STEP 1: Calculate Upper Sum ---
+    for (let i = 0; i <= config.upperSectionEndIndex; i++) {
+        const cell = this.cells[i];
+        // Only add value if the cell is fixed *by player selection* and has a positive value
+        if (cell && cell.fixed && !cell.isNonScoreCell && cell.value > 0) {
+            currentUpperSum += cell.value;
+        }
+    }
 
+    // --- STEP 2: Update Sum Cell ---
+    if (sumCellIndex !== -1 && this.cells[sumCellIndex]) {
+       this.cells[sumCellIndex].value = currentUpperSum;
+       this.cells[sumCellIndex].fixed = true; // Ensure fixed
+       this.cells[sumCellIndex].isNonScoreCell = true; // Ensure flagged
+    }
+
+    // --- STEP 3: Determine and Update Bonus Cell ---
+     isBonusAchieved = currentUpperSum >= config.bonusThreshold;
+    if (bonusCellIndex !== -1 && this.cells[bonusCellIndex]) {
+        let bonusValue = 0;
+        if (isBonusAchieved) {
+            bonusValue = config.bonusAmount;
+        } else {
+            // Check if all upper section cells are fixed *by player selection*
+            const allUpperFixed = this.cells
+                .slice(0, config.upperSectionEndIndex + 1)
+                .every(c => c?.fixed && !c.isNonScoreCell); // Exclude Sum cell itself if within range
+
+            bonusValue = allUpperFixed ? 0 : currentUpperSum - config.bonusThreshold; // Show deficit only if not all upper cells are fixed
+        }
+        this.cells[bonusCellIndex].value = bonusValue;
+        this.cells[bonusCellIndex].fixed = true; // Ensure fixed
+        this.cells[bonusCellIndex].isNonScoreCell = true; // Ensure flagged
+    }
+
+    // --- STEP 4: Calculate Total Score ---
+    currentTotalScore = currentUpperSum; // Start with upper sum
+    if (isBonusAchieved) {
+        currentTotalScore += config.bonusAmount; // Add actual bonus amount if achieved
+    }
+
+    // Add lower section scores (cells after bonus up to total)
+    const lowerSectionStartIndex = (bonusCellIndex !== -1 ? bonusCellIndex : config.upperSectionEndIndex) + 1;
+    const lowerSectionEndIndex = (totalCellIndex !== -1 ? totalCellIndex : this.cells.length) -1;
+
+    for (let i = lowerSectionStartIndex; i <= lowerSectionEndIndex; i++) {
+        const cell = this.cells[i];
+         // Only add value if fixed *by player selection* and positive
+        if (cell && cell.fixed && !cell.isNonScoreCell && cell.value > 0) {
+            currentTotalScore += cell.value;
+        }
+    }
+
+     // --- STEP 5: Update Total Cell ---
+     if (totalCellIndex !== -1 && this.cells[totalCellIndex]) {
+         this.cells[totalCellIndex].value = currentTotalScore;
+         this.cells[totalCellIndex].fixed = true; // Ensure fixed
+         this.cells[totalCellIndex].isNonScoreCell = true; // Ensure flagged
+     }
+
+    // --- STEP 6: Update Player's overall score properties ---
+    this.upperSum = currentUpperSum; // Store calculated upper sum
+    this.score = currentTotalScore;   // Store calculated total score
+    this.bonusAchieved = isBonusAchieved; // Store bonus status
+
+    // console.log(`-> Recalculated scores for ${this.username}: UpperSum=${this.upperSum}, Bonus=${this.bonusAchieved}, Total=${this.score}`);
+}
   hasCompletedGame(): boolean {
       // Check if all selectable cells are fixed
       return this.cells.every(cell => cell.fixed || cell.isNonScoreCell);
@@ -3247,6 +7470,74 @@ export class Player {
       // Score is updated by calculateScores, return the current value
       return this.score;
   }
+
+  calculateDerivedScores(): void {
+    const config = GameConfig[getBaseGameType(this.gameType)];
+    let currentUpperSum = 0;
+    let currentTotalScore = 0;
+    let isBonusAchieved = false;
+
+    const sumCellIndex = this.cells.findIndex(c => c?.label === 'Sum');
+    const bonusCellIndex = this.cells.findIndex(c => c?.label === 'Bonus');
+    const totalCellIndex = this.cells.findIndex(c => c?.label === 'Total');
+
+    // --- Calculate Upper Sum from player-fixed cells ---
+    for (let i = 0; i <= config.upperSectionEndIndex; i++) {
+        const cell = this.cells[i];
+        // Include only positive values from cells fixed by the player
+        if (cell && cell.fixed && !cell.isNonScoreCell && cell.value > 0) {
+            currentUpperSum += cell.value;
+        }
+    }
+
+    // --- Update Sum Cell (value only) ---
+    if (sumCellIndex !== -1 && this.cells[sumCellIndex]) {
+       this.cells[sumCellIndex].value = currentUpperSum;
+       this.cells[sumCellIndex].fixed = true; // Ensure fixed
+    }
+
+    // --- Update Bonus Cell (value only) ---
+    isBonusAchieved = currentUpperSum >= config.bonusThreshold;
+    if (bonusCellIndex !== -1 && this.cells[bonusCellIndex]) {
+        let bonusValue = 0;
+        if (isBonusAchieved) {
+            bonusValue = config.bonusAmount;
+        } else {
+            const allUpperSelectableFixed = this.cells
+                .slice(0, config.upperSectionEndIndex + 1)
+                .every(c => !c || c.isNonScoreCell || c.fixed); // Check only player-selectable fixed status
+            bonusValue = allUpperSelectableFixed ? 0 : currentUpperSum - config.bonusThreshold;
+        }
+        this.cells[bonusCellIndex].value = bonusValue;
+        this.cells[bonusCellIndex].fixed = true; // Ensure fixed
+    }
+
+    // --- Calculate Total Score from player-fixed cells + bonus ---
+    currentTotalScore = currentUpperSum;
+    if (isBonusAchieved) {
+        currentTotalScore += config.bonusAmount;
+    }
+    const lowerSectionStartIndex = (bonusCellIndex !== -1 ? bonusCellIndex : config.upperSectionEndIndex) + 1;
+    const lowerSectionEndIndex = (totalCellIndex !== -1 ? totalCellIndex : this.cells.length) -1;
+    for (let i = lowerSectionStartIndex; i <= lowerSectionEndIndex; i++) {
+        const cell = this.cells[i];
+         // Include only positive values from cells fixed by the player
+        if (cell && cell.fixed && !cell.isNonScoreCell && cell.value > 0) {
+            currentTotalScore += cell.value;
+        }
+    }
+
+   // --- Update Total Cell (value only) ---
+   if (totalCellIndex !== -1 && this.cells[totalCellIndex]) {
+       this.cells[totalCellIndex].value = currentTotalScore;
+       this.cells[totalCellIndex].fixed = true; // Ensure fixed
+   }
+
+  // --- Update Player aggregate scores ---
+  this.upperSum = currentUpperSum;
+  this.score = currentTotalScore;
+  this.bonusAchieved = isBonusAchieved;
+}
 
   toJSON(): any {
        return {
@@ -3776,7 +8067,7 @@ import { PlayerController } from "./controllers/PlayerController";
 import { ChatController } from "./controllers/ChatController";
 import { spectateGameRoute, initializeSpectateRoute } from "./routes/spectateGameRoute"; // <-- Import spectate route and initializer
 
-const PORT: number = 8002;
+const PORT: number = 8000;
 
 const app = express();
 
@@ -3796,11 +8087,15 @@ const localReactDir: string = "C:/Users/J/Desktop/proj";
 console.log("Starting Server...");
 
 if (isOnline) {
-  //app.use(express.static(path.join(__dirname, "/build")));
-  app.use("/new", express.static(path.join(__dirname, "web")));
+  //app.use("/new", express.static(path.join(__dirname, "web")));
+  // Middleware to log requests to UnityLibrary
+  app.use((req, res, next) => {
+    console.log(`[UNITY STATIC] ${req.url}`);
+    next();
+  });
+  app.use(express.static(path.join(__dirname, "web")));
 
 } else {
-  //app.use(express.static(localReactDir + "/build"));
   app.use(express.static(localFlutterDir + "/build/web"));
 }
 
@@ -3869,6 +8164,15 @@ io.on("connect", (socket) => {
 
   // Send welcome message for connection confirmation
   socket.emit("welcome", { message: "Connection successful", id: socket.id });
+  
+   // ***** FIX: Send the current game list to the newly connected player *****
+   try {
+    console.log(`🔌 Sending current game list to newly connected player ${socket.id}`);
+    gameService.broadcastGameListToPlayer(socket.id); // <-- ADD THIS LINE
+  } catch (error) {
+    console.error(`❌ Error sending game list to player ${socket.id}:`, error);
+  }
+  // **********************************************************************
   
   // Echo event for testing connection
   socket.on("echo", (data) => {
@@ -3941,20 +8245,11 @@ io.on("connect", (socket) => {
   });
 });
 
-app.get("/flutter", (req, res) => {
+app.get("/", (req, res) => {
   if (isOnline) {
     res.sendFile(path.join(__dirname + "/web/index.html"));
   } else {
     res.sendFile(localFlutterDir + "/build/web/index.html");
-  }
-});
-
-app.get("*", (req, res) => {
-  if (isOnline) {
-    //res.sendFile(path.join(__dirname + "/build/index.html"));
-    res.sendFile(path.join(__dirname + "/web/index.html"));
-  } else {
-    res.sendFile(localReactDir + "/build/index.html");
   }
 });
 
@@ -4276,6 +8571,7 @@ import { Server, Socket } from 'socket.io'; // Import Socket type
 import { GameLogService, GameMove } from './GameLogService'; // <-- Import log service and types
 import { TopScoreService } from './TopScoreService'; // <-- Import TopScoreService
 import { getSelectionLabel } from '../utils/yatzyMapping'; // <-- Import mapping utility
+import { GameConfig, getBaseGameType } from '../utils/gameConfig';
 
 /**
  * Service for managing Yatzy games and spectators
@@ -4519,33 +8815,71 @@ export class GameService {
   }
 
   notifyGameUpdate(game: Game): void {
-    const gameData = game.toJSON();
+    // --- Recalculate ALL players' derived scores before sending update ---
+    // Ensures Sum/Bonus/Total are always up-to-date in the sent payload.
+    // Potential scores are handled by calculatePotentialScores/clearPotentialScores calls elsewhere.
+    game.players.forEach(p => {
+        if (p) { // Calculate even for inactive players so spectators see correct final sums
+             p.calculateDerivedScores(); // Recalculates Sum/Bonus/Total based on fixed cells
+        }
+    });
+    // --- End Recalculation ---
 
-    // Determine action based on game state
-    // gameData.action = game.gameStarted ? 'onGameStart' : 'onGameUpdate'; // Logic seems reversed, usually update after start? Let's use onGameUpdate generally after start.
-    // Let's stick to onGameUpdate for general updates after the initial start signal
+    const gameData = game.toJSON(); // Serialize the final state
     gameData.action = 'onGameUpdate';
 
-    console.log(`🎮 Notifying players about game ${game.id} update, action: ${gameData.action}`);
+    // console.log(`🎮 Notifying players about game ${game.id} update`); // Less verbose log
 
-    for (let i = 0; i < game.players.length; i++) {
-      const player = game.players[i];
-      // Send update to active players
-      if (player?.isActive && player.id) { // Add null check
-        console.log(`🎮 Sending ${gameData.action} to player ${i} (${player.id})`);
-        this.io.to(player.id).emit('onServerMsg', gameData);
-      }
+    // Send to all players (active or not) and spectators
+    for (const player of game.players) {
+        if (player?.id) {
+            this.io.to(player.id).emit('onServerMsg', gameData);
+        }
     }
-
-    // Notify spectators
     const gameSpectators = this.spectators.get(game.id);
-    if (gameSpectators && gameSpectators.size > 0) {
-      console.log(`[Spectator] Notifying ${gameSpectators.size} spectators of game ${game.id} update`);
-      for (const spectatorId of gameSpectators) {
-        this.io.to(spectatorId).emit('onServerMsg', gameData);
-      }
+    if (gameSpectators) {
+       for (const spectatorId of gameSpectators) {
+           this.io.to(spectatorId).emit('onServerMsg', gameData);
+       }
     }
   }
+  // notifyGameUpdate(game: Game): void {
+  //   // --- Recalculate ALL players' derived scores before sending update ---
+  //       // Ensures Sum/Bonus/Total are always up-to-date in the sent payload.
+  //       // Potential scores are handled by calculatePotentialScores/clearPotentialScores calls elsewhere.
+  //       game.players.forEach(p => {
+  //         if (p) { // Calculate even for inactive players so spectators see correct final sums
+  //              p.calculateDerivedScores(); // Recalculates Sum/Bonus/Total based on fixed cells
+  //         }
+  //     });
+  //     // --- End Recalculation ---
+  //   const gameData = game.toJSON();
+
+  //   // Determine action based on game state
+  //   // gameData.action = game.gameStarted ? 'onGameStart' : 'onGameUpdate'; // Logic seems reversed, usually update after start? Let's use onGameUpdate generally after start.
+  //   // Let's stick to onGameUpdate for general updates after the initial start signal
+  //   gameData.action = 'onGameUpdate';
+
+  //   console.log(`🎮 Notifying players about game ${game.id} update, action: ${gameData.action}`);
+
+  //   for (let i = 0; i < game.players.length; i++) {
+  //     const player = game.players[i];
+  //     // Send update to active players
+  //     if (player?.isActive && player.id) { // Add null check
+  //       console.log(`🎮 Sending ${gameData.action} to player ${i} (${player.id})`);
+  //       this.io.to(player.id).emit('onServerMsg', gameData);
+  //     }
+  //   }
+
+  //   // Notify spectators
+  //   const gameSpectators = this.spectators.get(game.id);
+  //   if (gameSpectators && gameSpectators.size > 0) {
+  //     console.log(`[Spectator] Notifying ${gameSpectators.size} spectators of game ${game.id} update`);
+  //     for (const spectatorId of gameSpectators) {
+  //       this.io.to(spectatorId).emit('onServerMsg', gameData);
+  //     }
+  //   }
+  // }
 
   handlePlayerStartingNewGame(playerId: string): void {
     // This function essentially forces a disconnect/abort from existing games
@@ -4675,22 +9009,39 @@ export class GameService {
     console.log(`🎲 [GameService] Game ${game.id} state updated: Roll ${game.rollCount}, Dice ${game.diceValues}`);
     // --- End Update Game State ---
 
+     // Clear potential scores for ALL players FIRST
+        //    This ensures the previous player's potential scores are gone before calculating new ones.
+        console.log(`[GameService] Clearing potentials for ALL players before calculating new ones.`);
+        game.players.forEach(p => {
+            if (p) {
+                p.clearPotentialScores(); // Resets non-fixed values to -1 and updates derived scores
+            }
+        });
+
+      // --- *** ADDED: Calculate Potential Scores for Current Player *** ---
+      const currentPlayer = game.players[playerIndex];
+      if (currentPlayer) {
+          currentPlayer.calculatePotentialScores(diceValues); // This updates the .value of unfixed cells
+          // Also recalculate derived scores like Sum/Bonus/Total for display consistency
+          currentPlayer.calculateScores();
+      }
+      // --- *** END ADDED *** ---
 
     // --- Notify other players via onClientMsg (for potential direct dice display updates) ---
-    const diceUpdateData = {
-      action: 'sendDices',
-      gameId: game.id,
-      diceValue: diceValues,
-      rollCount: game.rollCount
-    };
+    // const diceUpdateData = {
+    //   action: 'sendDices',
+    //   gameId: game.id,
+    //   diceValue: diceValues,
+    //   rollCount: game.rollCount
+    // };
 
-    console.log(`🎲 Broadcasting 'sendDices' (onClientMsg) for game ${game.id}`);
-    for (let i = 0; i < game.players.length; i++) {
-      const player = game.players[i];
-      if (player?.isActive && player.id && player.id !== playerId) {
-        this.io.to(player.id).emit('onClientMsg', diceUpdateData);
-      }
-    }
+    // console.log(`🎲 Broadcasting 'sendDices' (onClientMsg) for game ${game.id}`);
+    // for (let i = 0; i < game.players.length; i++) {
+    //   const player = game.players[i];
+    //   if (player?.isActive && player.id && player.id !== playerId) {
+    //     this.io.to(player.id).emit('onClientMsg', diceUpdateData);
+    //   }
+    // }
     // --- End Notify other players ---
 
 
@@ -4700,14 +9051,14 @@ export class GameService {
     this.notifyGameUpdate(game);
     // --- End Notify ALL ---
 
-    // Also send dice update to spectators via onClientMsg if needed for specific client logic
-    const gameSpectators = this.spectators.get(game.id);
-    if (gameSpectators && gameSpectators.size > 0) {
-      console.log(`[Spectator] Sending 'sendDices' (onClientMsg) to ${gameSpectators.size} spectators`);
-      for (const spectatorId of gameSpectators) {
-         this.io.to(spectatorId).emit('onClientMsg', diceUpdateData);
-      }
-    }
+    // // Also send dice update to spectators via onClientMsg if needed for specific client logic
+    // const gameSpectators = this.spectators.get(game.id);
+    // if (gameSpectators && gameSpectators.size > 0) {
+    //   console.log(`[Spectator] Sending 'sendDices' (onClientMsg) to ${gameSpectators.size} spectators`);
+    //   for (const spectatorId of gameSpectators) {
+    //      this.io.to(spectatorId).emit('onClientMsg', diceUpdateData);
+    //   }
+    // }
 
 
     return true;
@@ -4726,6 +9077,9 @@ export class GameService {
       console.error(`❌ [GameService] processSelection: Invalid player ${playerId} (index ${playerIndex}) or not their turn (current: ${game.playerToMove})`);
       return false;
     }
+
+    const currentPlayer = game.players[playerIndex];
+    if (!currentPlayer) return false; // Should not happen
 
     console.log(`📝 [GameService] Processing selection for game ${gameId}: Player ${playerIndex} selected ${selectionLabel} for ${score} points`);
 
@@ -4763,6 +9117,15 @@ export class GameService {
     console.log(`📝 [GameService] Applying selection to game state: ${selectionLabel} with score ${score}`);
     game.applySelection(playerIndex, selectionLabel, score);
 
+    // --- Recalculate derived scores (Sum, Bonus, Total) for the player who just selected ---
+    //currentPlayer.calculateScores();
+    game.players.forEach(p => {
+      if (p) {
+          p.clearPotentialScores(); // Resets non-fixed values to -1 and updates derived scores
+      }
+    });
+    //currentPlayer.calculateDerivedScores();
+
     // Debug: Log cell values after selection
     const player = game.players[playerIndex];
     if (player && player.cells) {
@@ -4777,7 +9140,10 @@ export class GameService {
     // Check if game finished after this selection
     if (game.isGameFinished()) {
       console.log(`🏁 [GameService] Game ${gameId} finished after selection`);
-
+      // --- *** ADDED: Clear potential scores before final update *** ---
+      // Not strictly necessary as game is over, but good practice
+      currentPlayer.clearPotentialScores(); // Clear for the player who made the last move
+      // --- *** END ADDED *** ---
       // **** CRUCIAL FIX: Send final update BEFORE handling finish ****
       console.log(`🔄 Notifying final game update (onServerMsg) before finishing game ${game.id}`);
       this.notifyGameUpdate(game); // Send state including the last selection
@@ -4785,37 +9151,35 @@ export class GameService {
 
       this.handleGameFinished(game); // This handles logging end, notifying, removing game
     } else {
-      // Clear dice for next player
-      game.setDiceValues([0, 0, 0, 0, 0]);
-      game.rollCount = 0;
-      
-      // Advance to next player
+      // Advance turn to the next active player FIRST
       game.advanceToNextActivePlayer();
-      console.log(`🎮 [GameService] Player ${playerId} processed selection, advancing to player ${game.playerToMove}`);
-      
-      // Notify all players and spectators of the game update
-      this.notifyGameUpdate(game);
-      
-      // Prepare full game state with cleared dice
-      const gameData = game.toJSON();
-      gameData.action = 'onGameUpdate';
-      gameData.diceValues = [0, 0, 0, 0, 0];
-      gameData.rollCount = 0;
+      const nextPlayerIndex = game.playerToMove;
+      const nextPlayer = game.players[nextPlayerIndex];
 
-      // Send to all players
-      for (const player of game.players) {
-        if (player?.id) {
-          this.io.to(player.id).emit('onServerMsg', gameData);
-        }
-      }
-      
-      // Send to all spectators
-      const spectators = this.spectators.get(game.id);
-      if (spectators) {
-        for (const spectatorId of spectators) {
-          this.io.to(spectatorId).emit('onServerMsg', gameData);
-        }
-      }
+       // --- Clear potential scores for the player whose turn it is NOW ---
+       if (nextPlayer) {
+           console.log(`[GameService] Clearing potential scores for next player ${nextPlayerIndex} (${nextPlayer.username})`);
+           nextPlayer.clearPotentialScores(); // Resets non-fixed values to -1 and recalculates derived scores
+       } else {
+           console.warn(`[GameService] Could not find next player at index ${nextPlayerIndex} to clear scores.`);
+       }
+       // --- End Clearing Potential Scores ---
+
+      // --- Reset dice state for the *game* dynamically ---
+      const config = GameConfig[getBaseGameType(game.gameType)];
+      const diceCount = config.diceCount;
+      const zeroDiceArray = new Array(diceCount).fill(0); // Create array of 0s with correct length
+      game.setDiceValues(zeroDiceArray); // Use the dynamic array
+      game.rollCount = 0;
+      // --- End Resetting Dice State ---
+
+      console.log(`🎮 [GameService] Advanced turn to player ${game.playerToMove}. Dice reset.`);
+
+      // --- Notify ALL clients (players and spectators) of the updated game state ONCE ---
+      // notifyGameUpdate handles serialization and sending to players/spectators.
+      // It will send the state *after* potential scores are cleared and dice are reset.
+      this.notifyGameUpdate(game);
+      // --- End Notification ---
     }
 
     return true;
@@ -5337,346 +9701,12 @@ class AnimationsApplication {
 }
 </file>
 
-<file path="lib/application/application_functions_internal_calc_dice_values.dart">
-import 'application.dart';
-
-extension ApplicationCalcDiceValues on Application {
-  int zero() {
-    return 0;
-  }
-
-  int calcOnes() {
-    var eye = 1;
-    var value = 0;
-    for (var i = 0; i < gameDices.nrDices; i++) {
-      if (gameDices.diceValue[i] == eye) {
-        value += eye;
-      }
-    }
-    return value;
-  }
-
-  int calcTwos() {
-    var eye = 2;
-    var value = 0;
-    for (var i = 0; i < gameDices.nrDices; i++) {
-      if (gameDices.diceValue[i] == eye) {
-        value += eye;
-      }
-    }
-    return value;
-  }
-
-  int calcThrees() {
-    var eye = 3;
-    var value = 0;
-    for (var i = 0; i < gameDices.nrDices; i++) {
-      if (gameDices.diceValue[i] == eye) {
-        value += eye;
-      }
-    }
-    return value;
-  }
-
-  int calcFours() {
-    var eye = 4;
-    var value = 0;
-    for (var i = 0; i < gameDices.nrDices; i++) {
-      if (gameDices.diceValue[i] == eye) {
-        value += eye;
-      }
-    }
-    return value;
-  }
-
-  int calcFives() {
-    var eye = 5;
-    var value = 0;
-    for (var i = 0; i < gameDices.nrDices; i++) {
-      if (gameDices.diceValue[i] == eye) {
-        value += eye;
-      }
-    }
-    return value;
-  }
-
-  int calcSixes() {
-    var eye = 6;
-    var value = 0;
-    for (var i = 0; i < gameDices.nrDices; i++) {
-      if (gameDices.diceValue[i] == eye) {
-        value += eye;
-      }
-    }
-    return value;
-  }
-
-  List calcDiceNr() {
-    var tmp = List.filled(6, 0);
-    for (var i = 0; i < gameDices.nrDices; i++) {
-      tmp[gameDices.diceValue[i] - 1]++;
-    }
-    return tmp;
-  }
-
-  int calcPair() {
-    var value = 0;
-    var diceNr = calcDiceNr();
-    for (var i = 5; i >= 0; i--) {
-      if (diceNr[i] >= 2) {
-        value = (i + 1) * 2;
-        break;
-      }
-    }
-    return value;
-  }
-
-  int calcTwoPairs() {
-    var value = 0;
-    var pairs = 0;
-    var diceNr = calcDiceNr();
-    for (var i = 5; i >= 0; i--) {
-      if (diceNr[i] >= 2 && pairs < 2) {
-        value += (i + 1) * 2;
-        pairs++;
-      }
-    }
-    if (pairs < 2) {
-      value = 0;
-    }
-    return value;
-  }
-
-  int calcThreePairs() {
-    var value = 0;
-    var pairs = 0;
-    var diceNr = calcDiceNr();
-    for (var i = 5; i >= 0; i--) {
-      if (diceNr[i] >= 2) {
-        value += (i + 1) * 2;
-        pairs++;
-      }
-    }
-    if (pairs != 3) {
-      value = 0;
-    }
-    return value;
-  }
-
-  int calcThreeOfKind() {
-    var value = 0;
-    var diceNr = calcDiceNr();
-    for (var i = 5; i >= 0; i--) {
-      if (diceNr[i] >= 3) {
-        value = (i + 1) * 3;
-        break;
-      }
-    }
-    return value;
-  }
-
-  int calcFourOfKind() {
-    var value = 0;
-    var diceNr = calcDiceNr();
-    for (var i = 5; i >= 0; i--) {
-      if (diceNr[i] >= 4) {
-        value = (i + 1) * 4;
-        break;
-      }
-    }
-    return value;
-  }
-
-  int calcFiveOfKind() {
-    var value = 0;
-    var diceNr = calcDiceNr();
-    for (var i = 5; i >= 0; i--) {
-      if (diceNr[i] >= 5) {
-        value = (i + 1) * 5;
-        break;
-      }
-    }
-    return value;
-  }
-
-  int calcYatzy() {
-    var value = 0;
-    var diceNr = calcDiceNr();
-    for (var i = 5; i >= 0; i--) {
-      if (diceNr[i] == gameDices.nrDices) {
-        if (gameDices.nrDices == 5) {
-          value = 50;
-        }
-        if (gameDices.nrDices == 6) {
-          value = 100;
-        }
-      }
-    }
-    return value;
-  }
-
-  int calcHouse() {
-    var value = 0;
-    var pair = 0;
-    var triplet = 0;
-    var diceNr = calcDiceNr();
-
-    for (var i = 5; i >= 0; i--) {
-      if (diceNr[i] >= 3) {
-        value += (i + 1) * 3;
-        triplet = 1;
-        diceNr[i] = 0;
-        break;
-      }
-    }
-
-    for (var i = 5; i >= 0; i--) {
-      if (diceNr[i] >= 2) {
-        value += (i + 1) * 2;
-        pair = 1;
-        break;
-      }
-    }
-    if ((pair != 1) || (triplet != 1)) {
-      value = 0;
-    }
-    return value;
-  }
-
-  int calcTower() {
-    var value = 0;
-    var pair = 0;
-    var quadruple = 0;
-
-    var diceNr = calcDiceNr();
-
-    for (var i = 5; i >= 0; i--) {
-      if (diceNr[i] >= 4) {
-        value += (i + 1) * 4;
-        quadruple = 1;
-        diceNr[i] = 0;
-        break;
-      }
-    }
-
-    for (var i = 5; i >= 0; i--) {
-      if (diceNr[i] >= 2) {
-        value += (i + 1) * 2;
-        pair = 1;
-        break;
-      }
-    }
-    if ((pair != 1) || (quadruple != 1)) {
-      value = 0;
-    }
-    return value;
-  }
-
-  int calcVilla() {
-    var value = 0;
-    var threes = 0;
-    var diceNr = calcDiceNr();
-    for (var i = 5; i >= 0; i--) {
-      if (diceNr[i] == 3) {
-        value += (i + 1) * 3;
-        threes++;
-      }
-    }
-    if (threes != 2) {
-      value = 0;
-    }
-    return value;
-  }
-
-  int calcSmallLadder() {
-    var value = 0;
-    var diceNr = calcDiceNr();
-    if (gameType == "Ordinary") {
-      // Text is not displayed and therefore not translated
-      if ((diceNr[0] > 0) &&
-          (diceNr[1] > 0) &&
-          (diceNr[2] > 0) &&
-          (diceNr[3] > 0) &&
-          (diceNr[4] > 0)) {
-        value = 1 + 2 + 3 + 4 + 5;
-      }
-    }
-    if (gameType.startsWith("Maxi")) {
-      if ((diceNr[0] > 0) &&
-          (diceNr[1] > 0) &&
-          (diceNr[2] > 0) &&
-          (diceNr[3] > 0) &&
-          (diceNr[4] > 0)) {
-        value = 1 + 2 + 3 + 4 + 5;
-      }
-    }
-    return value;
-  }
-
-  int calcLargeLadder() {
-    var value = 0;
-    var diceNr = calcDiceNr();
-    if (gameType == "Ordinary") {
-      if ((diceNr[1] > 0) &&
-          (diceNr[2] > 0) &&
-          (diceNr[3] > 0) &&
-          (diceNr[4] > 0) &&
-          (diceNr[5] > 0)) {
-        value = 2 + 3 + 4 + 5 + 6;
-      }
-    }
-    if (gameType.startsWith("Maxi")) {
-      if ((diceNr[1] > 0) &&
-          (diceNr[2] > 0) &&
-          (diceNr[3] > 0) &&
-          (diceNr[4] > 0) &&
-          (diceNr[5] > 0)) {
-        value = 2 + 3 + 4 + 5 + 6;
-      }
-    }
-    return value;
-  }
-
-  int calcFullLadder() {
-    var value = 0;
-    var diceNr = calcDiceNr();
-    if (gameType.startsWith("Maxi")) {
-      if ((diceNr[0] > 0) &&
-          (diceNr[1] > 0) &&
-          (diceNr[2] > 0) &&
-          (diceNr[3] > 0) &&
-          (diceNr[4] > 0) &&
-          (diceNr[5] > 0)) {
-        value = 1 + 2 + 3 + 4 + 5 + 6;
-      }
-    }
-    return value;
-  }
-
-  int calcChance() {
-    var value = 0;
-
-    for (var i = 0; i < gameDices.nrDices; i++) {
-      value += gameDices.diceValue[i];
-    }
-    return value;
-  }
-}
-</file>
-
 <file path="lib/application/application_functions_internal.dart">
 // lib/application/application_functions_internal.dart
-import 'package:flutter/material.dart';
-import 'package:yatzy/dices/unity_communication.dart';
-import '../startup.dart';
 import 'application.dart';
-import '../utils/yatzy_mapping_client.dart'; // <-- Import client-side mapping
-import '../states/cubit/state/state_cubit.dart'; // Import SetStateCubit
-import 'package:provider/provider.dart'; // Import Provider
-
+import '../utils/yatzy_mapping_client.dart';
 
 extension ApplicationFunctionsInternal on Application {
-  // ... (clearFocus remains the same) ...
   clearFocus() {
     focusStatus = [];
     for (var i = 0; i < nrPlayers; i++) {
@@ -5693,11 +9723,7 @@ extension ApplicationFunctionsInternal on Application {
         cellValue[player][cell] != -1) {
 
       // Get the string label for the selected cell
-      String? selectionLabel = getSelectionLabel(gameType, cell); // Use mapping function
-      if (selectionLabel == null) {
-          print("Error: Could not find label for cell index $cell");
-          return; // Don't proceed if label is invalid
-      }
+      String? selectionLabel = getSelectionLabel(gameType, cell);
 
       Map<String, dynamic> msg = {};
       msg["diceValue"] = gameDices.diceValue; // Current dice
@@ -5715,173 +9741,63 @@ extension ApplicationFunctionsInternal on Application {
         socketService!.sendToClients(msg);
       } else {
         print('❌ Cannot send selection: socketService is null or not connected');
-        // Handle offline mode - just continue with local updates
       }
-
-      // --- Local Update (Optimistic UI) ---
-      // Apply the selection locally immediately for responsiveness.
-      // Server confirmation will solidify the state via onGameUpdate.
-      applyLocalSelection(player, cell, cellValue[player][cell]);
-      // ---------------------------------
-
+      print("sendSelection");
+      // clearFocus();
+      // if (dices.unityDices) {
+      //   dices.sendResetToUnity();
+      // }
+      // gameDices.clearDices();
     } else {
         print("Ignoring cell click: Not my turn or cell invalid/fixed.");
     }
   }
 
-  // New function to apply local UI changes after selection
-  void applyLocalSelection(int player, int cell, int score) {
-     if (gameDices.unityDices) {
-       gameDices.sendResetToUnity();
-       // Don't send start - wait for server to confirm next turn
-     }
-
-     appColors[player + 1][cell] = Colors.green.withAlpha(178); // Use alpha consistent with colorBoard
-     fixedCell[player][cell] = true;
-     cellValue[player][cell] = score; // Ensure value is set if passed
-
-     // Update Sums locally
-     var sum = 0;
-     var totalSum = 0;
-     var upperHalfSet = 0;
-     for (var i = 0; i < 6; i++) {
-       if (fixedCell[player][i]) {
-         upperHalfSet++;
-         sum += cellValue[player][i] as int; // Cast to int
-       }
-     }
-     totalSum = sum;
-     appText[player + 1][6] = sum.toString(); // Sum cell index = 6
-     cellValue[player][6] = sum; // Store sum value
-
-     // Bonus calculation index = 7
-     int bonusIndex = 7;
-     int bonusValue = 0; // Store calculated bonus value
-     if (sum >= bonusSum) {
-       bonusValue = bonusAmount;
-       appText[player + 1][bonusIndex] = bonusAmount.toString();
-       totalSum += bonusAmount;
-     } else {
-       // Check if all upper section cells are fixed
-       final allUpperFixed = !fixedCell[player].sublist(0, 6).contains(false);
-       if (allUpperFixed) {
-         bonusValue = 0; // All fixed, no bonus
-         appText[player + 1][bonusIndex] = "0";
-       } else {
-         bonusValue = sum - bonusSum; // Deficit
-         appText[player + 1][bonusIndex] = (sum - bonusSum).toString();
-       }
-     }
-     cellValue[player][bonusIndex] = bonusValue; // Store bonus/deficit
-
-
-      // Lower section sum calculation
-     for (var i = 8; i < totalFields -1; i++) { // Skip Sum, Bonus, Total (indices 6, 7, totalFields-1)
-       if (fixedCell[player][i]) {
-         totalSum += cellValue[player][i] as int;
-       }
-     }
-      // Update Total Sum cell (index = totalFields - 1)
-      int totalSumIndex = totalFields - 1;
-      appText[player + 1][totalSumIndex] = totalSum.toString();
-      cellValue[player][totalSumIndex] = totalSum;
-
-
-     // Zero results for remaining selectable cells for this player?
-     // This might be premature, let the server state dictate.
-     // Clear focus remains useful.
-     clearFocus();
-
-     // Check if this player finished locally (for UI feedback, maybe)
-      // Check all cells except Sum, Bonus, Total
-      bool playerFinished = true;
-      for(int j=0; j<totalFields; j++) {
-          if (j != 6 && j != 7 && j != totalFields - 1 && !fixedCell[player][j]) {
-              playerFinished = false;
-              break;
-          }
-      }
-      if (playerFinished) {
-          print("Player $player finished locally.");
-          // Server will confirm overall game finish status.
-      }
-
-     // Don't advance turn locally - wait for server message `onGameUpdate`
-     colorBoard(); // Update colors immediately for selection feedback
-     gameDices.clearDices(); // Clear dice display
-
-     // ***** FIX: Trigger board animation if enabled *****
-     if (boardAnimation) { // Check the flag from settings
-       print('🎬 Triggering board animation');
-       try {
-         // Animate the row that was just selected
-         animation.animateBoard(); // Pass player index + 1 (for the player row)
-         // Optionally animate the header row too?
-         // animation.animateBoardRow(0);
-       } catch (e) {
-         print("Error starting animation: $e");
-       }
-     }
-     // ***** END FIX *****
-     // Trigger UI update
-     try {
-       context.read<SetStateCubit>().setState();
-     } catch (e) {
-       print('⚠️ Error updating UI state: $e');
-       // Continue without updating state
-     }
-  }
-
-
-  // calcNewSums is now mostly handled by applyLocalSelection and server updates
-  // Keep the coloring part if needed separately
-  // calcNewSums(int player, int cell) { ... } // <-- REMOVE OR REFACTOR
-
-  colorBoard() {
-    // Update player column colors based on playerToMove and playerActive status
-    for (var i = 0; i < nrPlayers; i++) {
-      Color columnColor;
-      if (i == playerToMove) {
-        columnColor = Colors.greenAccent.withAlpha(77); // ~0.3 alpha
-      } else if (playerActive != null && i < playerActive.length && playerActive[i]) {
-        columnColor = Colors.grey.withAlpha(77); // ~0.3 alpha
-      } else {
-        // disconnected/aborted player
-        columnColor = Colors.black.withAlpha(77); // ~0.3 alpha
-      }
-
-      for (var j = 0; j < totalFields; j++) {
-          // Keep special colors for non-selectable cells
-          if (j == 6 || j == 7 || j == totalFields - 1) { // Sum, Bonus, Total
-              appColors[i + 1][j] = Colors.blue.withAlpha(77); // Special color for calculated fields
-          }
-          // Apply base color only if not already fixed with the selection color
-          else if (!(fixedCell[i][j] && appColors[i + 1][j] == Colors.green.withAlpha(178))) { // Check if it's the 'just selected' color
-             appColors[i + 1][j] = columnColor;
-          }
-          // Re-apply selection color if cell is fixed
-          else if (fixedCell[i][j]) {
-              appColors[i + 1][j] = Colors.green.withAlpha(178); // ~0.7 alpha for selected/fixed
-          }
-      }
-    }
-      // Update header colors based on which cells are fixed for the *current* player
-     if (playerToMove >= 0 && playerToMove < nrPlayers) {
-         for (var j = 0; j < totalFields; j++) {
-              // Keep special colors
-              if (j == 6 || j == 7 || j == totalFields - 1) {
-                  appColors[0][j] = Colors.blueAccent.withAlpha(204); // ~0.8 alpha
-              }
-              // Highlight fixed cells in header? Or just dim unfixed? Let's dim unfixed.
-              else if (fixedCell[playerToMove][j]) {
-                   appColors[0][j] = Colors.white.withAlpha(178); // Brighter/Solid for fixed
-              } else {
-                   appColors[0][j] = Colors.white.withAlpha(77); // Dimmer for available
-              }
-         }
-     }
-
-  }
+  // colorBoard() {
+  //   // Update player column colors based on playerToMove and playerActive status
+  //   for (var i = 0; i < nrPlayers; i++) {
+  //     Color columnColor;
+  //     if (i == playerToMove) {
+  //       columnColor = Colors.greenAccent.withAlpha(77); // ~0.3 alpha
+  //     } else if (i < playerActive.length && playerActive[i]) {
+  //       columnColor = Colors.grey.withAlpha(77); // ~0.3 alpha
+  //     } else {
+  //       // disconnected/aborted player
+  //       columnColor = Colors.black.withAlpha(77); // ~0.3 alpha
+  //     }
+  //
+  //     for (var j = 0; j < totalFields; j++) {
+  //         // Keep special colors for non-selectable cells
+  //         if (j == 6 || j == 7 || j == totalFields - 1) { // Sum, Bonus, Total
+  //             appColors[i + 1][j] = Colors.blue.withAlpha(77); // Special color for calculated fields
+  //         }
+  //         // Apply base color only if not already fixed with the selection color
+  //         else if (!(fixedCell[i][j] && appColors[i + 1][j] == Colors.green.withAlpha(178))) { // Check if it's the 'just selected' color
+  //            appColors[i + 1][j] = columnColor;
+  //         }
+  //         // Re-apply selection color if cell is fixed
+  //         else if (fixedCell[i][j]) {
+  //             appColors[i + 1][j] = Colors.green.withAlpha(178); // ~0.7 alpha for selected/fixed
+  //         }
+  //     }
+  //   }
+  //     // Update header colors based on which cells are fixed for the *current* player
+  //    if (playerToMove >= 0 && playerToMove < nrPlayers) {
+  //        for (var j = 0; j < totalFields; j++) {
+  //             // Keep special colors
+  //             if (j == 6 || j == 7 || j == totalFields - 1) {
+  //                 appColors[0][j] = Colors.blueAccent.withAlpha(204); // ~0.8 alpha
+  //             }
+  //             // Highlight fixed cells in header? Or just dim unfixed? Let's dim unfixed.
+  //             else if (fixedCell[playerToMove][j]) {
+  //                  appColors[0][j] = Colors.white.withAlpha(178); // Brighter/Solid for fixed
+  //             } else {
+  //                  appColors[0][j] = Colors.white.withAlpha(77); // Dimmer for available
+  //             }
+  //        }
+  //    }
+  //
+  // }
 
 }
 </file>
@@ -5892,7 +9808,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yatzy/application/application_functions_internal.dart';
 import 'package:yatzy/dices/unity_communication.dart';
 import 'package:yatzy/services/socket_service.dart';
-import 'application_functions_internal_calc_dice_values.dart';
 import '../dices/dices.dart';
 import '../input_items/input_items.dart';
 import '../startup.dart';
@@ -5901,7 +9816,6 @@ import 'animations_application.dart';
 import 'languages_application.dart';
 
 // cannot have typedef inside class
-typedef YatzyFunctions = int Function();
 
 class Application with LanguagesApplication  {
   final BuildContext context;
@@ -5950,8 +9864,8 @@ class Application with LanguagesApplication  {
   Map<String, dynamic> gameData = {};
 
   var gameId = -1;
-  var playerIds = [];
-  var playerActive = [];
+  //var playerIds = [];
+  List<bool> playerActive = [];
 
   var totalFields = 18;
   var bonusSum = 63;
@@ -5974,7 +9888,6 @@ class Application with LanguagesApplication  {
 
   var listenerKey = GlobalKey();
   late Dices gameDices;
-  late List<YatzyFunctions> yatzyFunctions;
   var serverId = "";
 
   var cellKeys = [];
@@ -5993,11 +9906,10 @@ class Application with LanguagesApplication  {
   }
 
   callbackUpdateDiceValues() {
-    updateDiceValues();
     Map<String, dynamic> msg = {};
     msg["action"] = "sendDices";
     msg["gameId"] = gameId;
-    msg["playerIds"] = playerIds;
+    //msg["playerIds"] = playerIds;
     msg["diceValue"] = gameDices.diceValue;
     
     // Use socketService for sending dice values to ensure delivery
@@ -6006,18 +9918,6 @@ class Application with LanguagesApplication  {
     if (socketService != null && socketService!.isConnected) {
       socketService?.sendToClients(msg);
     }
-  }
-
-  updateDiceValues() {
-    clearFocus();
-    for (var i = 0; i < totalFields; i++) {
-      if (!fixedCell[playerToMove][i]) {
-        cellValue[playerToMove][i] = yatzyFunctions[i]();
-        appText[playerToMove + 1][i] = cellValue[playerToMove][i].toString();
-      }
-    }
-
-    context.read<SetStateCubit>().setState();
   }
 
   setAppText() {
@@ -6083,49 +9983,12 @@ class Application with LanguagesApplication  {
       bonusSum = 84;
       bonusAmount = 100;
 
-      yatzyFunctions =
-          [calcOnes, calcTwos, calcThrees, calcFours, calcFives, calcSixes] +
-              [
-                zero,
-                zero,
-                calcPair,
-                calcTwoPairs,
-                calcThreePairs,
-                calcThreeOfKind,
-                calcFourOfKind,
-                calcFiveOfKind,
-                calcSmallLadder,
-                calcLargeLadder,
-                calcFullLadder,
-                calcHouse,
-                calcVilla,
-                calcTower,
-                calcChance,
-                calcYatzy,
-                zero
-              ];
     } else {
       totalFields = 18;
       gameDices.initDices(5);
       bonusSum = 63;
       bonusAmount = 50;
 
-      yatzyFunctions =
-          [calcOnes, calcTwos, calcThrees, calcFours, calcFives, calcSixes] +
-              [
-                zero,
-                zero,
-                calcPair,
-                calcTwoPairs,
-                calcThreeOfKind,
-                calcFourOfKind,
-                calcHouse,
-                calcSmallLadder,
-                calcLargeLadder,
-                calcChance,
-                calcYatzy,
-                zero
-              ];
     }
 
     appText = [];
@@ -6268,64 +10131,6 @@ extension CommunicationApplication on Application {
     clearFocus();
   }
 
-  handlePlayerAbort(int abortedPlayerIndex) {
-    print('🎮 Handling player abort for player $abortedPlayerIndex');
-
-    // Mark player as inactive
-    playerActive[abortedPlayerIndex] = false;
-
-    // Mark their column as inactive (dark)
-    for (var j = 0; j < totalFields; j++) {
-      appColors[abortedPlayerIndex + 1][j] = Colors.black.withValues(alpha: 0.5);
-    }
-
-    // If the aborted player was the current player to move, advance to the next active player
-    if (abortedPlayerIndex == playerToMove) {
-      advanceToNextActivePlayer();
-    }
-
-    // Update the board colors
-    colorBoard();
-
-    // Send a notification to the console for debugging
-    print('🎮 Player $abortedPlayerIndex has aborted the game, adjusted game state accordingly');
-  }
-
-  advanceToNextActivePlayer() {
-    print('🎮 Advancing to next active player from current player $playerToMove');
-
-    // Safety check
-    if (playerActive.isEmpty) return;
-
-    final startingPlayer = playerToMove;
-    
-    do {
-      playerToMove = (playerToMove + 1) % nrPlayers;
-
-      // If we've checked all players and none are active, keep current player
-      if (playerToMove == startingPlayer) {
-        print('🎮 All players are inactive or we\'ve checked all players');
-        break;
-      }
-    } while (!playerActive[playerToMove]);
-
-    print('🎮 Advanced to next active player: $playerToMove');
-
-    // Update the board colors to show the current player
-    colorBoard();
-    
-    // Reset dice for the new player
-    resetDices();
-
-    if (myPlayerId == playerToMove) {
-      print('🎮 My turn now, enabling dice throw');
-      if (gameDices.unityDices) {
-        gameDices.sendResetToUnity();
-        gameDices.sendStartToUnity();
-      }
-    }
-  }
-
   callbackOnServerMsg(dynamic data) async {
     try {
       final router = getIt<AppRouter>();
@@ -6346,7 +10151,7 @@ extension CommunicationApplication on Application {
       switch (action) {
         case "onGetId":
           // Explicitly cast keys and values using .map()
-          final Map<String, dynamic> getIdData = (data as Map).map(
+          final Map<String, dynamic> getIdData = (data).map(
             (key, value) => MapEntry(key.toString(), value)
           );
           try {
@@ -6451,8 +10256,6 @@ extension CommunicationApplication on Application {
             // --- Set gameStarted flag BEFORE calling setup ---
             gameStarted = true; // Mark game as started locally *before* setup
 
-            playerIds = gameData["playerIds"]; // Use the casted map
-            playerActive = List.filled(playerIds.length, true);
             gameType = gameData["gameType"]; // Use the casted map
             nrPlayers = gameData["nrPlayers"]; // Use the casted map
             setup();
@@ -6492,7 +10295,6 @@ extension CommunicationApplication on Application {
           print('📩 Processing onRequestGames...');
           data = List<dynamic>.from(data["Games"]);
           games = data;
-          _checkIfPlayerAborted(); // This check is likely safe now
           context.read<SetStateCubit>().setState(); // Update settings view if visible
           break;
         case "onGameUpdate":
@@ -6503,7 +10305,6 @@ extension CommunicationApplication on Application {
           // Reset state and go back to settings
           gameId = -1;
           myPlayerId = -1;
-          gameFinished = false;
           isSpectating = false; // Ensure spectator mode is also reset
           spectatedGameId = -1;
           gameData = {};
@@ -6516,8 +10317,6 @@ extension CommunicationApplication on Application {
             (key, value) => MapEntry(key.toString(), value)
           );
           gameData = finishedGameData;
-          gameFinished = true; // Set flag for UI layer to handle dialog
-
           // Trigger UI update first
           context.read<SetStateCubit>().setState();
 
@@ -6550,7 +10349,7 @@ extension CommunicationApplication on Application {
           print('🏆 Received top scores update');
           try {
             // Parse received data
-            final Map<String, dynamic> receivedData = (data as Map).map(
+            final Map<String, dynamic> receivedData = (data).map(
               (key, value) => MapEntry(key.toString(), value)
             );
             final receivedGameType = receivedData['gameType'];
@@ -6563,7 +10362,7 @@ extension CommunicationApplication on Application {
             }
 
             // Convert score entries to the correct type
-            List<Map<String, dynamic>> typedScores = (scoresList as List).map((scoreEntry) {
+            List<Map<String, dynamic>> typedScores = (scoresList).map((scoreEntry) {
               if (scoreEntry is Map) {
                 return scoreEntry.map((k, v) => MapEntry(k.toString(), v));
               } else {
@@ -6595,134 +10394,11 @@ extension CommunicationApplication on Application {
     }
   }
   
-  // Helper method to check if any players have aborted the game
-  void _checkIfPlayerAborted() {
-    // **** ADD THIS GUARD ****
-    if (isSpectating || gameData.isEmpty || gameId == -1) {
-      print('🎮 Skipping _checkIfPlayerAborted (Spectating or no active game data)');
-      return;
-    }
-    // **** END GUARD ****
-
-    // Existing logic...
-    print('🎮 Checking for aborted players...'); // Add log
-
-    // Track if any player's status changed
-    bool playerStatusChanged = false;
-
-    for (var i = 0; i < games.length; i++) {
-      // Ensure games[i] is a Map and has the required keys
-      if (games[i] is Map && games[i]["gameId"] == gameData["gameId"] && games[i]["playerIds"] != null) {
-        var currentGameFromList = games[i]; // To avoid repeated lookups
-
-        // Ensure playerActive and playerIds are initialized and match length
-        if (playerActive.length != nrPlayers || playerIds.length != nrPlayers) {
-           print('⚠️ Player state arrays mismatch nrPlayers ($nrPlayers). Reinitializing.');
-           playerActive = List.filled(nrPlayers, true); // Reinitialize based on current game
-           playerIds = List<String>.from(gameData['playerIds'] ?? List.filled(nrPlayers, "")); // Use current game data
-        }
-
-
-        for (var j = 0; j < nrPlayers && j < currentGameFromList["playerIds"].length; j++) {
-          // Make sure indices are valid before accessing
-          if (j < playerActive.length) {
-             bool wasActive = playerActive[j];
-             // Check if player ID is present and not empty in the game list data
-             bool isActive = currentGameFromList["playerIds"][j] != null &&
-                             currentGameFromList["playerIds"][j].toString().isNotEmpty;
-
-             // If a player was active but is now inactive, they aborted
-             if (wasActive && !isActive) {
-               print('🎮 Player $j has aborted the game!');
-               playerStatusChanged = true;
-               handlePlayerAbort(j); // Make sure this function handles UI updates
-             }
-
-             // Update the local playerActive status
-             playerActive[j] = isActive;
-          } else {
-             print('⚠️ Index $j out of bounds for playerActive (${playerActive.length})');
-          }
-        }
-         // Update playerIds safely
-         playerIds = List<String>.from(currentGameFromList["playerIds"]);
-         break; // Found the matching game, no need to check others
-      }
-    }
-
-    // If no specific player status changed but current player is inactive,
-    // we need to advance to the next active player
-    // Add checks to prevent RangeError here as well
-    if (!playerStatusChanged &&
-        playerToMove >= 0 && playerToMove < playerActive.length && !playerActive[playerToMove]) {
-      _advanceToNextActivePlayer();
-    } else if (playerToMove >= playerActive.length) {
-       print('⚠️ playerToMove ($playerToMove) is out of bounds for playerActive (${playerActive.length})');
-       // Reset playerToMove? Or handle error?
-       if (playerActive.isNotEmpty) playerToMove = 0;
-    }
-
-    // Update board colors based on the potentially changed playerActive status
-    colorBoard(); // Moved from inside the loop
-
-    // Trigger UI update if needed (e.g., if handlePlayerAbort doesn't do it)
-    if (playerStatusChanged) {
-        try {
-            context.read<SetStateCubit>().setState();
-        } catch (e) { print('⚠️ Error updating state after abort check: $e'); }
-    }
-  }
-  
-  // Helper method to advance to the next active player
-  void _advanceToNextActivePlayer() {
-    print('🎮 Current player $playerToMove is inactive, advancing to next active player');
-    
-    // Clear unfixed cells of the current player before advancing
-    for (var j = 0; j < totalFields; j++) {
-      if (!fixedCell[playerToMove][j]) {
-        cellValue[playerToMove][j] = -1;
-        appText[playerToMove + 1][j] = "";
-      }
-    }
-    
-    // Find the next active player
-    int nextPlayer = playerToMove;
-    bool foundActivePlayer = false;
-    
-    // Try to find an active player by checking each player in order
-    for (int i = 0; i < nrPlayers; i++) {
-      nextPlayer = (nextPlayer + 1) % nrPlayers;
-      if (playerActive[nextPlayer]) {
-        foundActivePlayer = true;
-        break;
-      }
-    }
-    
-    if (foundActivePlayer) {
-      print('🎮 Found next active player: $nextPlayer');
-      playerToMove = nextPlayer;
-      
-      // Reset dice for the new player
-      resetDices();
-      
-      // If it's my turn, start dice rolling
-      if (playerToMove == myPlayerId) {
-        print('🎮 My turn now! Enabling dice throw');
-        if (gameDices.unityDices) {
-          gameDices.sendResetToUnity();
-          gameDices.sendStartToUnity();
-        }
-      }
-    } else {
-      print('🎮 No active players found, game cannot continue');
-    }
-  }
-  
   // Helper method to process game updates
   void _processGameUpdate(dynamic data) async {
     try {
       final router = getIt<AppRouter>();
-      print('🎮 Processing game update: $data');
+      print('🎮 Processing game update: $data'); // Log action
 
       // Check if we're in spectator mode
       bool isSpectator = data["spectator"] == true;
@@ -6871,7 +10547,7 @@ extension CommunicationApplication on Application {
       }
 
       // Normal player processing starts here
-      
+
       // If this is a different game from what we're playing, ignore it
       if (data["gameId"] != gameId && gameId != -1) {
         print('🎮 Ignoring update for different game ID: ${data["gameId"]} (our gameId: $gameId)');
@@ -6880,16 +10556,64 @@ extension CommunicationApplication on Application {
 
       // Update game data with the new information
       gameData = data;
-      
+
       // If the game hasn't started yet, don't do anything more
       if (!(data["gameStarted"] ?? false)) {
         print('🎮 Game ${data["gameId"]} hasn\'t started yet');
         return;
       }
 
-      // Check if the player list has changed - someone might have disconnected
+
       if (data["playerIds"] != null) {
         final newPlayerIds = data["playerIds"];
+
+        List<dynamic> playersData = gameData['players'];
+        playerActive = (gameData['abortedPlayers'] as List<dynamic>)
+            .map((e) => !(e as bool))
+            .toList();
+
+        // --- Update cell state for each player ---
+        for (int p = 0; p < playersData.length; p++) {
+          var playerData = playersData[p];
+          if (playerData?['cells'] is List) {
+            List<dynamic> cellsData = playerData['cells'];
+            bool isAbortedPlayer = gameData['abortedPlayers'][p];
+            for (int c = 0; c < cellsData.length; c++) {
+              // Skip if cell index is out of bounds for local arrays
+              if (c >= totalFields || p >= fixedCell.length || c >= fixedCell[p].length || p >= cellValue.length || c >= cellValue[p].length || p + 1 >= appText.length || c >= appText[p+1].length || p + 1 >= appColors.length || c >= appColors[p+1].length)
+                {print("continue");continue;}
+
+              var cellData = cellsData[c];
+
+              if (cellData != null) {
+                try {
+                  final bool serverFixed = cellData['fixed'] ?? false;
+                  final int serverValue = cellData['value'] ?? -1;
+                  final bool isNonScoreCell = cellData['isNonScoreCell'] ?? (c == 6 || c == 7 || c == totalFields - 1);
+
+
+                  // --- Apply server state directly to local state ---
+                  fixedCell[p][c] = serverFixed;
+                  cellValue[p][c] = serverValue;
+                  appText[p + 1][c] = serverValue != -1 ? serverValue.toString() : "";
+
+                  // --- Update Color based on Fixed Status and Cell Type ---
+                  if (isAbortedPlayer) {
+                    appColors[p + 1][c] = Colors.black.withAlpha(178);
+                  } else if (isNonScoreCell) {
+                    // Always use the special color for Sum, Bonus, Total
+                    appColors[p + 1][c] = Colors.blue.withAlpha(77);
+                  } else if (serverFixed) {
+                    // Use the "fixed" color if the cell is marked fixed by the server
+                    appColors[p + 1][c] = Colors.green.withAlpha(178); // ~0.7 alpha
+                  }
+                } catch (e) { print("❌ Error updating cell state [$p][$c]: $e"); }
+              }
+            }
+          }
+        }
+
+      // ****** END: CORE STATE SYNCHRONIZATION ******
 
         // Check if this is our first update and we don't have an ID yet
         if (gameId == -1) {
@@ -6898,16 +10622,14 @@ extension CommunicationApplication on Application {
             // We found ourselves in this game
             myPlayerId = potentialId;
             gameId = data["gameId"];
-            playerIds = data["playerIds"];
-            playerActive = List.filled(playerIds.length, true);
             gameType = data["gameType"];
             nrPlayers = data["nrPlayers"];
             setup();
             userNames = data["userNames"];
             animation.players = nrPlayers;
-            
+
             print('🎮 Joining game $gameId as player $myPlayerId');
-            
+
             if (applicationStarted) {
               if (gameDices.unityCreated) {
                 gameDices.sendResetToUnity();
@@ -6925,17 +10647,11 @@ extension CommunicationApplication on Application {
           }
         }
 
-        // Make sure playerIds and playerActive are initialized
-        if (playerIds.isEmpty) {
-          playerIds = List<String>.from(newPlayerIds);
-          playerActive = List.filled(playerIds.length, true);
-        }
-
         // Check if the current player is still in the game
         if (myPlayerId >= 0 && myPlayerId < newPlayerIds.length) {
           String myId = socketService?.socketId ?? '';
 
-          if (newPlayerIds[myPlayerId] == null || 
+          if (newPlayerIds[myPlayerId] == null ||
               newPlayerIds[myPlayerId].isEmpty ||
               (newPlayerIds[myPlayerId] != myId)) {
             print('🎮 WARNING: Our player appears to have been removed from the game');
@@ -6943,38 +10659,18 @@ extension CommunicationApplication on Application {
             return;
           }
         }
-
-        // Process player status changes if arrays are initialized
-        if (playerIds.isNotEmpty && playerActive.isNotEmpty) {
-          bool playerStatusChanged = false;
-          for (int i = 0; i < playerIds.length && i < playerActive.length; i++) {
-            if (i < newPlayerIds.length) {
-              bool wasActive = playerActive[i];
-              bool isActive = newPlayerIds[i] != null && newPlayerIds[i].toString().isNotEmpty;
-
-              // Player was active but is now inactive (aborted/disconnected)
-              if (wasActive && !isActive) {
-                print('🎮 Player $i has aborted/disconnected!');
-                handlePlayerAbort(i);
-                playerStatusChanged = true;
-              }
-            }
-          }
-        }
-
-        // Update playerIds safely
-        playerIds = List<String>.from(newPlayerIds);
       }
 
       // Handle player turn changes
       final newPlayerToMove = data["playerToMove"];
-      if (newPlayerToMove != null && newPlayerToMove != playerToMove) {
+      print('playerToMove $playerToMove newPlayerToMove $newPlayerToMove');
+      if (newPlayerToMove != null && data["diceValues"][0] == 0) {
         playerToMove = newPlayerToMove;
         print('🎮 Turn changed to player $playerToMove (my ID: $myPlayerId)');
-        
+
         // Reset dice for the new player's turn
         resetDices();
-        
+
         // If it's my turn, start dice rolling
         if (playerToMove == myPlayerId) {
           print('🎮 My turn now! Enabling dice throw');
@@ -6984,13 +10680,14 @@ extension CommunicationApplication on Application {
           }
         }
       }
-      
+
       // Always update board colors
-      colorBoard();
+      //colorBoard();
     } catch (e) {
       print('🎮 Error processing game update: $e');
     }
   }
+
 
   chatCallbackOnSubmitted(String text) {
     print('💬 Chat message submitted: "$text"');
@@ -7003,9 +10700,6 @@ extension CommunicationApplication on Application {
     
     // Get the current game ID
     final gameId = this.gameId;
-    
-    // Format the message with the username
-    final formattedMessage = "$userName: $text";
 
     chat.scrollController.animateTo(
       chat.scrollController.position.maxScrollExtent,
@@ -7013,7 +10707,7 @@ extension CommunicationApplication on Application {
       curve: Curves.fastOutSlowIn
     );
     
-    print('💬 Sending chat message to game $gameId with players: $playerIds');
+    print('💬 Sending chat message to game $gameId');
     
     // Use the modern SocketService if available
     if (socketService != null && socketService!.isConnected) {
@@ -7025,7 +10719,6 @@ extension CommunicationApplication on Application {
         "gameId": gameId,
         "message": text,
         "sender": userName,
-        "playerIds": playerIds,
       };
       
       // Send via the modern socket service
@@ -7065,42 +10758,17 @@ extension CommunicationApplication on Application {
 
             // Update dice values to show what the other player had
             gameDices.diceValue = data["diceValue"].cast<int>();
-            updateDiceValues();
 
             // Mark the cell as selected but don't change turns
             // Actual turn change will come via the onGameUpdate message
             int player = data["player"];
-            int cell = data["cell"];
-
-            // Update the cell appearance and call calcNewSums
-            appColors[player + 1][cell] = Colors.green.withValues(alpha: 0.7);
-            fixedCell[player][cell] = true;
-            
-            // Clear unfixed cells for the current player
-            for (var i = 0; i < totalFields; i++) {
-              if (!fixedCell[player][i]) {
-                appText[player + 1][i] = "";
-                cellValue[player][i] = -1;
-              }
-            }
-            applyLocalSelection(player, cell, cellValue[player][cell]);
 
             // Get next player (same logic as in calcNewSums)
             int nextPlayer = player;
             do {
               nextPlayer = (nextPlayer + 1) % nrPlayers;
             } while (!playerActive[nextPlayer]);
-            
-            // Clear unfixed cells for the next player
-            for (var i = 0; i < totalFields; i++) {
-              if (!fixedCell[nextPlayer][i]) {
-                appText[nextPlayer + 1][i] = "";
-                cellValue[nextPlayer][i] = -1;
-              }
-            }
 
-            // Clear dice visuals
-            gameDices.clearDices();
           } else {
             // This is our own selection coming back to us, we can ignore it
             // since we already processed it locally
@@ -7114,7 +10782,6 @@ extension CommunicationApplication on Application {
             resetDices();
           } else {
             gameDices.diceValue = dices;
-            updateDiceValues();
             gameDices.nrRolls += 1;
             gameDices.updateDiceImages();
             if (gameDices.unityDices) {
@@ -7404,18 +11071,13 @@ mixin LanguagesApplication  {
 <file path="lib/application/widget_application_scaffold.dart">
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:yatzy/application/communication_application.dart';
 import 'package:yatzy/chat/widget_chat.dart';
-import 'package:yatzy/dices/unity_communication.dart';
 import 'package:yatzy/dices/widget_dices.dart';
 import 'package:yatzy/top_score/widget_top_scores.dart';
 
 import '../router/router.gr.dart';
 import '../scroll/widget_scroll.dart';
-import '../services/service_provider.dart';
 import '../startup.dart';
-import '../states/cubit/state/state_cubit.dart';
 import 'application.dart';
 import 'widget_application.dart';
 
@@ -7484,16 +11146,6 @@ extension WidgetApplicationScaffold on Application {
       ]);
 
       return widget;
-    }
-
-    gameFinished = true;
-    for (var i = 0; i < playerActive.length; i++) {
-      if (playerActive[i]) {
-        if (fixedCell[i].contains(false)) {
-          gameFinished = false;
-          break;
-        }
-      }
     }
 
     stackedWidgets = [];
@@ -7630,11 +11282,8 @@ extension WidgetApplicationScaffold on Application {
 </file>
 
 <file path="lib/application/widget_application_settings.dart">
-import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:yatzy/dices/unity_communication.dart';
-import '../router/router.gr.dart';
 import '../services/service_provider.dart';
 import '../shared_preferences.dart';
 import '../startup.dart';
@@ -7803,7 +11452,7 @@ extension WidgetApplicationSettings on Application {
             padding: const EdgeInsets.all(12.0),
             child: Column(
               children: [
-                Text("Game Type", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)), // Use headingStyle if available
+                const Text("Game Type", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)), // Use headingStyle if available
                 const SizedBox(height: 8),
                 inputItems.widgetStringRadioButton( // Use widgetStringRadioButton
                     state,
@@ -7865,60 +11514,10 @@ extension WidgetApplicationSettings on Application {
         msg["unityLightMotion"] = gameDices.unityLightMotion;
         SharedPrefProvider.setPrefObject('yatzySettings', msg);
       } else {
-        print('❌ No socket connection - starting offline 1-player game');
-        myPlayerId = 0;
-        gameId = 0;
-        playerIds = [""];
-        playerActive = List.filled(playerIds.length, true);
-        nrPlayers = 1;
-
-        setup();
-        userNames = [userName];
-        animation.players = 1;
-        if (applicationStarted) {
-          if (gameDices.unityDices) {
-            gameDices.sendResetToUnity();
-            if (gameDices.unityDices && myPlayerId == playerToMove) {
-              gameDices.sendStartToUnity();
-            }
-          }
-
-          context.read<SetStateCubit>().setState();
-          AutoRouter.of(context).pop();
-        } else {
-          applicationStarted = true;
-          await AutoRouter.of(context).pushAndPopUntil(const ApplicationView(),
-              predicate: (Route<dynamic> route) => false);
-        }
+        print('❌ No socket connection');
       }
     } catch (e) {
       print('⚠️ ServiceProvider not available in onStartGameButton: $e');
-      // Start offline game
-      print('❌ No service provider - starting offline 1-player game');
-      myPlayerId = 0;
-      gameId = 0;
-      playerIds = [""];
-      playerActive = List.filled(playerIds.length, true);
-      nrPlayers = 1;
-
-      setup();
-      userNames = [userName];
-      animation.players = 1;
-      if (applicationStarted) {
-        if (gameDices.unityDices) {
-          gameDices.sendResetToUnity();
-          if (gameDices.unityDices && myPlayerId == playerToMove) {
-            gameDices.sendStartToUnity();
-          }
-        }
-
-        context.read<SetStateCubit>().setState();
-        AutoRouter.of(context).pop();
-      } else {
-        applicationStarted = true;
-        await AutoRouter.of(context).pushAndPopUntil(const ApplicationView(),
-            predicate: (Route<dynamic> route) => false);
-      }
     }
   }
 
@@ -7930,7 +11529,6 @@ extension WidgetApplicationSettings on Application {
     // Define a consistent color scheme for better visibility
     final primaryColor = Colors.blue.shade700; // Brighter primary color
     final accentColor = Theme.of(context).colorScheme.secondary;
-    final backgroundColor = Theme.of(context).scaffoldBackgroundColor;
 
     const tabTextStyle = TextStyle(
       fontSize: 24,
@@ -7970,7 +11568,7 @@ extension WidgetApplicationSettings on Application {
                 indicatorWeight: 3,
                 indicatorColor: Colors.white, // High contrast indicator
                 labelColor: Colors.white, // Ensure high contrast for selected tab
-                unselectedLabelColor: Colors.white.withOpacity(0.8), // Still visible unselected tabs
+                unselectedLabelColor: Colors.white.withValues(alpha: 0.8), // Still visible unselected tabs
                 tabs: [
                   Tab(child: Text(game_, style: tabTextStyle)),
                   Tab(child: Text(general_, style: tabTextStyle)),
@@ -8138,7 +11736,7 @@ extension WidgetApplicationSettings on Application {
                                     borderRadius: BorderRadius.circular(8.0),
                                     boxShadow: [
                                       BoxShadow(
-                                        color: Colors.black.withOpacity(0.1),
+                                        color: Colors.black.withValues(alpha: 0.1),
                                         spreadRadius: 1,
                                         blurRadius: 3,
                                         offset: const Offset(0, 2),
@@ -8263,9 +11861,9 @@ extension WidgetApplicationSettings on Application {
                                     Theme(
                                       data: Theme.of(context).copyWith(
                                         checkboxTheme: CheckboxThemeData(
-                                          fillColor: MaterialStateProperty.resolveWith<Color>(
-                                            (Set<MaterialState> states) {
-                                              if (states.contains(MaterialState.selected)) {
+                                          fillColor: WidgetStateProperty.resolveWith<Color>(
+                                            (Set<WidgetState> states) {
+                                              if (states.contains(WidgetState.selected)) {
                                                 return accentColor;
                                               }
                                               return Colors.grey.shade400;
@@ -9348,6 +12946,7 @@ import 'dices.dart';
 
 extension UnityCommunication on Dices {
   sendResetToUnity() {
+    print("Sending Reset To Unity");
     UnityMessage msg = UnityMessage.reset(nrDices, nrTotalRolls);
 
     var json = msg.toJson();
@@ -9628,6 +13227,7 @@ class _WidgetDicesState extends State<WidgetDices>
               width: w + 75,
               height: h + 75,
               child: UnityWidget(
+                //webUrl: '/UnityLibrary/index.html',
                 borderRadius: BorderRadius.zero,
                 onUnityCreated: app.gameDices.onUnityCreated,
                 onUnityMessage: app.gameDices.onUnityMessage,
@@ -11028,8 +14628,8 @@ class _WidgetAnimationsScrollState extends State<WidgetAnimationsScroll>
 
   @override
   void dispose() {
-    super.dispose();
     animationsScroll.animationController.dispose();
+    super.dispose();
   }
 
   @override
@@ -11624,7 +15224,8 @@ class SocketService {
               'reconnectionDelayMax': 5000,
               'timeout': 20000,
               'extraHeaders': {'Content-Type': 'application/json'},
-              'path': '/new/socket.io/',
+              //'path': '/new/socket.io/',
+              'path': '/socket.io/',
             }
         );
       } else {
@@ -11676,32 +15277,24 @@ class SocketService {
   
   /// Remove all registered event listeners
   void _clearEventHandlers() {
-    if (socket != null) {
-       print('🧼 [Socket #$_instanceId] Clearing existing event handlers...');
-       socket.off('connect');
-       socket.off('disconnect');
-       socket.off('connect_error');
-       socket.off('welcome');
-       socket.off('echo_response');
-       socket.off('onClientMsg');
-       socket.off('onServerMsg');
-       socket.off('userId');
-       socket.off('gameUpdate');
-       socket.off('chatMessage');
-       _handlersSetUp = false;
-    } else {
-       print('🧼 [Socket #$_instanceId] No socket instance to clear handlers from.');
+     print('🧼 [Socket #$_instanceId] Clearing existing event handlers...');
+     socket.off('connect');
+     socket.off('disconnect');
+     socket.off('connect_error');
+     socket.off('welcome');
+     socket.off('echo_response');
+     socket.off('onClientMsg');
+     socket.off('onServerMsg');
+     socket.off('userId');
+     socket.off('gameUpdate');
+     socket.off('chatMessage');
+     _handlersSetUp = false;
     }
-  }
   
   /// Set up Socket.IO event handlers
   void _setupEventHandlers() {
     if (_handlersSetUp) {
        print('🔄 [Socket #$_instanceId] Handlers already set up for this socket instance, skipping.');
-       return;
-    }
-    if (socket == null) {
-       print('❌ [Socket #$_instanceId] Cannot set up handlers: Socket is null.');
        return;
     }
 
@@ -12013,10 +15606,8 @@ class SocketService {
   void disconnect() {
     print('🔌 [Socket #$_instanceId] Disconnecting socket...');
     _clearEventHandlers(); // Remove listeners before disconnecting
-    if (socket != null) {
-      socket.disconnect();
-    }
-    isConnected = false;
+    socket.disconnect();
+      isConnected = false;
     _handlersSetUp = false;
     _connectingInProgress = false;
     _globalConnectionInProgress = false; // Allow new connections
@@ -12091,7 +15682,7 @@ var isOnline = false;
 
 var localhost = isOnline
         ? "https://fluttersystems.com"
-    : "http://localhost:8002";
+    : "http://localhost:8000";
 
 var applicationStarted = false;
 var userName = "Yatzy";
@@ -12328,8 +15919,8 @@ class _WidgetTopScoreState extends State<WidgetTopScore>
 
   @override
   void dispose() {
-    super.dispose();
     topScore.animationController.dispose();
+    super.dispose();
   }
 
   @override
@@ -12700,14 +16291,10 @@ int getSelectionIndex(String gameType, String label) {
 
 <file path="lib/views/application_view.dart">
 import 'package:auto_route/auto_route.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:yatzy/application/widget_application_scaffold.dart';
 
-import '../router/router.gr.dart';
-import '../injection.dart';
-import '../router/router.dart';
 import '../startup.dart';
 import '../states/cubit/state/state_cubit.dart';
 
@@ -12727,49 +16314,11 @@ class _ApplicationViewState extends State<ApplicationView>
     }
   }
 
-  void _showGameFinishedDialog() {
-    final router = getIt<AppRouter>();
-    if (!mounted) return;
-    
-    String winnerMsg = "Game Over!";
-
-    showDialog(
-      context: context, 
-      barrierDismissible: false,
-      builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          title: const Text('Game Finished'),
-          content: Text(winnerMsg),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('OK'),
-              onPressed: () {
-                if (!mounted) return;
-                Navigator.of(dialogContext).pop();
-                
-                app.gameFinished = false;
-                
-                router.pushAndPopUntil(const SettingsView(), predicate: (_) => false);
-                
-                app.gameId = -1;
-                app.myPlayerId = -1;
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-
   postFrameCallback(BuildContext context) async {
     if (mounted) {
       myState();
     }
     mainPageLoaded = true;
-
-    if (app.gameFinished && !app.isSpectating && mounted) {
-       _showGameFinishedDialog();
-    }
   }
 
   @override
@@ -12787,20 +16336,15 @@ class _ApplicationViewState extends State<ApplicationView>
 
   @override
   void dispose() {
-    if (animationsScroll.animationController.isAnimating) {
-        animationsScroll.animationController.dispose(); 
-    }
+    tutorial.animationController1.dispose();
+    tutorial.animationController2.dispose();
+    tutorial.animationController3.dispose();
+
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (app.gameFinished && !app.isSpectating && mounted) {
-        _showGameFinishedDialog();
-      }
-    });
-
     return BlocBuilder<SetStateCubit, int>(builder: (context, state) {
       return app.widgetScaffold(context, myState);
     });
@@ -12852,7 +16396,7 @@ import 'package:flutter/material.dart';
 class SpectatorGameBoard extends StatefulWidget {
   final Map<String, dynamic> gameData;
 
-  const SpectatorGameBoard({Key? key, required this.gameData}) : super(key: key);
+  const SpectatorGameBoard({super.key, required this.gameData});
 
   @override
   State<SpectatorGameBoard> createState() => _SpectatorGameBoardState();
@@ -12960,7 +16504,7 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
                         border: Border.all(color: Colors.black, width: 1),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.2),
+                            color: Colors.black.withValues(alpha: 0.2),
                             spreadRadius: 1,
                             blurRadius: 2,
                             offset: const Offset(1, 1),
@@ -13007,7 +16551,7 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
             if (isFinished)
               Positioned.fill(
                 child: Container(
-                  color: Colors.black.withOpacity(0.5),
+                  color: Colors.black.withValues(alpha: 0.5),
                   child: Center(
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -13402,7 +16946,7 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
                     textAlign: TextAlign.center,
                   ),
                 ),
-              )).toList(),
+              )),
             ],
           ),
 
@@ -13435,7 +16979,7 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
                     padding: const EdgeInsets.symmetric(vertical: 8.0),
                     alignment: Alignment.center,
                     color: score != null && !category.isHighlighted ?
-                    Colors.green.shade100.withOpacity(0.7) : null,
+                    Colors.green.shade100.withValues(alpha: 0.7) : null,
                     child: Text(
                       score != null ? score.toString() : '',
                       style: TextStyle(
@@ -13447,7 +16991,7 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
                 ),
               ],
             );
-          }).toList(),
+          }),
         ],
       ),
     );
