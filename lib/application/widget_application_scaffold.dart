@@ -80,8 +80,20 @@ extension WidgetApplicationScaffold on Application {
     if (h > w) {
       return Scaffold(
           body: Stack(children: <Widget>[
-        Image.asset("assets/images/yatzy_portrait.jpg",
-            fit: BoxFit.cover, height: double.infinity, width: double.infinity),
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomLeft, // Start gradient at bottom-left
+                  end: Alignment.topRight,     // End gradient at top-right
+                  colors: [
+                    Colors.blue.shade300, // Lighter blue at the start
+                    Colors.blue.shade800, // Darker blue at the end
+                    // You can add more colors and use the 'stops' property
+                    // for more complex gradients if desired.
+                  ],
+                ),
+              ),
+            ),
         Stack(children: [
           Positioned(
               left: l,
@@ -113,8 +125,20 @@ extension WidgetApplicationScaffold on Application {
 
       return Scaffold(
           body: Stack(children: <Widget>[
-        Image.asset("assets/images/yatzy_landscape2.jpg",
-            fit: BoxFit.cover, height: double.infinity, width: double.infinity),
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomLeft, // Start gradient at bottom-left
+                  end: Alignment.topRight,     // End gradient at top-right
+                  colors: [
+                    Colors.blue.shade300, // Lighter blue at the start
+                    Colors.blue.shade800, // Darker blue at the end
+                    // You can add more colors and use the 'stops' property
+                    // for more complex gradients if desired.
+                  ],
+                ),
+              ),
+            ),
         Stack(children: [
           Positioned(
               left: w * 0.32 + l,

@@ -49,7 +49,6 @@ class Dices extends LanguagesDices  {
   late Function callbackUpdateDiceValues;
   late Function callbackUnityCreated;
   late Function callbackCheckPlayerToMove;
-  late AnimationController animationController;
   late Animation<double> sizeAnimation;
   late UnityWidgetController unityWidgetController;
   var unityCreated = false;
