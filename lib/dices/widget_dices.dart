@@ -287,7 +287,7 @@ class _WidgetDicesState extends State<WidgetDices>
               // --- Use Icon instead of Label ---
               child: Icon(
                 // Option 1: Send/Throw motion
-                  Icons.casino_outlined,
+                  Icons.send,
                   // Option 2: Replay/Re-roll symbol
                   // Icons.replay,
                   // Option 3: Casino/Dice symbol

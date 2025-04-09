@@ -2,7 +2,7 @@
 import { Player, PlayerFactory } from './Player';
 import { v4 as uuidv4 } from 'uuid';
 import { getSelectionIndex } from '../utils/yatzyMapping'; // Import for applySelection
-
+import { GameConfig, getBaseGameType } from '../utils/gameConfig';
 /**
  * Game model for Yatzy
  * Encapsulates all game-related data and logic
@@ -42,7 +42,9 @@ export class Game {
     this.gameStarted = false;
     this.gameFinished = false;
     this.playerToMove = 0;
-    this.diceValues = []; // Initialize dice values array
+    const config = GameConfig[getBaseGameType(gameType)];
+    const diceCount = config ? config.diceCount : 5; // Use config
+    this.diceValues = new Array(diceCount).fill(0); // Initialize with correct number of zeros
     this.rollCount = 0; // Initialize roll count
     this.turnNumber = 1; // Start at turn 1
   }
@@ -245,13 +247,30 @@ export class Game {
 
   // --- Existing methods modified/checked ---
   setDiceValues(values: number[]): void {
-    if (!values || values.length !== 5) {
-      console.error('Invalid dice values - must be array of 5 numbers');
-      this.diceValues = [0, 0, 0, 0, 0];
-    } else {
-      this.diceValues = [...values];
-    }
-    // Do not reset rollCount here, incrementRollCount handles it
+    // --- CORRECTED LOGIC ---
+        if (!values) {
+          console.error('[Game.setDiceValues] Invalid dice values received: null or undefined');
+          // Fallback: Create zeros based on game config
+          const config = GameConfig[getBaseGameType(this.gameType)];
+          const diceCount = config ? config.diceCount : 5; // Default 5 if config missing
+          this.diceValues = new Array(diceCount).fill(0);
+          console.log(`[Game.setDiceValues] Setting dice to ${diceCount} zeros due to invalid input.`);
+        } else {
+           const config = GameConfig[getBaseGameType(this.gameType)];
+           const expectedDiceCount = config ? config.diceCount : values.length; // Use actual length if config fails
+
+           if (values.length !== expectedDiceCount) {
+               // This might happen if client sends wrong number, or if config is wrong. Log it.
+               console.warn(`[Game.setDiceValues] Dice length mismatch. Expected ${expectedDiceCount} for type ${this.gameType}, got ${values.length}. Storing received values.`);
+               // Decide: Store anyway? Or fallback to zeros? Let's store received for now.
+               this.diceValues = [...values];
+           } else {
+               // Length matches expected count, store normally
+               this.diceValues = [...values]; // Copy the received values
+               // console.log(`[Game.setDiceValues] Stored dice: [${this.diceValues.join(', ')}]`); // Optional log
+           }
+        }
+
   }
 
 
