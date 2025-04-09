@@ -117,7 +117,6 @@ class _WidgetDicesState extends State<WidgetDices>
             )),
       );
       listings.add(Positioned(
-        key: app.gameDices.holdDiceKey[i],
         left: left + 1.25 * diceWidthHeight * i,
         top: top,
         child: GestureDetector(
@@ -181,7 +180,6 @@ class _WidgetDicesState extends State<WidgetDices>
                   width: double.infinity),
             ));
         return Positioned(
-          key: app.gameDices.rollDiceKey,
           left: left +
               diceWidthHeight * ((app.gameDices.sizeAnimation.value) / 4) +
               width / 2 -

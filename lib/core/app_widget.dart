@@ -7,11 +7,9 @@ import '../application/application.dart';
 import '../chat/chat.dart';
 import '../injection.dart';
 import '../router/router.dart';
-import '../scroll/animations_scroll.dart';
 import '../startup.dart';
 import '../states/cubit/state/state_cubit.dart';
 import '../top_score/top_score.dart';
-import '../tutorial/tutorial.dart';
 
 class AppWidget extends StatelessWidget {
   AppWidget({super.key});
@@ -29,10 +27,7 @@ class AppWidget extends StatelessWidget {
     topScore = TopScore(
         getChosenLanguage: getChosenLanguage,
         standardLanguage: standardLanguage);
-    animationsScroll = AnimationsScroll(
-        getChosenLanguage: getChosenLanguage,
-        standardLanguage: standardLanguage);
-    tutorial = Tutorial();
+
     dices = Dices(
         getChosenLanguage: getChosenLanguage,
         standardLanguage: standardLanguage,

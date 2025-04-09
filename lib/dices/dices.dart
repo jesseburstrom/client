@@ -15,10 +15,6 @@ class Dices extends LanguagesDices  {
   Dices(
       {required Function getChosenLanguage, required String standardLanguage, required this.setState, required this.inputItems}) {
     languagesSetup(getChosenLanguage, standardLanguage);
-
-    for (var i = 0; i < 6; i++) {
-      holdDiceKey.add(GlobalKey());
-    }
   }
 
   setCallbacks(cbUpdateDiceValues, cbUnityCreated, cbCheckPlayerToMove) {
@@ -50,8 +46,6 @@ class Dices extends LanguagesDices  {
     "5.jpg",
     "6.jpg"
   ];
-  var rollDiceKey = GlobalKey();
-  var holdDiceKey = [];
   late Function callbackUpdateDiceValues;
   late Function callbackUnityCreated;
   late Function callbackCheckPlayerToMove;

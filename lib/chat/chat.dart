@@ -39,7 +39,6 @@ class Chat {
   final chatTextController = TextEditingController();
   final scrollController = ScrollController();
   var focusNode = FocusNode();
-  var listenerKey = GlobalKey();
 
   // To get the slide in chat-bubble from bottom effect, 15 is for 4k full screen.
   // Otherwise chat starts from top and goes down. Maybe is some other way to start from bottom.

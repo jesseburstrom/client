@@ -120,7 +120,6 @@ class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with Langua
               animation: app.animation.cellAnimationControllers[0][i],
               builder: (BuildContext context, Widget? widget) {
                 return Positioned(
-                    key: app.cellKeys[0][i],
                     left: app.boardXPos[0][i] + app.animation.boardXAnimationPos[0][i],
                     top: app.boardYPos[0][i] + app.animation.boardYAnimationPos[0][i],
                     child: Container(
@@ -206,7 +205,6 @@ class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with Langua
               animation: app.animation.cellAnimationControllers[i][j],
               builder: (BuildContext context, Widget? widget) {
                 return Positioned(
-                  key: app.cellKeys[i + 1][j],
                   left: app.boardXPos[i + 1][j] +
                       app.animation.boardXAnimationPos[i + 1][j],
                   top: app.boardYPos[i + 1][j] +

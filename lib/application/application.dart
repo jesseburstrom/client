@@ -85,8 +85,6 @@ class Application with LanguagesApplication  {
   late Dices gameDices;
   var serverId = "";
 
-  var cellKeys = [];
-
   // Reference to the modern socket service
   SocketService? socketService;
 
@@ -272,15 +270,6 @@ class Application with LanguagesApplication  {
       if (myPlayerId == playerToMove) {
         gameDices.sendStartToUnity();
       }
-    }
-
-    cellKeys = [];
-    for (int i = 0; i < nrPlayers + 1; i++) {
-      var tmp = [];
-      for (int j = 0; j < totalFields; j++) {
-        tmp.add(GlobalKey());
-      }
-      cellKeys.add(tmp);
     }
   }
 

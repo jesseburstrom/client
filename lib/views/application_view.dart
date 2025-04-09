@@ -32,7 +32,6 @@ class _ApplicationViewState extends State<ApplicationView>
   @override
   void initState() {
     super.initState();
-    tutorial.setup(this);
 
     WidgetsBinding.instance
         .addPostFrameCallback((_) => postFrameCallback(context));
@@ -40,15 +39,6 @@ class _ApplicationViewState extends State<ApplicationView>
     app.animation.setupAnimation(
         this, app.nrPlayers, app.maxNrPlayers, app.maxTotalFields);
 
-  }
-
-  @override
-  void dispose() {
-    tutorial.animationController1.dispose();
-    tutorial.animationController2.dispose();
-    tutorial.animationController3.dispose();
-
-    super.dispose();
   }
 
   @override

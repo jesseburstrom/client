@@ -5,7 +5,6 @@ import 'package:yatzy/dices/widget_dices.dart';
 import 'package:yatzy/top_score/widget_top_scores.dart';
 
 import '../router/router.gr.dart';
-import '../scroll/widget_scroll.dart';
 import '../startup.dart';
 import 'application.dart';
 import 'widget_application.dart';
@@ -53,7 +52,6 @@ extension WidgetApplicationScaffold on Application {
 
       Widget widget = Stack(children: [
         Positioned(
-            key: keySettings,
             left: l + (1.0 - floatingButtonSize * (size == h ? 2 : 1.1)) * w,
             top: t +
                 (1.0 - floatingButtonSize * (size == w ? 2 : 1.1)) * h -
@@ -78,60 +76,6 @@ extension WidgetApplicationScaffold on Application {
     }
 
     stackedWidgets = [];
-    if (!gameDices.unityDices &&
-        mainPageLoaded &&
-        isTutorial &&
-        callbackCheckPlayerToMove() &&
-        gameDices.nrRolls < 3) {
-      stackedWidgets = [
-        tutorial.widgetArrow(gameDices.rollDiceKey, w, h,
-            tutorial.animationController1, gameDices.pressToRoll_, 0, "R", 0.5)
-      ];
-      if (!tutorial.animationController1.isAnimating) {
-        tutorial.animationController1.repeat(reverse: true);
-      }
-    }
-
-    if (!gameDices.unityDices &&
-        mainPageLoaded &&
-        isTutorial &&
-        callbackCheckPlayerToMove() &&
-        (gameDices.nrRolls == 1 || gameDices.nrRolls == 2)) {
-      stackedWidgets.add(tutorial.widgetArrow(gameDices.holdDiceKey[0], w, h,
-          tutorial.animationController2, gameDices.pressToHold_, 1, "B", 0.5));
-      if (!tutorial.animationController2.isAnimating) {
-        tutorial.animationController2.repeat(reverse: true);
-      }
-    }
-
-    if (mainPageLoaded &&
-        isTutorial &&
-        callbackCheckPlayerToMove() &&
-        gameDices.nrRolls == 3) {
-      stackedWidgets.add(tutorial.widgetArrow(
-          cellKeys[myPlayerId + 1][totalFields - 5],
-          w,
-          h,
-          tutorial.animationController2,
-          chooseMove_,
-          1,
-          "R",
-          devicePixelRatio > 2.5 ? 1.0 : 1.5));
-      if (!tutorial.animationController2.isAnimating) {
-        tutorial.animationController2.repeat(reverse: true);
-      }
-    }
-    try {
-      if (mainPageLoaded && isTutorial && gameFinished) {
-        stackedWidgets.add(tutorial.widgetArrow(keySettings, w, h,
-            tutorial.animationController3, pressSettings_, 2, "L", 0.5));
-        if (!tutorial.animationController3.isAnimating) {
-          tutorial.animationController3.repeat(reverse: true);
-        }
-      }
-    } catch (e) {
-      // Error
-    }
 
     if (h > w) {
       return Scaffold(
@@ -159,11 +103,7 @@ extension WidgetApplicationScaffold on Application {
               left: w * 0.675 + l,
               top: h * 0.04 + t,
               child: WidgetChat(width: w * 0.30, height: h * 0.16)),
-          WidgetAnimationsScroll(
-              width: w,
-              height: h * 0.1,
-              left: w * 0.025 + l,
-              top: -h * 0.03 + t)
+
         ]),
         widgetFloatingButton(h),
         Stack(children: stackedWidgets),
@@ -196,11 +136,7 @@ extension WidgetApplicationScaffold on Application {
               left: w * 0.575 + l,
               top: h * 0.02 + t,
               child: WidgetChat(width: w * 0.22, height: h * 0.3)),
-          WidgetAnimationsScroll(
-              width: w * 0.43,
-              height: h * 0.2,
-              left: w * 0.355 + l,
-              top: -h * 0.07 + t)
+
         ]),
         widgetFloatingButton(w),
         Stack(children: stackedWidgets),
