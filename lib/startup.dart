@@ -10,6 +10,7 @@ var localhost = isOnline
         ? "https://fluttersystems.com"
     : "http://localhost:8000";
 
+var showUnityOptions = false;
 var applicationStarted = false;
 var userName = "Yatzy";
 var userNames = [];

@@ -265,7 +265,6 @@ class _WidgetDicesState extends State<WidgetDices>
         double buttonSize = diceWidgetSize * 1.5; // Make button a bit larger than dice
 
         return Positioned(
-          // key: app.gameDices.rollDiceKey, // Keep key only if needed for tutorial
           // Center the button roughly, adjust vertical position
           left: left + (width / 2) - (buttonSize * buttonScaleFactor / 2) - (diceWidgetSize/4), // Centering adjustment
           top: top + diceWidgetSize * 1.5, // Position below the dice row

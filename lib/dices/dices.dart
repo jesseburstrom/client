@@ -139,6 +139,9 @@ class Dices extends LanguagesDices  {
 
   List<Widget> widgetUnitySettings(Function state) {
     List<Widget> widgets = [];
+    if (!showUnityOptions) {
+      return widgets;
+    }
     widgets.add(inputItems.widgetCheckbox(
             (x) => {unityDices = x, state()}, choseUnity_, unityDices));
     widgets.add(inputItems.widgetCheckbox(
