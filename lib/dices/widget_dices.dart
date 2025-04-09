@@ -221,7 +221,6 @@ class _WidgetDicesState extends State<WidgetDices>
       // Add the "HOLD" overlay if needed
       // Boundary check for holdDiceOpacity and holdDiceText
       double holdOpacity = (i < app.gameDices.holdDiceOpacity.length) ? app.gameDices.holdDiceOpacity[i] : 0.0;
-      String holdText = (i < app.gameDices.holdDiceText.length) ? app.gameDices.holdDiceText[i] : "";
 
       if (holdOpacity > 0) {
         listings.add(Positioned(
@@ -235,16 +234,7 @@ class _WidgetDicesState extends State<WidgetDices>
                 color: Colors.black.withValues(alpha: holdOpacity * 0.7), // Adjust opacity
                 borderRadius: BorderRadius.circular(diceWidgetSize * 0.15),
               ),
-              child: Center(
-                child: Text(
-                  holdText,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.9),
-                    fontWeight: FontWeight.bold,
-                    fontSize: diceWidgetSize * 0.3, // Scale text size
-                  ),
-                  textAlign: TextAlign.center,
-                ),
+              child: const Center(
               ),
             ),
           ),
