@@ -67,16 +67,10 @@ class _WidgetTopScoreState extends State<WidgetTopScore>
             child: FittedBox(
                 fit: BoxFit.contain,
                 child: Text(topScores_,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontStyle: FontStyle.italic,
-                      color: Colors.blue[800],
-                      shadows: const [
-                        Shadow(
-                          blurRadius: 10.0,
-                          color: Colors.red,
-                          offset: Offset(5.0, 5.0),
-                        ),
-                      ],
+                      color: Colors.white70,
+
                     ))))));
     try {
       listings.add(AnimatedBuilder(

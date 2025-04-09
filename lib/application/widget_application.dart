@@ -102,13 +102,6 @@ class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with Langua
                         fontWeight: FontWeight.bold,
                         fontSize: 20,
                         color: Colors.black.withValues(alpha: 0.8),
-                        shadows: const [
-                          Shadow(
-                            blurRadius: 10.0,
-                            color: Colors.blueAccent,
-                            offset: Offset(5.0, 5.0),
-                          ),
-                        ],
                       ))))));
     }
     // For 'live' translation reset board text
@@ -139,14 +132,6 @@ class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with Langua
                           app.appText[0][i],
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
-                            //color: Colors.blue[800],
-                            shadows: [
-                              Shadow(
-                                blurRadius: 5.0,
-                                color: Colors.blue,
-                                offset: Offset(2.0, 2.0),
-                              ),
-                            ],
                           ),
                           textAlign: TextAlign.center,
                         ),

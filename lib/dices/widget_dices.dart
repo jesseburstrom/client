@@ -205,7 +205,7 @@ class _WidgetDicesState extends State<WidgetDices>
                     border: Border.all(color: Colors.grey.shade400),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.15),
+                        color: Colors.black.withValues(alpha: 0.15),
                         blurRadius: 3,
                         offset: const Offset(1, 2),
                       )
@@ -225,7 +225,6 @@ class _WidgetDicesState extends State<WidgetDices>
 
       if (holdOpacity > 0) {
         listings.add(Positioned(
-          // key: app.gameDices.holdDiceKey[i], // Keep key only if needed for tutorial
           left: left + 1.25 * diceWidgetSize * i,
           top: top,
           child: IgnorePointer( // Makes overlay non-interactive
@@ -233,14 +232,14 @@ class _WidgetDicesState extends State<WidgetDices>
               width: diceWidgetSize,
               height: diceWidgetSize,
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(holdOpacity * 0.7), // Adjust opacity
+                color: Colors.black.withValues(alpha: holdOpacity * 0.7), // Adjust opacity
                 borderRadius: BorderRadius.circular(diceWidgetSize * 0.15),
               ),
               child: Center(
                 child: Text(
                   holdText,
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withValues(alpha: 0.9),
                     fontWeight: FontWeight.bold,
                     fontSize: diceWidgetSize * 0.3, // Scale text size
                   ),
@@ -271,31 +270,32 @@ class _WidgetDicesState extends State<WidgetDices>
           left: left + (width / 2) - (buttonSize * buttonScaleFactor / 2) - (diceWidgetSize/4), // Centering adjustment
           top: top + diceWidgetSize * 1.5, // Position below the dice row
           child: SizedBox( // Use SizedBox to apply animated size
-            width: buttonSize * buttonScaleFactor,
-            height: buttonSize * 0.6 * buttonScaleFactor, // Make button wider than tall
-            child: ElevatedButton.icon(
+            width: buttonSize * 0.8 * buttonScaleFactor, // Make button more square
+            height: buttonSize * 0.8 * buttonScaleFactor, // Make button more square
+            child: ElevatedButton(
               onPressed: canRoll ? () {
                 if (app.gameDices.rollDices(context)) {
                   _localAnimationController.forward(); // Start local animation
                 }
               } : null, // Disable button if cannot roll
-              icon: Icon(Icons.casino_outlined, size: buttonSize * 0.25 * buttonScaleFactor),
-              label: Text(
-                "Throw", // Or app.gameDices.throwDiceText_ if from languages
-                style: TextStyle(
-                    fontSize: buttonSize * 0.18 * buttonScaleFactor,
-                    fontWeight: FontWeight.bold
-                ),
-              ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: canRoll ? Colors.red.shade600 : Colors.grey.shade500, // Red when active, grey when disabled
+                backgroundColor: canRoll ? Colors.red.shade600 : Colors.grey.shade500,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(buttonSize * 0.2),
-                ),
-                padding: EdgeInsets.symmetric(horizontal: buttonSize * 0.1),
+                shape: const CircleBorder(), // Make it circular for a classic roll feel
+                padding: EdgeInsets.zero, // Remove padding to center icon
                 elevation: canRoll ? 4 : 0,
               ),
+              // --- Use Icon instead of Label ---
+              child: Icon(
+                // Option 1: Send/Throw motion
+                  Icons.casino_outlined,
+                  // Option 2: Replay/Re-roll symbol
+                  // Icons.replay,
+                  // Option 3: Casino/Dice symbol
+                  // Icons.casino_outlined, // Kept this as an option too
+                  size: buttonSize * 0.4 * buttonScaleFactor // Adjust icon size
+              ),
+              // ---------------------------------
             ),
           ),
         );
