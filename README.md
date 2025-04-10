@@ -76,7 +76,8 @@ graph LR
         C
     end
 
-    style D stroke-dasharray: 5 5, fill:#eee;```
+    style D stroke-dasharray: 5 5, fill:#eee;
+```
 
 ## Technologies Used
 
