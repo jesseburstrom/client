@@ -1,4 +1,3 @@
-```markdown
 # Multiplayer Yatzy Game
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/your-username/yatzy-game) <!-- Replace with actual build status badge if applicable -->
@@ -78,7 +77,6 @@ graph LR
     end
 
     style D stroke-dasharray: 5 5, fill:#eee;
-```
 
 ## Technologies Used
 
