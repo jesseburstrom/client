@@ -78,17 +78,3 @@ graph LR
 
     style D stroke-dasharray: 5 5, fill:#eee;
 
-Technologies Used
-Frontend (Flutter - lib/)
-Language: Dart
-Framework: Flutter
-State Management: Flutter BLoC/Cubit (SetStateCubit, LanguageBloc)
-Routing: auto_route
-Networking:
-http (REST API)
-socket_io_client (WebSockets)
-Dependency Injection: get_it, injectable
-Local Storage: shared_preferences
-UI: Material Design
-Optional: flutter_unity_widget (for Unity integration)
-
