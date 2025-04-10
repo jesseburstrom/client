@@ -10,58 +10,162 @@ import '../widgets/spectator_game_board.dart';
 import 'application.dart';
 
 extension WidgetApplicationSettings on Application {
+
+  // List<Widget> widgetWaitingGame(BuildContext context) {
+  //   List<Widget> gameWidgets = [];
+  //
+  //   var ongoingGames = 0;
+  //   for (var i = 0; i < games.length; i++) {
+  //     if (!games[i]["gameStarted"]) {
+  //       var gameTypeText = games[i]["gameType"];
+  //       if (gameTypeText == "Ordinary") {
+  //         gameTypeText = gameTypeOrdinary_;
+  //       }
+  //       var gameText = '$gameTypeText ${games[i]["connected"]}/${games[i]["nrPlayers"]} ${games[i]["userNames"]}';
+  //       try {
+  //         final serviceProvider = ServiceProvider.of(context);
+  //         if (games[i]["playerIds"].indexOf(serviceProvider.socketService.socketId) == -1) {
+  //           gameWidgets.add(inputItems.widgetButton(
+  //               () => onAttemptJoinGame(context, i), gameText));
+  //         } else {
+  //           gameWidgets.add(Text(gameText,
+  //               textAlign: TextAlign.center,
+  //               style: const TextStyle(
+  //                 fontWeight: FontWeight.bold,
+  //                 fontSize: 20,
+  //                 color: Colors.black87,
+  //               )));
+  //         }
+  //       } catch (e) {
+  //         print('⚠️ ServiceProvider not available in widgetWaitingGame: $e');
+  //         // Add button without checking socket ID
+  //         gameWidgets.add(inputItems.widgetButton(
+  //             () => onAttemptJoinGame(context, i), gameText));
+  //       }
+  //     } else {
+  //       // This is an ongoing game - add a spectate button
+  //       ongoingGames++;
+  //       var gameTypeText = games[i]["gameType"];
+  //       if (gameTypeText == "Ordinary") {
+  //         gameTypeText = gameTypeOrdinary_;
+  //       }
+  //       var gameText = '$gameTypeText ${games[i]["connected"]}/${games[i]["nrPlayers"]} ${games[i]["userNames"]} (Ongoing)';
+  //
+  //       // Add spectate button
+  //       gameWidgets.add(inputItems.widgetButton(
+  //           () => onSpectateGame(context, games[i]["gameId"]), gameText));
+  //     }
+  //   }
+  //   gameWidgets.add(Text("$ongoingGames_ : $ongoingGames",
+  //       textAlign: TextAlign.center,
+  //       style: const TextStyle(
+  //         fontWeight: FontWeight.bold,
+  //         fontSize: 20,
+  //         color: Colors.brown,
+  //       )));
+  //   return gameWidgets;
+  // }
   List<Widget> widgetWaitingGame(BuildContext context) {
     List<Widget> gameWidgets = [];
+    int spectatableOngoingGames = 0; // Counter for games shown with Spectate button
+    String myPlayerSocketId = ''; // Initialize
 
-    var ongoingGames = 0;
+    final headingStyle = TextStyle(
+        fontSize: 18,
+        fontWeight: FontWeight.bold,
+        color: Theme.of(context).colorScheme.secondary); // Consistent heading style
+
+    try {
+      // Get socket ID safely
+      final serviceProvider = ServiceProvider.of(context);
+      // Ensure socketService and its ID are not null before accessing
+      myPlayerSocketId = serviceProvider.socketService.socketId;
+      print("My Socket ID for filtering: $myPlayerSocketId");
+    } catch (e) {
+      print('⚠️ ServiceProvider not available or socketId null in widgetWaitingGame: $e');
+      // Proceed without socket ID, filtering won't work correctly for the current player
+    }
+
+    // Add header for clarity
+    if (games.isNotEmpty) {
+      gameWidgets.add(Padding(
+        padding: const EdgeInsets.only(top: 16.0, bottom: 8.0),
+        child: Text(ongoingGames_, style: headingStyle, textAlign: TextAlign.center),
+      ));
+    } else {
+      return gameWidgets; // Return early if no games
+    }
+
+
     for (var i = 0; i < games.length; i++) {
-      if (!games[i]["gameStarted"]) {
-        var gameTypeText = games[i]["gameType"];
-        if (gameTypeText == "Ordinary") {
-          gameTypeText = gameTypeOrdinary_;
-        }
-        var gameText = '$gameTypeText ${games[i]["connected"]}/${games[i]["nrPlayers"]} ${games[i]["userNames"]}';
+      final currentGame = games[i];
+      // Basic validation of game data structure
+      if (currentGame == null || currentGame is! Map || currentGame["gameId"] == null) {
+        print("⚠️ Skipping invalid game entry at index $i: $currentGame");
+        continue;
+      }
+
+      final bool gameStarted = currentGame["gameStarted"] ?? false;
+      final List<dynamic>? gamePlayerIds = currentGame["playerIds"]; // Can be null or not a List
+      final int gameId = currentGame["gameId"]; // Already checked for null above
+
+      // Determine if the current player is in this game
+      bool playerIsInGame = false;
+      if (myPlayerSocketId.isNotEmpty && gamePlayerIds != null && gamePlayerIds is List) {
         try {
-          final serviceProvider = ServiceProvider.of(context);
-          if (games[i]["playerIds"].indexOf(serviceProvider.socketService.socketId) == -1) {
-            gameWidgets.add(inputItems.widgetButton(
-                () => onAttemptJoinGame(context, i), gameText));
-          } else {
-            gameWidgets.add(Text(gameText,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 20,
-                  color: Colors.black87,
-                )));
-          }
+          // Safely check if the list contains the player's ID
+          playerIsInGame = gamePlayerIds.map((e) => e.toString()).contains(myPlayerSocketId);
         } catch (e) {
-          print('⚠️ ServiceProvider not available in widgetWaitingGame: $e');
-          // Add button without checking socket ID
+          print("⚠️ Error checking playerIds for game $gameId: $e");
+          // Assume player is not in game if there's an error parsing IDs
+        }
+      }
+
+      // --- Logic to decide what to show ---
+      String gameTypeText = currentGame["gameType"] ?? 'Unknown';
+      if (gameTypeText == "Ordinary") gameTypeText = gameTypeOrdinary_;
+      String userNamesText = (currentGame["userNames"] as List?)?.join(', ') ?? 'N/A';
+      String connectedText = '${currentGame["connected"] ?? '?'}/${currentGame["nrPlayers"] ?? '?'}';
+
+      if (!gameStarted) {
+        // --- Game is WAITING for players ---
+        String gameText = '$gameTypeText $connectedText [$userNamesText]';
+
+        if (playerIsInGame) {
+          // Player IS in this waiting game - show informative text
+          gameWidgets.add(Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 8.0),
+            child: Card( // Wrap in Card for better visuals
+              elevation: 1,
+              color: Colors.blue.shade50,
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Text("⏳ You are waiting in: $gameText",
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontWeight: FontWeight.w500, color: Colors.blueGrey)),
+              ),
+            ),
+          ));
+        } else {
+          // Player is NOT in this waiting game - show Join button
           gameWidgets.add(inputItems.widgetButton(
-              () => onAttemptJoinGame(context, i), gameText));
+                  () => onAttemptJoinGame(context, i), "➕ Join: $gameText"));
         }
       } else {
-        // This is an ongoing game - add a spectate button
-        ongoingGames++;
-        var gameTypeText = games[i]["gameType"];
-        if (gameTypeText == "Ordinary") {
-          gameTypeText = gameTypeOrdinary_;
+        // --- Game HAS STARTED ---
+        if (!playerIsInGame) {
+          // Player is NOT in this ongoing game - show Spectate button
+          spectatableOngoingGames++; // Increment counter
+          String gameText = '$gameTypeText $connectedText [$userNamesText] (Ongoing)';
+          gameWidgets.add(inputItems.widgetButton(
+                  () => onSpectateGame(context, gameId), "👁️ Spectate: $gameText"));
+        } else {
+          // Player IS in this ongoing game - show nothing in this list
+          print("Skipping started game $gameId for available games list because player $myPlayerSocketId is in it.");
         }
-        var gameText = '$gameTypeText ${games[i]["connected"]}/${games[i]["nrPlayers"]} ${games[i]["userNames"]} (Ongoing)';
-        
-        // Add spectate button
-        gameWidgets.add(inputItems.widgetButton(
-            () => onSpectateGame(context, games[i]["gameId"]), gameText));
       }
     }
-    gameWidgets.add(Text("$ongoingGames_ : $ongoingGames",
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          fontWeight: FontWeight.bold,
-          fontSize: 20,
-          color: Colors.brown,
-        )));
+
     return gameWidgets;
   }
 
