@@ -169,53 +169,73 @@ export class GameService {
 
   // Modified handlePlayerDisconnect to log the event
   handlePlayerDisconnect(playerId: string): void {
-    const affectedGames: number[] = []; // Store IDs of affected games
+     const affectedGames: number[] = []; // Store IDs of affected games
+    let foundPlayer = false; // Track if the player was found in any game
 
-    for (const [gameId, game] of this.games) {
-      const playerIndex = game.findPlayerIndex(playerId);
+    console.log(`🔌 Handling disconnect/cleanup for player ${playerId}`);
 
-      // Check if player was found and active in this game
-      if (playerIndex !== -1 && game.players[playerIndex]?.isActive) { // Add null check
-        console.log(`🎮 Player ${playerId} disconnected from game ${gameId}`);
-        affectedGames.push(gameId);
+    // Iterate through a COPY of the games map keys to avoid issues if a game is deleted during iteration
+    const gameIds = Array.from(this.games.keys());
 
-        // Log the disconnect move
-        const disconnectMove: GameMove = {
-          turnNumber: game.getCurrentTurnNumber(), // Need a method in Game to track turns
-          playerIndex: playerIndex,
-          playerId: playerId,
-          action: 'disconnect',
-          timestamp: new Date(),
-        };
-        
-        console.log(`📝 [GameService] Logging disconnect for player ${playerId} in game ${gameId}`);
-        this.gameLogService.logMove(gameId, disconnectMove)
-          .then(() => {
-            console.log(`✅ [GameService] Successfully logged disconnect for player ${playerId} in game ${gameId}`);
-          })
-          .catch(error => {
-            console.error(`❌ [GameService] Error logging disconnect for player ${playerId} in game ${gameId}:`, error);
-          });
+    for (const gameId of gameIds) {
+        const game = this.games.get(gameId); // Get game using the key
+        if (!game) continue; // Skip if game was somehow already removed
 
-        // Mark the player as aborted in the game state (Game model handles internal logic)
-        game.markPlayerAborted(playerId); // This method handles turn advancement if needed
+        const playerIndex = game.findPlayerIndex(playerId);
 
-        // Check if game should end (Game model's markPlayerAborted might set gameFinished)
-        if (game.gameFinished) {
-          console.log(`🎮 Game ${gameId} finished due to player disconnect/abort`);
-          this.handleGameFinished(game); // Handle logging end and cleanup
-        } else {
-          // Notify remaining players about the disconnection/abort
-          this.notifyGameUpdate(game);
+        // Check if player was found AND ACTIVE in this game
+        if (playerIndex !== -1 && game.players[playerIndex]?.isActive) {
+            foundPlayer = true; // Mark that we found the player in at least one game
+            console.log(`🎮 Player ${playerId} found active in game ${gameId}. Initiating cleanup.`);
+            affectedGames.push(gameId);
+
+            // Log the disconnect move *before* changing state
+            const disconnectMove: GameMove = {
+                turnNumber: game.getCurrentTurnNumber(),
+                playerIndex: playerIndex,
+                playerId: playerId, // Log the ID that disconnected
+                action: 'disconnect', // Use a specific action type
+                timestamp: new Date(),
+            };
+            // Log asynchronously, don't wait
+            this.gameLogService.logMove(gameId, disconnectMove)
+                .then(() => console.log(`✅ Logged disconnect for player ${playerId} in game ${gameId}`))
+                .catch(error => console.error(`❌ Error logging disconnect for player ${playerId} in game ${gameId}:`, error));
+
+            // Mark the player as aborted IN THE GAME STATE
+            // The Game model's method handles turn advancement, checking finish state internally
+            const wasCurrentPlayer = game.playerToMove === playerIndex;
+            game.markPlayerAborted(playerId); // This might set game.gameFinished
+
+            console.log(`🎮 Player ${playerId} marked as aborted in game ${gameId}. Active players: ${game.players.filter(p => p?.isActive).length}`);
+
+            // Check if the game finished AS A RESULT of this player leaving
+            if (game.gameFinished) {
+                console.log(`🏁 Game ${gameId} finished due to player disconnect/abort.`);
+                // IMPORTANT: handleGameFinished removes the game from the map
+                this.handleGameFinished(game); // This handles logging end and cleanup
+            } else {
+                // If the game is NOT finished, notify remaining players about the state change
+                console.log(`📢 Notifying remaining players in game ${gameId} about player ${playerId} disconnect.`);
+                this.notifyGameUpdate(game); // Send update with the player marked inactive
+            }
+        } else if (playerIndex !== -1) {
+             console.log(`🎮 Player ${playerId} found in game ${gameId}, but was already inactive.`);
         }
-      }
+    } // End of loop through games
+
+    if (!foundPlayer) {
+             console.log(`🔌 Player ${playerId} not found in any active games. No server-side game cleanup needed.`);
     }
 
     // If any games were affected (player removed or game ended), broadcast the updated list
-    if (affectedGames.length > 0) {
-      // If games were removed inside handleGameFinished, they won't be in this.games anymore
-      // Broadcast updated game list to all clients
-      this.broadcastGameList();
+    // This happens AFTER the loop, ensuring cleanup is done first.
+    // Note: handleGameFinished also calls broadcastGameList, so this might be redundant
+    // if the only affected games were finished. Let's keep it for cases where a player
+    // leaves but the game continues.
+    if (affectedGames.length > 0 && affectedGames.some(id => this.games.has(id))) { // Check if any *ongoing* games were affected
+         console.log(`📢 Broadcasting updated game list after player ${playerId} cleanup.`);
+         this.broadcastGameList();
     }
 
     // Also remove the disconnected user if they were a spectator

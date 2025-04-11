@@ -111,7 +111,7 @@ extension WidgetApplicationSettings on Application {
 
       // Determine if the current player is in this game
       bool playerIsInGame = false;
-      if (myPlayerSocketId.isNotEmpty && gamePlayerIds != null && gamePlayerIds is List) {
+      if (myPlayerSocketId.isNotEmpty && gamePlayerIds != null) {
         try {
           // Safely check if the list contains the player's ID
           playerIsInGame = gamePlayerIds.map((e) => e.toString()).contains(myPlayerSocketId);
@@ -296,13 +296,20 @@ extension WidgetApplicationSettings on Application {
   // --- End Simplified Game Type Selection ---
   onStartGameButton(BuildContext context, Function state) async {
     try {
+      // *** ADDED: Reset client state BEFORE sending the request ***
+      print("Initiating Start Game Button Action...");
+      app.resetForNewGame();
+      // Trigger an immediate UI update to reflect the reset state (e.g., hide spectator view)
+      context.read<SetStateCubit>().setState();
+      print("Client state reset, proceeding with game request.");
+      // **********************************************************
+
       final serviceProvider = ServiceProvider.of(context);
       final socketServiceConnected = serviceProvider.socketService.isConnected;
 
       if (socketServiceConnected) {
         Map<String, dynamic> msg = {};
 
-        msg = {};
         msg["playerIds"] = List.filled(nrPlayers, "");
         msg["userNames"] = List.filled(nrPlayers, "");
         msg["userName"] = userName;
@@ -321,18 +328,17 @@ extension WidgetApplicationSettings on Application {
           serviceProvider.socketService.sendToServer(msg);
         }
 
-        state();
-
-        msg = {};
-        msg["action"] = "saveSettings";
-        msg["userName"] = userName;
-        msg["gameType"] = gameType;
-        msg["nrPlayers"] = nrPlayers;
-        msg["language"] = chosenLanguage;
-        msg["boardAnimation"] = boardAnimation;
-        msg["unityDices"] = gameDices.unityDices;
-        msg["unityLightMotion"] = gameDices.unityLightMotion;
-        SharedPrefProvider.setPrefObject('yatzySettings', msg);
+        // Save settings logic (remains the same)
+        Map<String, dynamic> settingsMsg = {};
+        settingsMsg["action"] = "saveSettings";
+        settingsMsg["userName"] = userName;
+        settingsMsg["gameType"] = gameType;
+        settingsMsg["nrPlayers"] = nrPlayers;
+        settingsMsg["language"] = chosenLanguage;
+        settingsMsg["boardAnimation"] = boardAnimation;
+        settingsMsg["unityDices"] = gameDices.unityDices;
+        settingsMsg["unityLightMotion"] = gameDices.unityLightMotion;
+        SharedPrefProvider.setPrefObject('yatzySettings', settingsMsg);
       } else {
         print('❌ No socket connection');
       }
@@ -497,7 +503,7 @@ extension WidgetApplicationSettings on Application {
                                                     child: inputItems.widgetInputText(
                                                         enterUsername_,
                                                         (x) => {onChangeUserName(x), state()},
-                                                        (x) => {onChangeUserName(x), state()},
+                                                        (x) => {},
                                                         textEditingController,
                                                         focusNode)),
                                               ]),

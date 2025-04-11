@@ -81,12 +81,149 @@ class Application with LanguagesApplication  {
       appColors = [],
       focusStatus = [];
 
-  var listenerKey = GlobalKey();
   late Dices gameDices;
   var serverId = "";
 
   // Reference to the modern socket service
   SocketService? socketService;
+
+  void updateBoardColors() {
+    // Safety checks: Ensure arrays are initialized and have expected dimensions
+    if (appColors.isEmpty || appColors.length <= nrPlayers ||
+        fixedCell.isEmpty || fixedCell.length < nrPlayers ||
+        playerActive.isEmpty || playerActive.length < nrPlayers) {
+      print("⚠️ Cannot update board colors: State arrays not ready or incorrect size.");
+      // Optionally call setup() if state seems completely uninitialized? Be careful with loops.
+      // setup(); // Use with caution
+      return;
+    }
+
+    // Update player column colors based on playerToMove and playerActive status
+    for (var i = 0; i < nrPlayers; i++) {
+      // Ensure inner lists exist and have correct length before accessing
+      if (i + 1 >= appColors.length || appColors[i + 1] == null || appColors[i + 1].length != totalFields) {
+        print("⚠️ Initializing appColors sublist for player $i");
+        // Initialize or resize if necessary. Ensure appColors[0] (header) is preserved.
+        while (appColors.length <= i + 1) {
+          appColors.add(List.filled(totalFields, Colors.transparent)); // Add missing lists
+        }
+        if (appColors[i + 1].length != totalFields) {
+          appColors[i + 1] = List.filled(totalFields, Colors.transparent); // Resize existing
+        }
+      }
+      if (i >= fixedCell.length || fixedCell[i] == null || fixedCell[i].length != totalFields) {
+        print("⚠️ fixedCell array issue for player $i - Cannot update colors reliably.");
+        continue; // Skip this player if fixedCell state is inconsistent
+      }
+
+      Color columnColor;
+      bool isCurrentPlayer = (i == playerToMove);
+      // Use safe bounds check for playerActive
+      bool isActivePlayer = (i < playerActive.length && playerActive[i]);
+
+      // Determine base color for the column
+      if (isCurrentPlayer && isActivePlayer) {
+        // Current player's turn & they are active
+        columnColor = Colors.greenAccent.withAlpha(100); // Brighter highlight
+      } else if (isActivePlayer) {
+        // Not current player's turn, but they are active
+        columnColor = Colors.grey.withAlpha(77);
+      } else {
+        // Player is inactive (disconnected/aborted)
+        columnColor = Colors.black.withAlpha(90); // Darker/distinct inactive color
+      }
+
+      // Apply colors cell by cell
+      for (var j = 0; j < totalFields; j++) {
+        bool isFixed = fixedCell[i][j];
+        // Check for non-score cells (Sum, Bonus, Total) - these have special colors
+        bool isNonScoreCell = (j == 6 || j == 7 || j == totalFields - 1); // Adjust indices based on your gameType logic if needed
+
+        if (isNonScoreCell) {
+          // Always use the special blueish color for calculated fields
+          appColors[i + 1][j] = Colors.blue.withAlpha(77);
+        } else if (isFixed) {
+          // Use a distinct color for cells that are *already* fixed by the player
+          // Keep the color consistent regardless of whose turn it is.
+          appColors[i + 1][j] = Colors.lightGreen.withAlpha(150); // A slightly different green maybe?
+        } else {
+          // Apply the base column color (current turn, active, inactive)
+          // This covers cells available for the current player or showing state for others.
+          appColors[i + 1][j] = columnColor;
+        }
+      }
+    }
+
+    // Update header colors (Optional: Highlight based on current player's available moves)
+    // Ensure header row exists and has correct length
+    if (appColors.isNotEmpty && appColors[0] != null && appColors[0].length == totalFields &&
+        playerToMove >= 0 && playerToMove < nrPlayers && fixedCell.isNotEmpty && fixedCell[playerToMove] != null && fixedCell[playerToMove].length == totalFields) {
+      for (var j = 0; j < totalFields; j++) {
+        bool isNonScore = (j == 6 || j == 7 || j == totalFields - 1);
+        bool isFixedByCurrentPlayer = fixedCell[playerToMove][j];
+
+        if (isNonScore) {
+          appColors[0][j] = Colors.blueAccent.withAlpha(204); // Header color for calculated fields
+        } else if (isFixedByCurrentPlayer) {
+          appColors[0][j] = Colors.white.withAlpha(100); // Dimmer header for fixed items for the current player
+        } else {
+          appColors[0][j] = Colors.white.withAlpha(200); // Brighter header for available items
+        }
+      }
+    }
+    print("🎨 Board colors updated. Current player: $playerToMove");
+  }
+
+  void resetForNewGame() {
+    print('🔄 Resetting application state for new game...');
+    gameId = -1;
+    gameStarted = false;
+    gameFinished = false;
+    myPlayerId = -1;
+    playerToMove = 0; // Reset to default starting player index (usually 0)
+    winnerId = -1;
+    gameData = {}; // Clear old game data map
+
+    // Clear player lists from previous game (ensure they are dynamic or recreate)
+    // Assuming userNames and playerActive are Lists, clearing them.
+    // If they have fixed size based on maxNrPlayers, re-initialize instead.
+    userNames = []; // Or List<String>.filled(maxNrPlayers, "") if size is fixed
+    playerActive = []; // Or List<bool>.filled(maxNrPlayers, false) if size is fixed
+    // playerIds should also be cleared if used directly elsewhere
+
+    // Reset dice state
+
+    gameDices.clearDices(); // Ensure Dices class has this method
+    // If using Unity, maybe send a reset message?
+    // if (this.gameDices.unityDices && this.gameDices.unityCreated) {
+    //   this.gameDices.sendResetToUnity();
+    // }
+
+    // Reset chat (optional, depends on desired behavior)
+    // Option 1: Clear all messages
+    chat.messages.clear();
+    // Option 2: Reset to initial empty placeholders if that's the design
+    // chat.messages = List<ChatMessage>.generate(15, (index) => ChatMessage("", "Sender"));
+
+    // Reset visual board state arrays (important!)
+    // Ensure these lists are cleared or re-initialized
+    boardXPos = [];
+    boardYPos = [];
+    boardWidth = [];
+    boardHeight = [];
+    cellValue = [];
+    fixedCell = [];
+    appColors = [];
+    focusStatus = [];
+    // Reset animation state if necessary
+    // animation = AnimationsApplication(); // Or reset specific animation properties
+
+    // Reset spectator state
+    isSpectating = false;
+    spectatedGameId = -1;
+
+    print('🔄 Application state reset complete.');
+  }
 
   bool callbackCheckPlayerToMove() {
     return playerToMove == myPlayerId;

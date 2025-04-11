@@ -25,6 +25,9 @@ class WidgetSetupGameBoard extends StatefulWidget {
 }
 
 class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with LanguagesApplication {
+
+  final GlobalKey _gameBoardListenerKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
@@ -148,7 +151,7 @@ class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with Langua
       if (app.playerToMove != app.myPlayerId) {
         return;
       }
-      var box = app.listenerKey.currentContext!.findRenderObject() as RenderBox;
+      var box = _gameBoardListenerKey.currentContext!.findRenderObject() as RenderBox;
       var position = box.localToGlobal(Offset.zero); //this is global position
       mainY -= position.dy;
       for (var i = 0; i < app.totalFields; i++) {
@@ -167,7 +170,7 @@ class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with Langua
     //add listener object to get drag positions
     //Important it comes after the part over which it should trigger
     listings.add(GestureDetector(
-        key: app.listenerKey,
+        key: _gameBoardListenerKey,
         onVerticalDragUpdate: (d) {
           onVerticalDragUpdate(d.globalPosition.dx, d.globalPosition.dy);
 

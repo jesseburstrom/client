@@ -29,7 +29,7 @@ app.use(cors({
 
 const httpServer = createServer(app);
 
-let isOnline: boolean = true;
+let isOnline: boolean = false;
 
 const localFlutterDir: string = "C:/Users/J/StudioProjects/flutter_system";
 const localReactDir: string = "C:/Users/J/Desktop/proj";

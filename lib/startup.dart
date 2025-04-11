@@ -4,7 +4,7 @@ import 'chat/chat.dart';
 import 'dices/dices.dart';
 import 'input_items/input_items.dart';
 
-var isOnline = true;
+var isOnline = false;
 
 var localhost = isOnline
         ? "https://fluttersystems.com"

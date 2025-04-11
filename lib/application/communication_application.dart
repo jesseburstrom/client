@@ -164,25 +164,27 @@ extension CommunicationApplication on Application {
             
             print('🎮 Game started! Transitioning to game screen, myPlayerId: $myPlayerId, gameId: $gameId');
             
-            if (applicationStarted) {
-              if (gameDices.unityCreated) {
-                gameDices.sendResetToUnity();
-                if (gameDices.unityDices && myPlayerId == playerToMove) {
-                  gameDices.sendStartToUnity();
-                }
-              }
-              // Pop back to settings first? Or directly update the existing view?
-              // Let's assume we just need to ensure the state is correct.
-              // A simple setState might be enough if already on ApplicationView.
-              // If coming from SettingsView, pop might be needed.
-              // The existing router logic seems to handle popping if needed.
-              context.read<SetStateCubit>().setState(); // Ensure UI update
-              // await router.pop(); // Maybe not needed if guard prevents re-entry?
-            } else {
-              applicationStarted = true;
-              await router.pushAndPopUntil(const ApplicationView(),
-                  predicate: (Route<dynamic> route) => false);
-            }
+            // if (applicationStarted) {
+            //   if (gameDices.unityCreated) {
+            //     gameDices.sendResetToUnity();
+            //     if (gameDices.unityDices && myPlayerId == playerToMove) {
+            //       gameDices.sendStartToUnity();
+            //     }
+            //   }
+            //   // Pop back to settings first? Or directly update the existing view?
+            //   // Let's assume we just need to ensure the state is correct.
+            //   // A simple setState might be enough if already on ApplicationView.
+            //   // If coming from SettingsView, pop might be needed.
+            //   // The existing router logic seems to handle popping if needed.
+            //   context.read<SetStateCubit>().setState(); // Ensure UI update
+            //   // await router.pop(); // Maybe not needed if guard prevents re-entry?
+            // } else {
+            //   applicationStarted = true;
+            //   await router.pushAndPopUntil(const ApplicationView(),
+            //       predicate: (Route<dynamic> route) => false);
+            // }
+            await router.pushAndPopUntil(const ApplicationView(),
+                predicate: (Route<dynamic> route) => false);
           } else {
             print('🎮 Received game start for a game we\'re not in: ${data["gameId"]}');
           }
@@ -497,22 +499,12 @@ extension CommunicationApplication on Application {
                   cellValue[p][c] = serverValue;
                   appText[p + 1][c] = serverValue != -1 ? serverValue.toString() : "";
 
-                  // --- Update Color based on Fixed Status and Cell Type ---
-                  if (isAbortedPlayer) {
-                    appColors[p + 1][c] = Colors.black.withAlpha(178);
-                  } else if (isNonScoreCell) {
-                    // Always use the special color for Sum, Bonus, Total
-                    appColors[p + 1][c] = Colors.blue.withAlpha(77);
-                  } else if (serverFixed) {
-                    // Use the "fixed" color if the cell is marked fixed by the server
-                    appColors[p + 1][c] = Colors.green.withAlpha(178); // ~0.7 alpha
-                  }
                 } catch (e) { print("❌ Error updating cell state [$p][$c]: $e"); }
               }
             }
           }
         }
-
+        updateBoardColors();
       // ****** END: CORE STATE SYNCHRONIZATION ******
 
         // Check if this is our first update and we don't have an ID yet
@@ -563,8 +555,8 @@ extension CommunicationApplication on Application {
 
       // Handle player turn changes
       final newPlayerToMove = data["playerToMove"];
-      print('playerToMove $playerToMove newPlayerToMove $newPlayerToMove');
-      if (newPlayerToMove != null && data["diceValues"][0] == 0) {
+      print('playerToMove $playerToMove newPlayerToMove $newPlayerToMove dicevalue0 ${data["diceValues"][0]}');
+      if (newPlayerToMove != playerToMove || data["diceValues"][0] == 0) {
         playerToMove = newPlayerToMove;
         print('🎮 Turn changed to player $playerToMove (my ID: $myPlayerId)');
 
@@ -580,9 +572,29 @@ extension CommunicationApplication on Application {
           }
         }
       }
+      // *** Update Dice State from Server ***
+      if (gameData['diceValues'] != null && gameData['diceValues'] is List) {
+        try {
+          final List<int> serverDiceValues = List<int>.from(gameData['diceValues']);
+          final int serverRollCount = gameData['rollCount'] ?? app.gameDices.nrRolls; // Get roll count
 
-      // Always update board colors
-      //colorBoard();
+          print("🎲 Server update: Syncing dice to ${serverDiceValues}, roll count to $serverRollCount");
+          app.gameDices.diceValue = serverDiceValues;
+          app.gameDices.nrRolls = serverRollCount; // <-- Update roll count too!
+
+          // Update visual representation
+          app.gameDices.updateDiceImages(); // For 2D dice
+          if (app.gameDices.unityDices && app.gameDices.unityCreated) {
+            app.gameDices.sendDicesToUnity(); // For 3D dice
+          }
+
+        } catch (e) {
+          print("⚠️ Error processing diceValues from server: $e");
+        }
+      }
+      // **********************************
+
+
     } catch (e) {
       print('🎮 Error processing game update: $e');
     }
