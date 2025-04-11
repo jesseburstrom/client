@@ -47,7 +47,7 @@ class TopScore with LanguagesTopScore {
   Future<void> loadTopScoreFromServer(String gameType, SetStateCubit cubit) async {
     print('📊 [TopScore] Loading top scores for game type: $gameType');
     try {
-      var httpService = HttpService(baseUrl: '$localhost$route');
+      var httpService = HttpService(baseUrl: '$localhost/$route');
       var serverResponse = await httpService.getDB("/GetTopScores?count=20&type=$gameType");
       
       if (serverResponse.statusCode == 200) {
