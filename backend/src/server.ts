@@ -37,13 +37,13 @@ const localReactDir: string = "C:/Users/J/Desktop/proj";
 console.log("Starting Server...");
 
 if (isOnline) {
-  app.use("/flutter", express.static(path.join(__dirname, "web")));
+  //app.use("/flutter", express.static(path.join(__dirname, "web")));
   // Middleware to log requests to UnityLibrary
   // app.use((req, res, next) => {
   //   console.log(`[UNITY STATIC] ${req.url}`);
   //   next();
   // });
-  // app.use(express.static(path.join(__dirname, "web")));
+  app.use(express.static(path.join(__dirname, "web")));
 
 } else {
   app.use(express.static(localFlutterDir + "/build/web"));
@@ -195,13 +195,13 @@ io.on("connect", (socket) => {
   });
 });
 
-app.get("/flutter", (req, res) => {
-  if (isOnline) {
-    res.sendFile(path.join(__dirname + "/web/index.html"));
-  } else {
-    res.sendFile(localFlutterDir + "/build/web/index.html");
-  }
-});
+// app.get("/flutter", (req, res) => {
+//   if (isOnline) {
+//     res.sendFile(path.join(__dirname + "/web/index.html"));
+//   } else {
+//     res.sendFile(localFlutterDir + "/build/web/index.html");
+//   }
+// });
 
 // Initialize database connection and start server
 initializeDbConnection()
