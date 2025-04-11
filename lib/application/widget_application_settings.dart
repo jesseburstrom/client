@@ -10,64 +10,9 @@ import '../widgets/spectator_game_board.dart';
 import 'application.dart';
 
 extension WidgetApplicationSettings on Application {
-
-  // List<Widget> widgetWaitingGame(BuildContext context) {
-  //   List<Widget> gameWidgets = [];
-  //
-  //   var ongoingGames = 0;
-  //   for (var i = 0; i < games.length; i++) {
-  //     if (!games[i]["gameStarted"]) {
-  //       var gameTypeText = games[i]["gameType"];
-  //       if (gameTypeText == "Ordinary") {
-  //         gameTypeText = gameTypeOrdinary_;
-  //       }
-  //       var gameText = '$gameTypeText ${games[i]["connected"]}/${games[i]["nrPlayers"]} ${games[i]["userNames"]}';
-  //       try {
-  //         final serviceProvider = ServiceProvider.of(context);
-  //         if (games[i]["playerIds"].indexOf(serviceProvider.socketService.socketId) == -1) {
-  //           gameWidgets.add(inputItems.widgetButton(
-  //               () => onAttemptJoinGame(context, i), gameText));
-  //         } else {
-  //           gameWidgets.add(Text(gameText,
-  //               textAlign: TextAlign.center,
-  //               style: const TextStyle(
-  //                 fontWeight: FontWeight.bold,
-  //                 fontSize: 20,
-  //                 color: Colors.black87,
-  //               )));
-  //         }
-  //       } catch (e) {
-  //         print('⚠️ ServiceProvider not available in widgetWaitingGame: $e');
-  //         // Add button without checking socket ID
-  //         gameWidgets.add(inputItems.widgetButton(
-  //             () => onAttemptJoinGame(context, i), gameText));
-  //       }
-  //     } else {
-  //       // This is an ongoing game - add a spectate button
-  //       ongoingGames++;
-  //       var gameTypeText = games[i]["gameType"];
-  //       if (gameTypeText == "Ordinary") {
-  //         gameTypeText = gameTypeOrdinary_;
-  //       }
-  //       var gameText = '$gameTypeText ${games[i]["connected"]}/${games[i]["nrPlayers"]} ${games[i]["userNames"]} (Ongoing)';
-  //
-  //       // Add spectate button
-  //       gameWidgets.add(inputItems.widgetButton(
-  //           () => onSpectateGame(context, games[i]["gameId"]), gameText));
-  //     }
-  //   }
-  //   gameWidgets.add(Text("$ongoingGames_ : $ongoingGames",
-  //       textAlign: TextAlign.center,
-  //       style: const TextStyle(
-  //         fontWeight: FontWeight.bold,
-  //         fontSize: 20,
-  //         color: Colors.brown,
-  //       )));
-  //   return gameWidgets;
-  // }
+  
   List<Widget> widgetWaitingGame(BuildContext context) {
     List<Widget> gameWidgets = [];
-    int spectatableOngoingGames = 0; // Counter for games shown with Spectate button
     String myPlayerSocketId = ''; // Initialize
 
     final headingStyle = TextStyle(
@@ -155,7 +100,6 @@ extension WidgetApplicationSettings on Application {
         // --- Game HAS STARTED ---
         if (!playerIsInGame) {
           // Player is NOT in this ongoing game - show Spectate button
-          spectatableOngoingGames++; // Increment counter
           String gameText = '$gameTypeText $connectedText [$userNamesText] (Ongoing)';
           gameWidgets.add(inputItems.widgetButton(
                   () => onSpectateGame(context, gameId), "👁️ Spectate: $gameText"));

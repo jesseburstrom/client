@@ -299,7 +299,6 @@ extension CommunicationApplication on Application {
   // Helper method to process game updates
   void _processGameUpdate(dynamic data) async {
     try {
-      final router = getIt<AppRouter>();
       print('🎮 Processing game update: $data'); // Log action
 
       // Check if we're in spectator mode
@@ -479,7 +478,6 @@ extension CommunicationApplication on Application {
           var playerData = playersData[p];
           if (playerData?['cells'] is List) {
             List<dynamic> cellsData = playerData['cells'];
-            bool isAbortedPlayer = gameData['abortedPlayers'][p];
             for (int c = 0; c < cellsData.length; c++) {
               // Skip if cell index is out of bounds for local arrays
               if (c >= totalFields || p >= fixedCell.length || c >= fixedCell[p].length || p >= cellValue.length || c >= cellValue[p].length || p + 1 >= appText.length || c >= appText[p+1].length || p + 1 >= appColors.length || c >= appColors[p+1].length)
@@ -491,8 +489,6 @@ extension CommunicationApplication on Application {
                 try {
                   final bool serverFixed = cellData['fixed'] ?? false;
                   final int serverValue = cellData['value'] ?? -1;
-                  final bool isNonScoreCell = cellData['isNonScoreCell'] ?? (c == 6 || c == 7 || c == totalFields - 1);
-
 
                   // --- Apply server state directly to local state ---
                   fixedCell[p][c] = serverFixed;
@@ -522,19 +518,19 @@ extension CommunicationApplication on Application {
 
             print('🎮 Joining game $gameId as player $myPlayerId');
 
-            if (applicationStarted) {
-              if (gameDices.unityCreated) {
-                gameDices.sendResetToUnity();
-                if (gameDices.unityDices && myPlayerId == playerToMove) {
-                  gameDices.sendStartToUnity();
-                }
-              }
-              await router.pop();
-            } else {
-              applicationStarted = true;
-              await router.pushAndPopUntil(const ApplicationView(),
-                  predicate: (Route<dynamic> route) => false);
-            }
+            // if (applicationStarted) {
+            //   if (gameDices.unityCreated) {
+            //     gameDices.sendResetToUnity();
+            //     if (gameDices.unityDices && myPlayerId == playerToMove) {
+            //       gameDices.sendStartToUnity();
+            //     }
+            //   }
+            //   await router.pop();
+            // } else {
+            //   applicationStarted = true;
+            //   await router.pushAndPopUntil(const ApplicationView(),
+            //       predicate: (Route<dynamic> route) => false);
+            // }
             return;
           }
         }
