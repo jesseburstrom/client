@@ -84,6 +84,8 @@ class Application with LanguagesApplication  {
   late Dices gameDices;
   var serverId = "";
 
+  bool isSettingUpGame = false; // <-- Add this flag
+
   // Reference to the modern socket service
   SocketService? socketService;
 
@@ -303,7 +305,7 @@ class Application with LanguagesApplication  {
 
   setup() {
     topScore.loadTopScoreFromServer(gameType, context.read<SetStateCubit>());
-    gameStarted = true;
+    //gameStarted = true;
     playerToMove = 0;
     winnerId = -1;
 

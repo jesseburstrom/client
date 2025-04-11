@@ -26427,7 +26427,7 @@ _.p1=p
 _.p2=q
 _.p3=r
 _.p4=s
-_.RG=null
+_.rx=null
 _.A6$=a0
 _.A7$=a1
 _.A8$=a2
@@ -26543,7 +26543,7 @@ break
 case 10:A.V("\ud83c\udfae Received game start event for game "+A.j(J.C(c0,"gameId")))
 h=J.C(c0,"gameId")
 b2=b9.CW
-if(b2===h&&b9.fy){A.V("\ud83c\udfae Ignoring duplicate onGameStart for game "+b2)
+if(b2===h&&b9.fy&&b9.dy!==-1){A.V("\ud83c\udfae Ignoring duplicate onGameStart for game "+b2+" because myPlayerId ("+b9.dy+") is already set. incomingGameId "+A.j(h)+" gameStarted "+b9.fy)
 s=1
 break}if(J.d(J.C(c0,"spectator"),!0)){A.V("\ud83d\udc41\ufe0f Received spectator game data for game "+A.j(J.C(c0,"gameId")))
 g=J.C(c0,"players")
@@ -26566,7 +26566,7 @@ A.jK("\u26a0\ufe0f Index "+b5+" out of bounds for appText[1] ("+A.j(b6.length>1?
 A.V("\u26a0\ufe0f Error processing spectator data: "+A.j(a1))}s=1
 break}a2=-1
 if(J.C(c0,"playerIds")!=null){b2=J.C(c0,"playerIds")
-b5=b9.RG
+b5=b9.rx
 b5=b5==null?null:b5.d
 a2=J.aCx(b2,b5==null?"":b5)}s=a2>=0?16:18
 break
@@ -26580,6 +26580,7 @@ b9.at=J.C(b9.ch,"nrPlayers")
 b9.rR()
 $.mG=J.C(b9.ch,"userNames")
 A.V("\ud83c\udfae Game started! Transitioning to game screen, myPlayerId: "+b9.dy+", gameId: "+b9.CW)
+b9.fy=!0
 s=19
 return A.Z(n.ZF(B.zW,new A.a3f(),t.X),$async$Kt)
 case 19:s=17
@@ -26613,11 +26614,11 @@ a3=J.ta(c0,new A.a3h(),b2,b5)
 b9.ch=a3
 A.dR(b9.a,!1,t.l).eE()
 if(!b9.c){A.V("\ud83c\udfc1 Game finished for player. UI layer will handle dialog.")
-try{b6=b9.RG
+try{b6=b9.rx
 if(b6!=null&&b6.e){b7=J.C(b9.ch,"gameType")
 a4=b7==null?b9.as:b7
 A.V("\ud83c\udfc6 Requesting latest top scores for "+A.j(a4)+" after game finish...")
-b6=b9.RG
+b6=b9.rx
 b6.toString
 b6.wx(A.n(["action","requestTopScores","gameType",a4],b2,b5))}else A.V("\u26a0\ufe0f Cannot request top scores: SocketService not connected.")}catch(c1){a5=A.ac(c1)
 A.V("\u274c Error sending requestTopScores for player: "+A.j(a5))}}else A.V("\ud83c\udfc1 Spectator received game finished signal.")
@@ -26739,7 +26740,7 @@ b7=A.j(a0)
 b8=A.j(a3)
 c0=A.j(a7)
 A.jK("\u274c Error updating cell state ["+b7+"]["+b8+"]: "+c0)}}++a3}}++a0}c5.au6()
-if(c5.CW===-1){b6=c5.RG
+if(c5.CW===-1){b6=c5.rx
 b6=b6==null?null:b6.d
 if(b6==null)b6=""
 a8=J.aCx(b,b6)
@@ -26752,7 +26753,7 @@ $.mG=b5.h(c6,"userNames")
 A.V("\ud83c\udfae Joining game "+c5.CW+" as player "+c5.dy)
 s=1
 break}}b6=c5.dy
-if(b6>=0&&b6<J.bh(b)){b6=c5.RG
+if(b6>=0&&b6<J.bh(b)){b6=c5.rx
 c3=b6==null?null:b6.d
 a9=c3==null?"":c3
 if(J.C(b,c5.dy)==null||J.fm(J.C(b,c5.dy))||!J.d(J.C(b,c5.dy),a9)){A.V("\ud83c\udfae WARNING: Our player appears to have been removed from the game")
@@ -26802,10 +26803,10 @@ q=B.b.gaL($.fl.N().r.f).Q
 q.toString
 r.hl(q,B.ab,B.di)
 A.V("\ud83d\udcac Sending chat message to game "+s)
-r=a.RG
+r=a.rx
 if(r!=null&&r.e){A.V("\ud83d\udcac Using modern SocketService to send chat message")
 p=A.n(["action","chatMessage","gameId",s,"message",b,"sender",$.t7],t.N,t.K)
-a.RG.D7(p)}},
+a.rx.D7(p)}},
 aO2(a){return new A.a3l(a)},
 a3m(a,b){var s=0,r=A.Q(t.z),q,p
 var $async$a3m=A.M(function(c,d){if(c===1)return A.N(d,r)
@@ -90356,7 +90357,7 @@ s=this.p4
 s===$&&A.a()
 q.m(0,"diceValue",s.fr)
 A.V("\ud83c\udfb2 Sending dice values to other players: "+A.j(s.fr))
-s=this.RG
+s=this.rx
 r=s==null
 if(!r&&s.e)if(!r)s.D7(q)},
 Mp(){var s=this,r=B.c.bd(s.as,"Maxi"),q=t.s,p=s.p1,o=s.A8$,n=s.A9$,m=s.Aa$,l=s.Ab$,k=s.Ac$,j=s.Ad$,i=s.Ae$,h=s.Af$,g=s.Ag$,f=s.Ah$,e=s.Aj$,d=s.Ak$,c=s.An$,b=s.Ao$,a=s.At$,a0=s.Aw$
@@ -90364,7 +90365,6 @@ if(r)p[0]=A.b([s.b_(o),s.b_(n),s.b_(m),s.b_(l),s.b_(k),s.b_(j),s.b_(i),s.b_(h)+"
 else p[0]=A.b([s.b_(o),s.b_(n),s.b_(m),s.b_(l),s.b_(k),s.b_(j),s.b_(i),s.b_(h)+" ( "+s.dx+" )",s.b_(g),s.b_(f),s.b_(e),s.b_(d),s.b_(s.Am$),s.b_(c),s.b_(b),s.b_(a),s.b_(s.Au$),s.b_(a0)],q)},
 rR(){var s,r,q,p,o,n,m,l,k=this
 $.eY.N().Bq(k.as,A.dR(k.a,!1,t.l))
-k.fy=!0
 k.fr=0
 s=k.p4
 if(B.c.bd(k.as,"Maxi")){k.cy=23
@@ -90682,9 +90682,9 @@ r.m(0,"player",o)
 r.m(0,"selectionLabel",s)
 r.m(0,"score",p.k4[o][n])
 r.m(0,"action",q)
-m=p.RG
+m=p.rx
 if(m!=null&&m.e){A.V("\ud83c\udfae Sending selection via socketService: player "+o+" cell "+n+' label "'+A.j(s)+'" score '+A.j(r.h(0,"score")))
-p.RG.D7(r)}else A.V("\u274c Cannot send selection: socketService is null or not connected")
+p.rx.D7(r)}else A.V("\u274c Cannot send selection: socketService is null or not connected")
 A.V(q)}else A.V("Ignoring cell click: Not my turn or cell invalid/fixed.")
 A.dR(this.c,!1,t.l).eE()},
 $S:0}
@@ -90967,7 +90967,7 @@ s.f.uz()}A.V("\ud83d\udd04 AppWidget: Connecting modern SocketService to Applica
 p=$.aa.N()
 o=s.f
 A.V("\ud83d\udd0c Application: Setting socket service reference")
-p.RG=o}catch(n){r=A.ac(n)
+p.rx=o}catch(n){r=A.ac(n)
 A.V("\u26a0\ufe0f ServiceProvider not available in AppWidget: "+A.j(r))
 A.V("\ud83d\udd04 AppWidget: Running in offline mode")}},
 $S:7}

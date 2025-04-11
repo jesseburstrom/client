@@ -29,25 +29,25 @@ app.use(cors({
 
 const httpServer = createServer(app);
 
-let isOnline: boolean = true;
+//let isOnline: boolean = false;
 
-const localFlutterDir: string = "C:/Users/J/StudioProjects/flutter_system";
-const localReactDir: string = "C:/Users/J/Desktop/proj";
+// const localFlutterDir: string = "C:/Users/J/StudioProjects/flutter_system";
+// const localReactDir: string = "C:/Users/J/Desktop/proj";
 
 console.log("Starting Server...");
 
-if (isOnline) {
-  //app.use("/flutter", express.static(path.join(__dirname, "web")));
-  // Middleware to log requests to UnityLibrary
-  // app.use((req, res, next) => {
-  //   console.log(`[UNITY STATIC] ${req.url}`);
-  //   next();
-  // });
-  app.use(express.static(path.join(__dirname, "web")));
+// if (isOnline) {
+//   //app.use("/flutter", express.static(path.join(__dirname, "web")));
+//   // Middleware to log requests to UnityLibrary
+//   // app.use((req, res, next) => {
+//   //   console.log(`[UNITY STATIC] ${req.url}`);
+//   //   next();
+//   // });
+//   app.use(express.static(path.join(__dirname, "web")));
 
-} else {
-  app.use(express.static(localFlutterDir + "/build/web"));
-}
+// } else {
+//   app.use(express.static(localFlutterDir + "/build/web"));
+// }
 
 app.use(express.json());
 
@@ -59,7 +59,7 @@ routes().forEach((route) => {
   if (app[method]) {
       app[method](route.path, route.handler);
   } else {
-      console.error(`Invalid method ${route.method} for route ${route.path}`);
+      console.error(`Invalid method ${route.method} for route ${route.path}`); 
   }
 });
 // Add the new spectate route explicitly after other routes
@@ -220,9 +220,9 @@ initializeDbConnection()
     httpServer.listen(PORT, () => {
       console.log(`✅ [SERVER] Server running on port ${PORT}`);
       console.log(`✅ [SERVER] Socket.IO server ready for connections`);
-      isOnline 
-        ? console.log("🌐 [SERVER] SERVER MODE: ONLINE") 
-        : console.log("🖥️ [SERVER] SERVER MODE: OFFLINE");
+      // isOnline 
+      //   ? console.log("🌐 [SERVER] SERVER MODE: ONLINE") 
+      //   : console.log("🖥️ [SERVER] SERVER MODE: OFFLINE");
       
       // Log MongoDB connection details
       console.log(`📊 [SERVER] MongoDB connected to database '${gameLogService.getDatabaseName()}'`);

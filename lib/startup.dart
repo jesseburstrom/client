@@ -6,7 +6,6 @@ import 'input_items/input_items.dart';
 
 var isOnline = true;
 
-var route = 'flutter';
 var localhost = isOnline
         ? "https://fluttersystems.com"
     : "http://localhost:8000";

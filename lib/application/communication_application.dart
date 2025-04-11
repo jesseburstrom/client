@@ -73,13 +73,16 @@ extension CommunicationApplication on Application {
           break;
         case "onGameStart":
           print('🎮 Received game start event for game ${data["gameId"]}');
-          // --- ADD GUARD AGAINST DUPLICATE PROCESSING ---
+          // --- Player Logic ---
           final incomingGameId = data["gameId"];
-          if (gameId == incomingGameId && gameStarted) { // Check if we are already in this game and it's started
-            print('🎮 Ignoring duplicate onGameStart for game $gameId');
-            return; // Prevent reprocessing
+
+          // --- REVISED Guard against duplicate processing ---
+          // Only ignore if THIS client instance has ALREADY processed the start for THIS game.
+          if (gameId == incomingGameId && gameStarted && myPlayerId != -1) {
+            print('🎮 Ignoring duplicate onGameStart for game $gameId because myPlayerId ($myPlayerId) is already set. incomingGameId $incomingGameId gameStarted $gameStarted');
+            return; // Prevent reprocessing for this specific client instance
           }
-          // --- END GUARD ---
+          // --- END REVISED Guard ---
 
           // Check if this is a spectator message
           if (data["spectator"] == true) {
@@ -163,26 +166,8 @@ extension CommunicationApplication on Application {
             animation.players = nrPlayers;
             
             print('🎮 Game started! Transitioning to game screen, myPlayerId: $myPlayerId, gameId: $gameId');
-            
-            // if (applicationStarted) {
-            //   if (gameDices.unityCreated) {
-            //     gameDices.sendResetToUnity();
-            //     if (gameDices.unityDices && myPlayerId == playerToMove) {
-            //       gameDices.sendStartToUnity();
-            //     }
-            //   }
-            //   // Pop back to settings first? Or directly update the existing view?
-            //   // Let's assume we just need to ensure the state is correct.
-            //   // A simple setState might be enough if already on ApplicationView.
-            //   // If coming from SettingsView, pop might be needed.
-            //   // The existing router logic seems to handle popping if needed.
-            //   context.read<SetStateCubit>().setState(); // Ensure UI update
-            //   // await router.pop(); // Maybe not needed if guard prevents re-entry?
-            // } else {
-            //   applicationStarted = true;
-            //   await router.pushAndPopUntil(const ApplicationView(),
-            //       predicate: (Route<dynamic> route) => false);
-            // }
+
+            gameStarted = true;
             await router.pushAndPopUntil(const ApplicationView(),
                 predicate: (Route<dynamic> route) => false);
           } else {
