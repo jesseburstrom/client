@@ -10,7 +10,7 @@ import '../widgets/spectator_game_board.dart';
 import 'application.dart';
 
 extension WidgetApplicationSettings on Application {
-  
+
   List<Widget> widgetWaitingGame(BuildContext context) {
     List<Widget> gameWidgets = [];
     String myPlayerSocketId = ''; // Initialize

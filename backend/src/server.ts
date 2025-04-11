@@ -29,7 +29,7 @@ app.use(cors({
 
 const httpServer = createServer(app);
 
-let isOnline: boolean = false;
+let isOnline: boolean = true;
 
 const localFlutterDir: string = "C:/Users/J/StudioProjects/flutter_system";
 const localReactDir: string = "C:/Users/J/Desktop/proj";
@@ -37,13 +37,13 @@ const localReactDir: string = "C:/Users/J/Desktop/proj";
 console.log("Starting Server...");
 
 if (isOnline) {
-  //app.use("/new", express.static(path.join(__dirname, "web")));
+  app.use("/flutter", express.static(path.join(__dirname, "web")));
   // Middleware to log requests to UnityLibrary
-  app.use((req, res, next) => {
-    console.log(`[UNITY STATIC] ${req.url}`);
-    next();
-  });
-  app.use(express.static(path.join(__dirname, "web")));
+  // app.use((req, res, next) => {
+  //   console.log(`[UNITY STATIC] ${req.url}`);
+  //   next();
+  // });
+  // app.use(express.static(path.join(__dirname, "web")));
 
 } else {
   app.use(express.static(localFlutterDir + "/build/web"));
@@ -195,7 +195,7 @@ io.on("connect", (socket) => {
   });
 });
 
-app.get("/", (req, res) => {
+app.get("/flutter", (req, res) => {
   if (isOnline) {
     res.sendFile(path.join(__dirname + "/web/index.html"));
   } else {
