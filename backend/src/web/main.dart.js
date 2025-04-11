@@ -91522,7 +91522,7 @@ aqS(a,b){var s=0,r=A.Q(t.H),q=1,p=[],o=this,n,m,l,k,j,i,h
 var $async$Bq=A.M(function(c,d){if(c===1){p.push(d)
 s=q}while(true)switch(s){case 0:A.V("\ud83d\udcca [TopScore] Loading top scores for game type: "+a)
 q=3
-j=$.aBD+"/flutter"
+j=$.aBD
 A.V("\ud83d\udd0d HttpService created with baseUrl: "+j)
 n=new A.a8D(j)
 s=6
