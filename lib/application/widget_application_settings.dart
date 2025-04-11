@@ -248,6 +248,31 @@ extension WidgetApplicationSettings on Application {
       print("Client state reset, proceeding with game request.");
       // **********************************************************
 
+      // --- SAVE Current Settings ---
+      print("⚙️ Saving current settings before starting game...");
+      try {
+        Map<String, dynamic> settingsToSave = {
+          // --- Gather ALL settings from the 'app' instance ---
+          "userName": userName, // Make sure app.userName is up-to-date
+          "gameType": app.gameType,
+          "nrPlayers": app.nrPlayers,
+          "language": chosenLanguage, // Or read from LanguageBloc state if preferred
+          "boardAnimation": app.boardAnimation,
+          // Include dice settings (check for null)
+          "unityDices": app.gameDices.unityDices,
+          "unityLightMotion": app.gameDices.unityLightMotion,
+          "unityFun": app.gameDices.unityFun,
+          "unitySnowEffect": app.gameDices.unitySnowEffect,
+          // Add any other settings...
+        };
+        print("⚙️ Settings to save: $settingsToSave");
+        await SharedPrefProvider.setPrefObject('yatzySettings', settingsToSave);
+        print("⚙️ Settings saved successfully.");
+      } catch (e) {
+        print("❌ Error saving settings: $e");
+        // Continue even if saving fails? Or show error?
+      }
+      // --- End Part ---
       final serviceProvider = ServiceProvider.of(context);
       final socketServiceConnected = serviceProvider.socketService.isConnected;
 
