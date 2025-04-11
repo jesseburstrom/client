@@ -33,6 +33,17 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
     final int numPlayers =
         playerNames.length; // Get actual number of players from data
 
+    // *** Get Aborted/Active Status ***
+    final List<bool> abortedPlayers = (widget.gameData['abortedPlayers'] as List<dynamic>?)
+        ?.map((a) => a is bool ? a : true) // Assume aborted if data is wrong
+        .toList() ?? List.filled(numPlayers, true); // Assume all aborted if array missing
+    // Ensure list length matches numPlayers
+    while(abortedPlayers.length < numPlayers) {
+      abortedPlayers.add(true);
+    }
+    final List<bool> playerActive = abortedPlayers.map((aborted) => !aborted).toList();
+    // *********************************
+
     final int currentRoll = widget.gameData['rollCount'] ?? 0;
     final List<int> diceValues =
         (widget.gameData['diceValues'] as List<dynamic>?)
@@ -157,7 +168,7 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
                       scrollDirection: Axis.horizontal,
                       // *** Pass player data to buildScoreTable ***
                       child: buildScoreTable(
-                          playerNames, playersData, playerToMove),
+                          playerNames, playersData, playerActive, playerToMove),
                     ),
                   ),
                 ),
@@ -229,7 +240,7 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
 
   // Modify buildScoreTable to accept playersData and playerToMove
   Widget buildScoreTable(
-      List<String> playerNames, List<dynamic> playersData, int playerToMove) {
+      List<String> playerNames, List<dynamic> playersData, List<bool> playerActive, int playerToMove) {
     // Define score categories (adjust indices if gameType changes - need gameType from gameData)
     final String gameType =
         widget.gameData['gameType'] ?? 'Ordinary'; // Get game type
@@ -238,13 +249,13 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
 
     // --- ADJUST COLUMN WIDTHS ---
     // Calculate width based on number of players
-    final double categoryWidth = 150; // Width for the category names
-    final double scoreWidth = 80; // Width for each player's score column
+    const double categoryWidth = 150; // Width for the category names
+    const double scoreWidth = 80; // Width for each player's score column
     final Map<int, TableColumnWidth> columnWidths = {
-      0: FixedColumnWidth(categoryWidth), // Category column
+      0: const FixedColumnWidth(categoryWidth), // Category column
     };
     for (int i = 0; i < playerNames.length; i++) {
-      columnWidths[i + 1] = FixedColumnWidth(scoreWidth); // Player columns
+      columnWidths[i + 1] = const FixedColumnWidth(scoreWidth); // Player columns
     }
     // ---------------------------
 
@@ -262,9 +273,10 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
               _buildHeaderCell('Category'), // Header cell helper below
               // Player name headers - Highlight current player
               ...List.generate(playerNames.length, (index) {
-                return _buildHeaderCell(playerNames[index],
-                    isHighlighted:
-                        index == playerToMove // Highlight if it's their turn
+                return _buildHeaderCell(
+                    playerNames[index],
+                    isHighlighted: index == playerToMove && playerActive[index], // Highlight only if active *and* current turn
+                    isDimmed: !playerActive[index] // Dim if inactive
                     );
               }),
             ],
@@ -300,6 +312,9 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
                 ...List.generate(playerNames.length, (playerIndex) {
                   int? score;
                   bool isFixed = false; // Is the score fixed for this player?
+                  // *** Check if player is active ***
+                  bool isActive = playerActive[playerIndex];
+                  // *********************************
                   if (playerIndex < playersData.length &&
                       playersData[playerIndex]?['cells'] is List) {
                     List<dynamic> cells = playersData[playerIndex]['cells'];
@@ -318,14 +333,18 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
 
                   // Determine background color
                   Color bgColor = Colors.transparent;
-                  if (isFixed && !category.isHighlighted) {
-                    // If score is set and not Sum/Bonus/Total
-                    bgColor = Colors.lightGreen
-                        .withAlpha(100); // Use a subtle fixed color
-                  } else if (playerIndex == playerToMove &&
-                      !isFixed &&
-                      !category.isHighlighted) {
-                    // Optional: Highlight available cells for current player slightly?
+                  Color textColor = Colors.black87; // Default text color
+
+                  if (!isActive) {
+                    // *** Style for disconnected player ***
+                    bgColor = Colors.grey.shade400.withOpacity(0.5); // Grey background
+                    textColor = Colors.grey.shade700; // Dimmer text
+                    // ************************************
+                  } else if (isFixed && !category.isHighlighted) {
+                    bgColor = Colors.lightGreen.withAlpha(100);
+                    textColor = Colors.black; // Ensure fixed score is clear
+                  } else if (playerIndex == playerToMove && !isFixed && !category.isHighlighted) {
+                    // Optional: Highlight available cells for current active player
                     // bgColor = Colors.yellow.withAlpha(50);
                   }
 
@@ -333,19 +352,16 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 6.0),
                       alignment: Alignment.center,
-                      color: bgColor,
+                      color: bgColor, // Apply calculated background
                       child: Text(
-                        score?.toString() ?? '',
-                        // Display score or empty string
+                        // Show score or empty string, or maybe "D/C" if disconnected?
+                        isActive ? (score?.toString() ?? '') : "(Disc.)",
                         style: TextStyle(
-                          fontWeight: category.isHighlighted
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                          fontSize: 13, // Adjust font size
-                          // Optional: Dim text if not fixed?
-                          color: isFixed || category.isHighlighted
-                              ? Colors.black87
-                              : Colors.grey,
+                          fontWeight: category.isHighlighted ? FontWeight.bold : FontWeight.normal,
+                          fontSize: 13,
+                          color: textColor, // Apply calculated text color
+                          // Optional: Add strikethrough for disconnected?
+                          // decoration: !isActive ? TextDecoration.lineThrough : TextDecoration.none,
                         ),
                         textAlign: TextAlign.center,
                       ),
@@ -361,21 +377,29 @@ class _SpectatorGameBoardState extends State<SpectatorGameBoard> {
   }
 
   // Helper for header cells
-  Widget _buildHeaderCell(String text, {bool isHighlighted = false}) {
+  Widget _buildHeaderCell(String text, {bool isHighlighted = false, bool isDimmed = false}) {
+    Color bgColor = Colors.transparent;
+    Color txtColor = Colors.black87;
+
+    if (isHighlighted) {
+      bgColor = Colors.green.shade200;
+      txtColor = Colors.black;
+    } else if (isDimmed) {
+      bgColor = Colors.grey.shade300; // Background for dimmed header
+      txtColor = Colors.grey.shade600; // Text color for dimmed header
+    }
+
     return TableCell(
       verticalAlignment: TableCellVerticalAlignment.middle,
       child: Container(
-        color: isHighlighted ? Colors.green.shade200 : Colors.transparent,
-        // Highlight background
+        color: bgColor, // Apply background
         padding: const EdgeInsets.all(8.0),
         child: Text(
           text,
           style: TextStyle(
               fontWeight: FontWeight.bold,
-              color: isHighlighted
-                  ? Colors.black
-                  : Colors.black87 // Highlight text
-              ),
+              color: txtColor // Apply text color
+          ),
           textAlign: TextAlign.center,
         ),
       ),
