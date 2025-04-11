@@ -7,7 +7,7 @@ import 'input_items/input_items.dart';
 var isOnline = true;
 
 var localhost = isOnline
-        ? "https://fluttersystems.com"
+        ? "https://fluttersystems.com/flutter"
     : "http://localhost:8000";
 
 var showUnityOptions = false;
