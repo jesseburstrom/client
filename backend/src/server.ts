@@ -29,25 +29,7 @@ app.use(cors({
 
 const httpServer = createServer(app);
 
-//let isOnline: boolean = false;
-
-// const localFlutterDir: string = "C:/Users/J/StudioProjects/flutter_system";
-// const localReactDir: string = "C:/Users/J/Desktop/proj";
-
 console.log("Starting Server...");
-
-// if (isOnline) {
-//   //app.use("/flutter", express.static(path.join(__dirname, "web")));
-//   // Middleware to log requests to UnityLibrary
-//   // app.use((req, res, next) => {
-//   //   console.log(`[UNITY STATIC] ${req.url}`);
-//   //   next();
-//   // });
-//   app.use(express.static(path.join(__dirname, "web")));
-
-// } else {
-//   app.use(express.static(localFlutterDir + "/build/web"));
-// }
 
 app.use(express.json());
 
@@ -195,14 +177,6 @@ io.on("connect", (socket) => {
   });
 });
 
-// app.get("/flutter", (req, res) => {
-//   if (isOnline) {
-//     res.sendFile(path.join(__dirname + "/web/index.html"));
-//   } else {
-//     res.sendFile(localFlutterDir + "/build/web/index.html");
-//   }
-// });
-
 // Initialize database connection and start server
 initializeDbConnection()
   .then(() => {
@@ -220,9 +194,6 @@ initializeDbConnection()
     httpServer.listen(PORT, () => {
       console.log(`✅ [SERVER] Server running on port ${PORT}`);
       console.log(`✅ [SERVER] Socket.IO server ready for connections`);
-      // isOnline 
-      //   ? console.log("🌐 [SERVER] SERVER MODE: ONLINE") 
-      //   : console.log("🖥️ [SERVER] SERVER MODE: OFFLINE");
       
       // Log MongoDB connection details
       console.log(`📊 [SERVER] MongoDB connected to database '${gameLogService.getDatabaseName()}'`);
