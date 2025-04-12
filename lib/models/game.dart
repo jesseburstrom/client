@@ -49,9 +49,6 @@ class Game {
   /// My player index in the game
   int myPlayerIndex;
   
-  /// Whether board animations are enabled
-  bool boardAnimation;
-  
   /// Callback when player turns change
   VoidCallback? onPlayerTurnChanged;
   
@@ -74,7 +71,6 @@ class Game {
     this.upperSectionEndIndex = 5,
     required this.cellLabels,
     this.myPlayerIndex = 0,
-    this.boardAnimation = false,
     this.onPlayerTurnChanged,
     this.onDiceValuesChanged,
   });

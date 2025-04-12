@@ -11,7 +11,6 @@ import '../states/cubit/state/state_cubit.dart';
 
 import 'languages_application.dart';
 
-
 class WidgetSetupGameBoard extends StatefulWidget {
   final double width;
   final double height;
@@ -20,12 +19,11 @@ class WidgetSetupGameBoard extends StatefulWidget {
       {super.key, required this.width, required this.height});
 
   @override
-  State<WidgetSetupGameBoard> createState() =>
-      _WidgetSetupGameBoardState();
+  State<WidgetSetupGameBoard> createState() => _WidgetSetupGameBoardState();
 }
 
-class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with LanguagesApplication {
-
+class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard>
+    with LanguagesApplication {
   final GlobalKey _gameBoardListenerKey = GlobalKey();
 
   @override
@@ -61,7 +59,7 @@ class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with Langua
 
     for (var i = 0; i < app.nrPlayers; i++) {
       for (var j = 0; j < app.totalFields; j++) {
-        app.boardXPos[i + 1][j] = app.boardXPos[i][j] +app.boardWidth[i][j];
+        app.boardXPos[i + 1][j] = app.boardXPos[i][j] + app.boardWidth[i][j];
         app.boardYPos[i + 1][j] = app.boardYPos[0][j];
         app.boardHeight[i + 1][j] = app.boardHeight[0][j];
         app.boardWidth[i + 1][j] = app.boardWidth[0][j] / 3;
@@ -89,7 +87,7 @@ class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with Langua
           top: app.boardYPos[1 + i][0] - cellHeight,
           child: Container(
               padding:
-              const EdgeInsets.only(left: 5, right: 5, top: 0, bottom: 0),
+                  const EdgeInsets.only(left: 5, right: 5, top: 0, bottom: 0),
               width: app.boardWidth[1 + i][0],
               height: cellHeight,
               child: FittedBox(
@@ -99,7 +97,7 @@ class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with Langua
                           ? userNames[i].length > 3
                               ? userNames[i].substring(0, 3)
                               : userNames[i]
-                          : "P${i+1}",
+                          : "P${i + 1}",
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
@@ -111,37 +109,31 @@ class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with Langua
     app.setAppText();
     for (var i = 0; i < app.totalFields; i++) {
       try {
-        listings.add(
-          AnimatedBuilder(
-              animation: app.animation.cellAnimationControllers[0][i],
-              builder: (BuildContext context, Widget? widget) {
-                return Positioned(
-                    left: app.boardXPos[0][i] + app.animation.boardXAnimationPos[0][i],
-                    top: app.boardYPos[0][i] + app.animation.boardYAnimationPos[0][i],
-                    child: Container(
-                      padding: const EdgeInsets.only(left: 10, right: 10),
-                      width: app.boardWidth[0][i],
-                      height: app.boardHeight[0][i],
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: Colors.grey,
-                          width: 1.0,
-                        ),
-                        color: app.appColors[0][i],
-                      ),
-                      child: FittedBox(
-                        fit: BoxFit.contain,
-                        child: Text(
-                          app.appText[0][i],
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ));
-              }),
-        );
+        listings.add(Positioned(
+            left: app.boardXPos[0][i],
+            top: app.boardYPos[0][i],
+            child: Container(
+              padding: const EdgeInsets.only(left: 10, right: 10),
+              width: app.boardWidth[0][i],
+              height: app.boardHeight[0][i],
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: Colors.grey,
+                  width: 1.0,
+                ),
+                color: app.appColors[0][i],
+              ),
+              child: FittedBox(
+                fit: BoxFit.contain,
+                child: Text(
+                  app.appText[0][i],
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            )));
       } catch (e) {
         // error
       }
@@ -151,13 +143,15 @@ class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with Langua
       if (app.playerToMove != app.myPlayerId) {
         return;
       }
-      var box = _gameBoardListenerKey.currentContext!.findRenderObject() as RenderBox;
+      var box =
+          _gameBoardListenerKey.currentContext!.findRenderObject() as RenderBox;
       var position = box.localToGlobal(Offset.zero); //this is global position
       mainY -= position.dy;
       for (var i = 0; i < app.totalFields; i++) {
         if (mainY >= app.boardYPos[0][i] &&
             mainY <= app.boardYPos[0][i] + app.boardHeight[0][i]) {
-          if (!app.fixedCell[app.playerToMove][i] && app.cellValue[app.playerToMove][i] != -1) {
+          if (!app.fixedCell[app.playerToMove][i] &&
+              app.cellValue[app.playerToMove][i] != -1) {
             if (app.focusStatus[app.playerToMove][i] == 0) {
               app.clearFocus();
               app.focusStatus[app.playerToMove][i] = 1;
@@ -189,14 +183,9 @@ class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with Langua
     try {
       for (var i = 0; i < app.nrPlayers; i++) {
         for (var j = 0; j < app.totalFields; j++) {
-          tmpWidget = AnimatedBuilder(
-              animation: app.animation.cellAnimationControllers[i][j],
-              builder: (BuildContext context, Widget? widget) {
-                return Positioned(
-                  left: app.boardXPos[i + 1][j] +
-                      app.animation.boardXAnimationPos[i + 1][j],
-                  top: app.boardYPos[i + 1][j] +
-                      app.animation.boardYAnimationPos[i + 1][j],
+          tmpWidget = Positioned(
+                  left: app.boardXPos[i + 1][j],
+                  top: app.boardYPos[i + 1][j],
                   child: GestureDetector(
                       onTap: () {
                         app.cellClick(i, j);
@@ -221,7 +210,7 @@ class _WidgetSetupGameBoardState extends State<WidgetSetupGameBoard> with Langua
                                     fontWeight: FontWeight.bold)),
                           ))),
                 );
-              });
+
           if (app.focusStatus[i][j] == 1) {
             focusWidget = tmpWidget;
           } else {
@@ -255,7 +244,8 @@ class WidgetDisplayGameStatus extends StatefulWidget {
       _WidgetDisplayGameStatusState();
 }
 
-class _WidgetDisplayGameStatusState extends State<WidgetDisplayGameStatus> with LanguagesApplication{
+class _WidgetDisplayGameStatusState extends State<WidgetDisplayGameStatus>
+    with LanguagesApplication {
   @override
   void initState() {
     super.initState();
@@ -275,10 +265,12 @@ class _WidgetDisplayGameStatusState extends State<WidgetDisplayGameStatus> with 
       }
     }
 
-    var playerName = app.playerToMove == app.myPlayerId ? your_ : 
-        (userNames.length > app.playerToMove && userNames[app.playerToMove].isNotEmpty 
-          ? "${userNames[app.playerToMove]}'s" 
-          : "Player ${app.playerToMove + 1}'s");
+    var playerName = app.playerToMove == app.myPlayerId
+        ? your_
+        : (userNames.length > app.playerToMove &&
+                userNames[app.playerToMove].isNotEmpty
+            ? "${userNames[app.playerToMove]}'s"
+            : "Player ${app.playerToMove + 1}'s");
     var outputText = app.gameFinished ? gameFinished_ : "$playerName $turn_ ";
 
     Widget myWidget = Container(

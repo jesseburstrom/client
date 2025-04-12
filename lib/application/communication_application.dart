@@ -135,7 +135,6 @@ extension CommunicationApplication on Application {
               userName = settings["userName"];
               gameType = settings["gameType"];
               nrPlayers = settings["nrPlayers"];
-              boardAnimation = settings["boardAnimation"];
               chosenLanguage = settings["language"];
               gameDices.unityDices = settings["unityDices"];
               gameDices.unityLightMotion = settings["unityLightMotion"];
@@ -244,7 +243,6 @@ extension CommunicationApplication on Application {
               nrPlayers = gameData["nrPlayers"]; // Use the casted map
               setup();
               userNames = gameData["userNames"]; // Use the casted map
-              animation.players = nrPlayers;
 
               print(
                   '🎮 Game started! Transitioning to game screen, myPlayerId: $myPlayerId, gameId: $gameId');
@@ -456,7 +454,6 @@ extension CommunicationApplication on Application {
             nrPlayers = data["nrPlayers"];
             setup();
             userNames = data["userNames"];
-            animation.players = nrPlayers;
 
             print('🎮 Joining game $gameId as player $myPlayerId');
 

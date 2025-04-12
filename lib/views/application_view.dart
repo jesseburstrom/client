@@ -35,10 +35,6 @@ class _ApplicationViewState extends State<ApplicationView>
 
     WidgetsBinding.instance
         .addPostFrameCallback((_) => postFrameCallback(context));
-
-    app.animation.setupAnimation(
-        this, app.nrPlayers, app.maxNrPlayers, app.maxTotalFields);
-
   }
 
   @override

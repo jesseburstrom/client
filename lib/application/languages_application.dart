@@ -64,7 +64,6 @@ mixin LanguagesApplication  {
   final _currentUsername = {"English": "Current username: "};
   final _enterUsername = {"English": "Enter username"};
   final _ongoingGames = {"English": "Ongoing Games"};
-  final _boardAnimation = {"English": "Board Animation"};
   final _useTutorial = {"English": "Use Tutorial"};
 
   String get ones_ => getText(_ones);
@@ -181,8 +180,6 @@ mixin LanguagesApplication  {
 
   String get ongoingGames_ => getText(_ongoingGames);
 
-  String get boardAnimation_ => getText(_boardAnimation);
-
   String get useTutorial_ => getText(_useTutorial);
 
 
@@ -245,7 +242,6 @@ mixin LanguagesApplication  {
     _currentUsername["Swedish"] = "Nuvarande användarnamn: ";
     _enterUsername["Swedish"] = "Ange användarnamn";
     _ongoingGames["Swedish"] = "Pågående Spel";
-    _boardAnimation["Swedish"] = "Spelplans Animation";
     _useTutorial["Swedish"] = "Användar Hjälp På";
     _gameTypeMaxiR3["Swedish"] = "Maxi Ångra 3";
     _gameTypeMaxiRE3["Swedish"] = "Maxi Ångra Extra 3";

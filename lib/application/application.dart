@@ -7,10 +7,7 @@ import '../dices/dices.dart';
 import '../input_items/input_items.dart';
 import '../startup.dart';
 import '../states/cubit/state/state_cubit.dart';
-import 'animations_application.dart';
 import 'languages_application.dart';
-
-// cannot have typedef inside class
 
 class Application with LanguagesApplication  {
   final BuildContext context;
@@ -32,16 +29,18 @@ class Application with LanguagesApplication  {
     return standardLanguage;
   }
 
+  var userName = "Yatzy";
+  var chosenLanguage = "Swedish";
+
   bool isSpectating = false;
   int spectatedGameId = -1;
   // Settings properties
   dynamic tabController;
   var textEditingController = TextEditingController();
   var focusNode = FocusNode();
-  var animation = AnimationsApplication();
+  //var animation = AnimationsApplication();
   var games = [];
   var presentations = [];
-  var boardAnimation = false;
 
   // Application properties
 
@@ -350,15 +349,11 @@ class Application with LanguagesApplication  {
     boardYPos = [List.filled(maxTotalFields, 0.0)];
     boardWidth = [List.filled(maxTotalFields, 0.0)];
     boardHeight = [List.filled(maxTotalFields, 0.0)];
-    animation.boardXAnimationPos = [List.filled(maxTotalFields, 0.0)];
-    animation.boardYAnimationPos = [List.filled(maxTotalFields, 0.0)];
     for (var i = 0; i < maxNrPlayers; i++) {
       boardXPos.add(List.filled(maxTotalFields, 0.0));
       boardYPos.add(List.filled(maxTotalFields, 0.0));
       boardWidth.add(List.filled(maxTotalFields, 0.0));
       boardHeight.add(List.filled(maxTotalFields, 0.0));
-      animation.boardXAnimationPos.add(List.filled(maxTotalFields, 0.0));
-      animation.boardYAnimationPos.add(List.filled(maxTotalFields, 0.0));
     }
     clearFocus();
     fixedCell = [];

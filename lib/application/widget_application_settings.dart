@@ -257,7 +257,6 @@ extension WidgetApplicationSettings on Application {
           "gameType": app.gameType,
           "nrPlayers": app.nrPlayers,
           "language": chosenLanguage, // Or read from LanguageBloc state if preferred
-          "boardAnimation": app.boardAnimation,
           // Include dice settings (check for null)
           "unityDices": app.gameDices.unityDices,
           "unityLightMotion": app.gameDices.unityLightMotion,
@@ -304,7 +303,6 @@ extension WidgetApplicationSettings on Application {
         settingsMsg["gameType"] = gameType;
         settingsMsg["nrPlayers"] = nrPlayers;
         settingsMsg["language"] = chosenLanguage;
-        settingsMsg["boardAnimation"] = boardAnimation;
         settingsMsg["unityDices"] = gameDices.unityDices;
         settingsMsg["unityLightMotion"] = gameDices.unityLightMotion;
         SharedPrefProvider.setPrefObject('yatzySettings', settingsMsg);
@@ -323,7 +321,6 @@ extension WidgetApplicationSettings on Application {
   Widget widgetScaffoldSettings(BuildContext context, Function state) {
     // Define a consistent color scheme for better visibility
     final primaryColor = Colors.blue.shade700; // Brighter primary color
-    final accentColor = Theme.of(context).colorScheme.secondary;
 
     const tabTextStyle = TextStyle(
       fontSize: 24,
@@ -651,30 +648,6 @@ extension WidgetApplicationSettings on Application {
                                   children: [
                                     Text(misc_, style: headingStyle),
                                     const Divider(thickness: 1.5),
-                                    const SizedBox(height: 8),
-                                    // Animation Checkbox
-                                    Theme(
-                                      data: Theme.of(context).copyWith(
-                                        checkboxTheme: CheckboxThemeData(
-                                          fillColor: WidgetStateProperty.resolveWith<Color>(
-                                            (Set<WidgetState> states) {
-                                              if (states.contains(WidgetState.selected)) {
-                                                return accentColor;
-                                              }
-                                              return Colors.grey.shade400;
-                                            },
-                                          ),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(4),
-                                          ),
-                                        ),
-                                      ),
-                                      child: inputItems.widgetCheckbox(
-                                        (x) => {boardAnimation = x, state()},
-                                        boardAnimation_,
-                                        boardAnimation,
-                                      ),
-                                    ),
                                     const SizedBox(height: 16),
                                     // Language Selection
                                     Text("Language", style: subtitleStyle),

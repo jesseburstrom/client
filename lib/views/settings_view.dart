@@ -30,7 +30,7 @@ class _SettingsViewHomeState extends State<SettingsView>
     // *******************************
 
     // Initialize TextEditingController AFTER loading userName
-    app.textEditingController.text = userName; // Use app.userName here
+    app.textEditingController.text = app.userName; // Use app.userName here
   }
 
   // Helper function to load settings
@@ -43,10 +43,9 @@ class _SettingsViewHomeState extends State<SettingsView>
 
       if (settings is Map && settings.isNotEmpty) {
         // Update app state from the loaded object
-        userName = settings["userName"] ?? userName; // Use ?? default
+        app.userName = settings["userName"] ?? app.userName; // Use ?? default
         app.gameType = settings["gameType"] ?? app.gameType;
         app.nrPlayers = settings["nrPlayers"] ?? app.nrPlayers;
-        app.boardAnimation = settings["boardAnimation"] ?? app.boardAnimation;
         // Ensure Dices settings are updated (check for null safety)
         app.gameDices.unityDices = settings["unityDices"] ?? app.gameDices.unityDices;
         app.gameDices.unityLightMotion = settings["unityLightMotion"] ?? app.gameDices.unityLightMotion;
@@ -54,9 +53,9 @@ class _SettingsViewHomeState extends State<SettingsView>
         app.gameDices.unityFun = settings["unityFun"] ?? app.gameDices.unityFun;
         app.gameDices.unitySnowEffect = settings["unitySnowEffect"] ?? app.gameDices.unitySnowEffect;
               // Language is handled by LanguageBloc, but ensure consistency if needed
-        chosenLanguage = settings["language"] ?? chosenLanguage;
+        app.chosenLanguage = settings["language"] ?? app.chosenLanguage;
 
-        print("⚙️ Settings applied: userName=${userName}, gameType=${app.gameType}, nrPlayers=${app.nrPlayers}, unity=${app.gameDices.unityDices}");
+        print("⚙️ Settings applied: userName=${app.userName}, gameType=${app.gameType}, nrPlayers=${app.nrPlayers}, unity=${app.gameDices.unityDices}");
 
       } else {
         print("⚙️ No valid 'yatzySettings' object found. Using defaults or previously loaded values.");
@@ -65,7 +64,7 @@ class _SettingsViewHomeState extends State<SettingsView>
       }
 
       // Ensure the text controller reflects the potentially loaded userName
-      app.textEditingController.text = userName;
+      app.textEditingController.text = app.userName;
 
     } catch (e) {
       print("❌ Error loading settings: $e");

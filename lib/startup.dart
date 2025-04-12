@@ -11,7 +11,7 @@ var localhost = isOnline
     : "http://localhost:8000";
 
 var showUnityOptions = false;
-var userName = "Yatzy";
+var standardLanguage = "English";
 var userNames = [];
 var isTesting = false;
 var isTutorial = true;
@@ -20,16 +20,12 @@ late double screenWidth;
 late double screenHeight;
 late double devicePixelRatio;
 
-var chosenLanguage = "Swedish";
-var standardLanguage = "English";
-
 var differentLanguages = ["English", "Swedish"];
 
 // android:theme="@style/UnityThemeSelector.Translucent"
 // android/app/src/main/AndroidManifest.xml
 
 var inputItems = InputItems();
-//var languagesGlobal = LanguagesGlobal();
 
 late TopScore topScore;
 

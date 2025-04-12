@@ -432,7 +432,7 @@ class SocketService {
       'action': 'chatMessage',
       'gameId': gameId,
       'message': message,
-      'sender': userName,
+      'sender': app.userName,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
     

@@ -17,7 +17,7 @@ class AppWidget extends StatelessWidget {
   final _appRouter = getIt<AppRouter>();
 
   String getChosenLanguage() {
-    return chosenLanguage;
+    return app.chosenLanguage;
   }
 
   @override
