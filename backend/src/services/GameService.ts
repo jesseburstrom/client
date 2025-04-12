@@ -348,60 +348,131 @@ export class GameService {
     this.handlePlayerDisconnect(playerId); // Re-use disconnect logic which includes logging.
   }
 
-
-  handleGameFinished(game: Game): void {
+  async handleGameFinished(game: Game): Promise<void> {
     console.log(`🏁 Game ${game.id} finished.`);
-    // Log game end with final scores
-    const finalScores = game.players
-      .filter(p => p?.id) // Make sure player slot wasn't empty (add null check)
-      .map(p => ({ username: p!.username, score: p!.getScore() })); // Assume Player has getScore method (add non-null assertion)
-    
-    console.log(`📝 [GameService] Logging game ${game.id} finish with scores:`, finalScores);
-    this.gameLogService.logGameEnd(game.id, finalScores)
-      .then(() => {
+
+    // --- Log Game End (Always do this) ---
+    // Fetch scores for ALL players who have an ID, regardless of active/aborted status at the end
+    const finalScoresData = game.players
+      .map((player, index) => ({
+          player: player, // Keep the player object
+          index: index    // Keep the original index
+      }))
+      .filter(item => item.player?.id && item.player.username) // Filter out empty slots
+      .map(item => ({
+          username: item.player!.username,
+          score: item.player!.getScore(),
+          aborted: game.abortedPlayers[item.index] // Check the aborted status for THIS player index
+      }));
+
+    console.log(`📝 [GameService] Logging game ${game.id} finish. Final scores/status:`, finalScoresData);
+    try {
+        // Log only username and score to the game log end event
+        const scoresToLog = finalScoresData.map(d => ({ username: d.username, score: d.score }));
+        await this.gameLogService.logGameEnd(game.id, scoresToLog);
         console.log(`✅ [GameService] Successfully logged game ${game.id} end to database`);
-      })
-      .catch(error => {
+    } catch (error) {
         console.error(`❌ [GameService] Error logging game ${game.id} end:`, error);
-      });
+    }
+    // --- End Logging ---
 
-    // **** Update Top Scores ****
-    console.log(`🏆 [GameService] Attempting to update top scores for game ${game.id} (Type: ${game.gameType})`);
-    const scoreUpdatePromises = finalScores.map(playerScore => {
-      if (playerScore.username && playerScore.score > 0) { // Basic check
-         // Important: updateTopScore now broadcasts internally
-         return this.topScoreService.updateTopScore(game.gameType, playerScore.username, playerScore.score)
-           .then(success => {
-              if (success) console.log(`🏆 [TopScoreService] Score update initiated for ${playerScore.username}`);
-              // No need to log success here, updateTopScore handles its own logging/broadcasting
-           })
-           .catch(err => console.error(`❌ [TopScoreService] Error initiating score update for ${playerScore.username}:`, err));
-      }
-      return Promise.resolve(); // Return a resolved promise for players with no score
+
+    // --- Update Top Scores Conditionally Per Player ---
+    console.log(`🏆 [GameService] Evaluating players for top score update in game ${game.id} (Type: ${game.gameType})...`);
+
+    const scoreUpdatePromises = finalScoresData.map(playerScoreData => {
+        // *** Check if THIS player aborted ***
+        if (!playerScoreData.aborted && playerScoreData.username && playerScoreData.score > 0) {
+            console.log(`🏆 -> Player ${playerScoreData.username} did NOT abort (Score: ${playerScoreData.score}). Attempting top score update.`);
+            // This player finished normally, attempt to update their score
+            return this.topScoreService.updateTopScore(game.gameType, playerScoreData.username, playerScoreData.score)
+               .catch(err => console.error(`❌ [TopScoreService] Error initiating score update for ${playerScoreData.username}:`, err));
+        } else {
+            console.log(`🚫 -> Player ${playerScoreData.username} aborted or had invalid score. Skipping top score update.`);
+            return Promise.resolve(); // Player aborted or score invalid, return resolved promise
+        }
     });
 
-    // Wait for all score updates to attempt broadcasting before proceeding
-    Promise.all(scoreUpdatePromises).then(() => {
-        console.log(`🏁 [GameService] Finished attempting top score updates for game ${game.id}.`);
-        // Note: Broadcasting now happens within updateTopScore
-    });
-    // **************************
+    // Wait for all attempts before continuing
+    try {
+         await Promise.all(scoreUpdatePromises);
+         console.log(`🏁 [GameService] Finished attempting conditional top score updates for game ${game.id}.`);
+         // TopScoreService handles broadcasting on successful updates
+    } catch (e) {
+        console.error(`❌ Error during Promise.all for top score updates: ${e}`);
+    }
+    // --- End Top Score Update ---
 
-    // Notify all active players (and spectators) about the game finish
-    this.notifyGameFinished(game);
 
-    // Remove the game from the active games map
-    this.games.delete(game.id); // Remove the game *after* notifying
+    // --- Notify Players/Spectators (Always do this) ---
+    this.notifyGameFinished(game); // Sends 'onGameFinished' state
 
-    // Clean up spectators for this game
+
+    // --- Clean Up Game (Always do this) ---
+    this.games.delete(game.id);
     if (this.spectators.has(game.id)) {
       console.log(`[Spectator] Removing ${this.spectators.get(game.id)?.size} spectators from finished game ${game.id}`);
       this.spectators.delete(game.id);
     }
 
-    // Broadcast updated game list (game is removed)
+
+    // --- Broadcast Updated Game List (Always do this) ---
     this.broadcastGameList();
   }
+
+  // handleGameFinished(game: Game): void {
+  //   console.log(`🏁 Game ${game.id} finished.`);
+  //   // Log game end with final scores
+  //   const finalScores = game.players
+  //     .filter(p => p?.id) // Make sure player slot wasn't empty (add null check)
+  //     .map(p => ({ username: p!.username, score: p!.getScore() })); // Assume Player has getScore method (add non-null assertion)
+    
+  //   console.log(`📝 [GameService] Logging game ${game.id} finish with scores:`, finalScores);
+  //   this.gameLogService.logGameEnd(game.id, finalScores)
+  //     .then(() => {
+  //       console.log(`✅ [GameService] Successfully logged game ${game.id} end to database`);
+  //     })
+  //     .catch(error => {
+  //       console.error(`❌ [GameService] Error logging game ${game.id} end:`, error);
+  //     });
+
+  //   // **** Update Top Scores ****
+  //   console.log(`🏆 [GameService] Attempting to update top scores for game ${game.id} (Type: ${game.gameType})`);
+  //   const scoreUpdatePromises = finalScores.map(playerScore => {
+  //     if (playerScore.username && playerScore.score > 0) { // Basic check
+  //        // Important: updateTopScore now broadcasts internally
+  //        return this.topScoreService.updateTopScore(game.gameType, playerScore.username, playerScore.score)
+  //          .then(success => {
+  //             if (success) console.log(`🏆 [TopScoreService] Score update initiated for ${playerScore.username}`);
+  //             // No need to log success here, updateTopScore handles its own logging/broadcasting
+  //          })
+  //          .catch(err => console.error(`❌ [TopScoreService] Error initiating score update for ${playerScore.username}:`, err));
+  //     }
+  //     return Promise.resolve(); // Return a resolved promise for players with no score
+  //   });
+
+  //   // Wait for all score updates to attempt broadcasting before proceeding
+  //   Promise.all(scoreUpdatePromises).then(() => {
+  //       console.log(`🏁 [GameService] Finished attempting top score updates for game ${game.id}.`);
+  //       // Note: Broadcasting now happens within updateTopScore
+  //   });
+  //   // **************************
+
+  //   // Notify all active players (and spectators) about the game finish
+  //   this.notifyGameFinished(game);
+
+  //   // Remove the game from the active games map
+  //   this.games.delete(game.id); // Remove the game *after* notifying
+
+  //   // Clean up spectators for this game
+  //   if (this.spectators.has(game.id)) {
+  //     console.log(`[Spectator] Removing ${this.spectators.get(game.id)?.size} spectators from finished game ${game.id}`);
+  //     this.spectators.delete(game.id);
+  //   }
+
+  //   // Broadcast updated game list (game is removed)
+  //   this.broadcastGameList();
+  // }
 
   notifyGameFinished(game: Game): void {
     const gameData = game.toJSON(); // Get final game state
